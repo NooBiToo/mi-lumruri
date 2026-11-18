@@ -1,0 +1,8 @@
+{
+  "rule": {
+    "id": "r-tv-video",
+    "source": { "type": "device", "id": "tv", "mac": "a4:77:33:10:20:30" },
+    "destination": { "type": "group", "id": "video" },
+    "action": { "type": "profile", "id": "tt-home" }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "profiles": [ { "id": "tt-home", "name": "TrustTunnel", "kind": "trusttunnel" } ],
+  "networks": [ { "id": "home", "name": "Домашняя", "ssid": "Home" }, { "id": "home2", "name": "Ещё одна", "ssid": "Home" } ],
+  "devices": [
+    { "id": "tv", "name": "Телевизор", "mac": "a4:77:33:10:20:30", "network": "home" },
+    { "id": "tv2", "name": "Второй", "mac": "A4-77-33-10-20-30", "network": "attic" }
+  ],
+  "groups": [ { "id": "video", "name": "Видео", "destinations": [ { "type": "domain", "value": "*.youtube.com" } ] } ],
+  "rules": [ { "id": "r1", "source": { "type": "device", "id": "tv" }, "destination": { "type": "group", "id": "video" }, "action": { "type": "profile", "id": "vless-x" } } ],
+  "default_action": { "type": "direct" }
+}

@@ -1,0 +1,8 @@
+{
+  "rule": {
+    "id": "r-tv-video",
+    "source": { "type": "device", "id": "fridge" },
+    "destination": { "type": "group", "id": "music" },
+    "action": { "type": "profile", "id": "tt-office" }
+  }
+}

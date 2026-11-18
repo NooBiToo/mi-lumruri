@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "profiles": [
+    {
+      "id": "tt-lab",
+      "name": "TrustTunnel стенд",
+      "kind": "trusttunnel",
+      "on_failure": "block",
+      "endpoint": {
+        "server": "10.30.0.2",
+        "port": 443,
+        "sni": "vpn.lab.test",
+        "username": "tv-user",
+        "cert_sha256": "7A:5A:63:A5:C7:B3:C2:BE:D2:AC:F9:A7:F5:CD:C2:60:22:E2:13:60:01:25:7F:BE:56:28:0D:7B:83:7D:1E:8F"
+      }
+    }
+  ],
+  "networks": [
+    {
+      "id": "home",
+      "name": "Домашняя (стенд)",
+      "ssid": "Lab-Home",
+      "subnet": "10.10.1.0/24",
+      "bridge": "br-lan",
+      "ports": [
+        "r-tv",
+        "r-ph"
+      ]
+    },
+    {
+      "id": "guest",
+      "name": "Гостевая (стенд)",
+      "ssid": "Lab-Guest",
+      "subnet": "10.10.2.0/24",
+      "bridge": "br-guest",
+      "ports": [
+        "r-gst"
+      ]
+    }
+  ],
+  "devices": [
+    {
+      "id": "tv",
+      "name": "Телевизор (стенд)",
+      "mac": "02:00:00:00:0a:02",
+      "network": "home"
+    },
+    {
+      "id": "phone",
+      "name": "Телефон (стенд)",
+      "mac": "02:00:00:00:0b:02",
+      "network": "home"
+    },
+    {
+      "id": "laptop",
+      "name": "Ноутбук гостя (стенд)",
+      "mac": "02:00:00:00:0c:02",
+      "network": "guest"
+    }
+  ],
+  "groups": [
+    {
+      "id": "video",
+      "name": "Видео (стенд)",
+      "destinations": [
+        {
+          "type": "domain_suffix",
+          "value": "video.lab.test"
+        },
+        {
+          "type": "cidr",
+          "value": "10.99.0.0/24"
+        }
+      ]
+    }
+  ],
+  "rules": [],
+  "default_action": {
+    "type": "direct"
+  }
+}

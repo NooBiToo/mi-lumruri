@@ -1,0 +1,15 @@
+{
+  "rule": {
+    "id": "r-tv-video",
+    "source": { "type": "device", "id": "tv" },
+    "destination": { "type": "group", "id": "video" },
+    "action": { "type": "profile", "id": "tt-home" }
+  },
+  "probes": [
+    { "device": "tv", "host": "www.youtube.com" },
+    { "device": "phone", "host": "www.youtube.com" },
+    { "network": "guest", "host": "www.youtube.com" },
+    { "device": "tv", "host": "203.0.113.7" },
+    { "device": "tv", "host": "example.org" }
+  ]
+}
