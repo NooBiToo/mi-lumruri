@@ -1,0 +1,70 @@
+name: BE7000 ARM64
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Test and compile controller
+        working-directory: controller
+        run: |
+          cargo test --locked
+          cargo build --locked --release --target aarch64-unknown-linux-musl
+
+      - name: Test and compile panel
+        working-directory: panel
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+      - name: Fetch router engines
+        run: |
+          tools/lab/fetch-zapret.sh
+          curl --fail --silent --show-error --location --retry 3 --proto '=https' \
+            --output .tools/lab/dl/dnscrypt-proxy-linux_arm64-2.1.20.tar.gz \
+            https://github.com/DNSCrypt/dnscrypt-proxy/releases/download/2.1.20/dnscrypt-proxy-linux_arm64-2.1.20.tar.gz
+
+      - name: Sign package
+        env:
+          SIGNING_KEY: ${{ secrets.BE7000_SIGNING_KEY }}
+        run: |
+          : "${SIGNING_KEY:?Configure the BE7000_SIGNING_KEY Actions secret}"
+          umask 077
+          key=$(mktemp)
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$SIGNING_KEY" > "$key"
+          unset SIGNING_KEY
+          node tools/package.mjs --version "ci-${GITHUB_SHA:0:12}" --key "$key"
+
+      - name: Verify signature and checksum
+        run: |
+          (cd controller && cargo run --quiet --locked --bin mi-tt-admin -- release verify ../out/package/mi-trusttunnel)
+          cd out/package
+          sha256sum mi-trusttunnel-*.tar > SHA256SUMS
+          cat SHA256SUMS >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mi-trusttunnel-be7000
+          path: |
+            out/package/mi-trusttunnel-*.tar
+            out/package/SHA256SUMS
+          if-no-files-found: error
+          compression-level: 0
