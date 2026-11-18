@@ -84,7 +84,10 @@ pub fn admin_auth(a: &Auth, args: &[&str], stdin: &str, now: u64) -> (i32, Value
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut ch = c.spawn().unwrap();
-    ch.stdin.take().unwrap().write_all(stdin.as_bytes()).unwrap();
+    if let Err(err) = ch.stdin.take().unwrap().write_all(stdin.as_bytes()) {
+        // Команда может отклонить запрос до чтения stdin. Код и JSON ответа проверяет тест.
+        assert_eq!(err.kind(), std::io::ErrorKind::BrokenPipe, "stdin: {err}");
+    }
     let o = ch.wait_with_output().unwrap();
     (o.status.code().unwrap(), serde_json::from_slice(&o.stdout).unwrap_or(Value::Null))
 }
