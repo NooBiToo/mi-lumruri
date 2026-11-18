@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "profiles": [],
+  "networks": [],
+  "devices": [],
+  "groups": [],
+  "rules": [],
+  "default_action": { "type": "direct" }
+}

@@ -2,3 +2,8 @@
 [target.aarch64-unknown-linux-musl]
 linker = "rust-lld"
 rustflags = ["-C", "target-feature=+crt-static", "-C", "link-self-contained=yes"]
+
+# Хост для тестов (Windows, GNU): у bcryptprimitives нет import-библиотеки, а raw-dylib требует dlltool с ассемблером.
+# getrandom на хосте берёт RtlGenRandom (advapi32); на ARM64 (Linux) — системный вызов getrandom, эта настройка не влияет.
+[target.x86_64-pc-windows-gnu]
+rustflags = ["--cfg", 'getrandom_backend="windows_legacy"']

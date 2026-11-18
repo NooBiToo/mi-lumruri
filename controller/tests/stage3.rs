@@ -15,6 +15,8 @@ fn run(bin: &str, args: &[&str], env: &[(&str, &str)]) -> (i32, Value) {
     (o.status.code().unwrap(), serde_json::from_slice(&o.stdout).unwrap_or(Value::Null))
 }
 
+mod common;
+
 const ADMIN: &str = env!("CARGO_BIN_EXE_mi-tt-admin");
 const CTL: &str = env!("CARGO_BIN_EXE_mi-tt-ctl");
 
@@ -43,14 +45,19 @@ fn cgi_binary_has_no_apply_commands() {
         let o = Command::new(CTL).arg(cmd).output().unwrap();
         assert_eq!(o.status.code(), Some(2), "mi-tt-ctl {cmd} не существует");
     }
-    // и через CGI нет адресов применения
-    let o = Command::new(CTL)
-        .arg("cgi")
-        .env("REQUEST_METHOD", "POST")
-        .env("PATH_INFO", "/apply")
-        .env("CONTENT_TYPE", "application/json")
-        .env("CONTENT_LENGTH", "0")
-        .output()
-        .unwrap();
-    assert!(String::from_utf8_lossy(&o.stdout).starts_with("Status: 404"));
+    // и через CGI нет адресов применения: без входа — отказ, после входа (пароль + TOTP) — 404
+    let cgi = |env: Vec<(String, String)>| {
+        let o = Command::new(CTL)
+            .arg("cgi")
+            .env("REQUEST_METHOD", "POST")
+            .env("PATH_INFO", "/apply")
+            .env("CONTENT_TYPE", "application/json")
+            .env("CONTENT_LENGTH", "0")
+            .envs(env)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&o.stdout).into_owned()
+    };
+    assert!(cgi(vec![]).starts_with("Status: 403"));
+    assert!(cgi(common::shared_env(true)).starts_with("Status: 404"));
 }

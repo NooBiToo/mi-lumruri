@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { api, type ApiResult, type ConfigResponse, type PreviewResponse, type SaveResponse } from './api'
+import { api, onAuthLost, setCsrf, type ApiResult, type ConfigResponse, type PreviewResponse, type SaveResponse, type SessionResponse } from './api'
+import type { LoginStage } from './auth'
+import LoginView from './LoginView.vue'
+import ManageView from './ManageView.vue'
+import type { Config } from './api'
 import { defaultForm, fieldForIssue, ruleKey, saveOutcome, toRequest, type DraftForm, type Field, type SaveOutcome } from './draft'
 import RuleForm from './RuleForm.vue'
 import PreviewView from './PreviewView.vue'
@@ -14,6 +18,67 @@ const checkedKey = ref<string | null>(null)
 const saving = ref(false)
 const saveRes = ref<ApiResult<SaveResponse> | null>(null)
 const outcome = ref<SaveOutcome | null>(null)
+/** checking — спрашиваем контроллер о сессии; login — нужен вход; ready — вошли. */
+const auth = ref<'checking' | 'login' | 'ready' | 'error'>('checking')
+const authError = ref<string | null>(null)
+const loginStage = ref<LoginStage>('password')
+const clockTrusted = ref(true)
+const lost = ref(false)
+type Tab = 'edit' | 'rules' | 'devices' | 'profiles' | 'categories' | 'dns' | 'status'
+const tab = ref<Tab>('edit')
+const TABS: [Tab, string][] = [['edit', 'Новое правило'], ['rules', 'Правила'], ['devices', 'Устройства и сети'], ['profiles', 'Профили'], ['categories', 'Категории'], ['dns', 'DNS, реклама, Zapret'], ['status', 'Состояние']]
+
+function onChanged(c: Config, revision: string) {
+  if (cfg.value) cfg.value = { status: 200, body: { ...cfg.value.body, ok: true, config: c, revision, issues: [] } }
+}
+
+function resetData() {
+  cfg.value = null
+  form.value = null
+  result.value = null
+  saveRes.value = null
+  outcome.value = null
+  checkedKey.value = null
+}
+
+async function checkSession() {
+  auth.value = 'checking'
+  const r = await api.session()
+  if (r.status === 200 && r.body.authenticated) {
+    setCsrf(r.body.csrf ?? null)
+    auth.value = 'ready'
+    await load()
+  } else if (r.status === 200) {
+    loginStage.value = r.body.stage ?? 'password'
+    clockTrusted.value = r.body.clock_trusted !== false
+    auth.value = 'login'
+  } else {
+    authError.value = r.body.error?.message ?? `контроллер ответил ${r.status}`
+    auth.value = 'error'
+  }
+}
+
+async function onLoggedIn(_s: SessionResponse) {
+  lost.value = false
+  auth.value = 'ready'
+  await load()
+}
+
+async function logout() {
+  await api.logout()
+  setCsrf(null)
+  resetData()
+  loginStage.value = 'password'
+  auth.value = 'login'
+}
+
+// сессия истекла или отозвана во время работы: возвращаемся ко входу, черновик правила теряется
+onAuthLost(() => {
+  resetData()
+  lost.value = true
+  loginStage.value = 'password'
+  auth.value = 'login'
+})
 
 async function load(keepForm = false) {
   cfg.value = await api.config()
@@ -81,7 +146,7 @@ function count(n: number, one: string, few: string, many: string): string {
   return `${n} ${w}`
 }
 
-onMounted(() => load())
+onMounted(() => checkSession())
 </script>
 
 <template>
@@ -91,10 +156,22 @@ onMounted(() => load())
         <h1>Правило устройства или сети</h1>
         <p class="app__sub">mi-trusttunnel · BE7000 · сценарий TrustTunnel</p>
       </div>
-      <span class="app__mode" title="Стенд слушает только 127.0.0.1; входа по паролю пока нет">Стенд · только loopback</span>
+      <div class="app__actions">
+        <span class="app__mode" title="Вход: пароль и второй фактор (TOTP или recovery-код)">HTTPS · вход с TOTP</span>
+        <button v-if="auth === 'ready'" type="button" class="app__logout" @click="logout">Выйти</button>
+      </div>
     </header>
 
-    <section v-if="!cfg" class="app__status">Читаю настройки…</section>
+    <section v-if="auth === 'checking'" class="app__status">Проверяю вход…</section>
+    <section v-else-if="auth === 'error'" class="app__status app__status--bad" role="alert">
+      <strong>Панель недоступна.</strong> {{ authError }}
+      <button type="button" @click="checkSession()">Повторить</button>
+    </section>
+    <template v-else-if="auth === 'login'">
+      <p v-if="lost" class="app__status app__status--bad" role="alert">Сессия завершилась. Войдите снова.</p>
+      <LoginView :initial-stage="loginStage" :clock-trusted="clockTrusted" @done="onLoggedIn" />
+    </template>
+    <section v-else-if="!cfg" class="app__status">Читаю настройки…</section>
     <section v-else-if="!cfg.body.ok || !cfg.body.config" class="app__status app__status--bad" role="alert">
       <strong>Настройки не загружены.</strong>
       <span v-if="cfg.body.error"> {{ cfg.body.error.message }}</span>
@@ -113,7 +190,12 @@ onMounted(() => load())
       </span>
     </section>
 
-    <main v-if="form && cfg?.body.config" class="app__grid">
+    <nav v-if="auth === 'ready' && cfg?.body.config" class="tabs" aria-label="Разделы">
+      <button v-for="[id, label] in TABS" :key="id" type="button" :class="['tabs__btn', { 'tabs__btn--on': tab === id }]" :aria-current="tab === id ? 'page' : undefined" @click="tab = id">{{ label }}</button>
+    </nav>
+    <ManageView v-if="auth === 'ready' && cfg?.body.config && cfg.body.revision && tab !== 'edit'" :key="tab" :tab="tab" :config="cfg.body.config"
+      :revision="cfg.body.revision" @changed="onChanged" @reload="load(true)" />
+    <main v-if="auth === 'ready' && tab === 'edit' && form && cfg?.body.config" class="app__grid">
       <RuleForm v-model="form" :config="cfg.body.config" :errors="errors" :busy="busy" @submit="check" />
       <div class="app__right">
         <PreviewView :result="result" :stale="stale" />
@@ -129,8 +211,8 @@ onMounted(() => load())
     </main>
 
     <footer class="app__foot">
-      Локальный стенд на 127.0.0.1: контроллер вызывается как CGI и сохраняет правило атомарно, только по запросу с этой
-      страницы. Входа по паролю пока нет. Применение к сети выполняется отдельно (mi-tt-ctl render) и из панели не запускается.
+      Чтение, проверка и сохранение доступны только после входа паролем и вторым фактором; изменения принимаются только
+      со страницы панели (Origin и CSRF-токен). Применяет настройки служба роутера (mi-tt-admin) по заявке из раздела «Состояние»; секреты профилей панель только записывает.
     </footer>
   </div>
 </template>

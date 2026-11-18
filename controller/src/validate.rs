@@ -199,6 +199,7 @@ pub struct Index<'a> {
     pub networks: HashMap<&'a str, &'a Network>,
     pub devices: HashMap<&'a str, &'a Device>,
     pub groups: HashMap<&'a str, &'a Group>,
+    pub categories: HashMap<&'a str, &'a Category>,
 }
 
 impl<'a> Index<'a> {
@@ -208,6 +209,7 @@ impl<'a> Index<'a> {
             networks: c.networks.iter().map(|x| (x.id.as_str(), x)).collect(),
             devices: c.devices.iter().map(|x| (x.id.as_str(), x)).collect(),
             groups: c.groups.iter().map(|x| (x.id.as_str(), x)).collect(),
+            categories: c.categories.iter().map(|x| (x.id.as_str(), x)).collect(),
         }
     }
 }
@@ -253,6 +255,9 @@ pub fn validate_config(c: &Config) -> Vec<Issue> {
     check_unique(&mut issues, "networks", c.networks.iter().map(|x| x.id.as_str()));
     check_unique(&mut issues, "devices", c.devices.iter().map(|x| x.id.as_str()));
     check_unique(&mut issues, "groups", c.groups.iter().map(|x| x.id.as_str()));
+    check_unique(&mut issues, "categories", c.categories.iter().map(|x| x.id.as_str()));
+    check_names(&mut issues, "categories", c.categories.iter().map(|x| x.name.as_str()));
+    limit(&mut issues, "categories", c.categories.len(), MAX_ITEMS);
     check_unique(&mut issues, "rules", c.rules.iter().map(|x| x.id.as_str()));
     check_names(&mut issues, "profiles", c.profiles.iter().map(|x| x.name.as_str()));
     check_names(&mut issues, "networks", c.networks.iter().map(|x| x.name.as_str()));
@@ -334,7 +339,7 @@ pub fn validate_config(c: &Config) -> Vec<Issue> {
 
     for (i, p) in c.profiles.iter().enumerate() {
         if let Some(e) = &p.endpoint {
-            check_endpoint(&mut issues, &format!("profiles[{i}].endpoint"), e);
+            check_endpoint(&mut issues, &format!("profiles[{i}].endpoint"), p.kind, e);
         }
     }
 
@@ -342,6 +347,17 @@ pub fn validate_config(c: &Config) -> Vec<Issue> {
         check_rule_refs(&mut issues, &format!("rules[{i}]"), r, &idx);
     }
     check_action(&mut issues, "default_action", &c.default_action, &idx);
+    if let Some(d) = &c.dns {
+        check_dns(&mut issues, d);
+    }
+    if let Some(z) = &c.zapret {
+        if !(1..=64).contains(&z.pos) {
+            issues.push(Issue::new("zapret.pos", "bad_pos", "позиция разреза — от 1 до 64 байт"));
+        }
+        if z.tcp_ports.is_empty() || z.tcp_ports.len() > 8 || z.tcp_ports.contains(&0) {
+            issues.push(Issue::new("zapret.tcp_ports", "bad_ports", "от 1 до 8 TCP-портов, каждый от 1 до 65535"));
+        }
+    }
     issues
 }
 
@@ -354,7 +370,32 @@ pub fn normalize_sha256(v: &str) -> Result<String, String> {
     Ok(h)
 }
 
-fn check_endpoint(issues: &mut Vec<Issue>, path: &str, e: &Endpoint) {
+fn check_endpoint(issues: &mut Vec<Issue>, path: &str, kind: ProfileKind, e: &Endpoint) {
+    let na = |issues: &mut Vec<Issue>, present: bool, field: &str| {
+        if present {
+            issues.push(Issue::new(format!("{path}.{field}"), "not_applicable", format!("поле {field} не применяется к профилю {}", kind.label())));
+        }
+    };
+    let tt = kind == ProfileKind::Trusttunnel;
+    let hy = kind == ProfileKind::Hysteria2;
+    let vl = kind == ProfileKind::Vless;
+    let wg = kind == ProfileKind::Wireguard;
+    na(issues, !tt && !e.username.is_empty(), "username");
+    na(issues, !tt && e.quic, "quic");
+    na(issues, !hy && e.obfs.is_some(), "obfs");
+    na(issues, !vl && e.security.is_some(), "security");
+    na(issues, !vl && e.flow.is_some(), "flow");
+    na(issues, !vl && e.reality.is_some(), "reality");
+    na(issues, !vl && e.client_fingerprint.is_some(), "client_fingerprint");
+    na(issues, !wg && e.public_key.is_some(), "public_key");
+    na(issues, !wg && e.address.is_some(), "address");
+    na(issues, !wg && e.mtu.is_some(), "mtu");
+    na(issues, !wg && e.awg.is_some(), "awg");
+    na(issues, wg && e.sni.is_some(), "sni");
+    na(issues, wg && e.cert_sha256.is_some(), "cert_sha256");
+    let reality = vl && e.security == Some(VlessSecurity::Reality);
+    na(issues, reality && e.cert_sha256.is_some(), "cert_sha256");
+
     if e.server.parse::<IpAddr>().is_err() {
         if let Err(m) = normalize_domain(&e.server, 2) {
             issues.push(Issue::new(format!("{path}.server"), "bad_server", m));
@@ -368,7 +409,7 @@ fn check_endpoint(issues: &mut Vec<Issue>, path: &str, e: &Endpoint) {
             issues.push(Issue::new(format!("{path}.sni"), "bad_sni", m));
         }
     }
-    if e.username.is_empty() || e.username.len() > 64 || e.username.chars().any(|c| c.is_control() || c == ':') {
+    if tt && (e.username.is_empty() || e.username.len() > 64 || e.username.chars().any(|c| c.is_control() || c == ':')) {
         issues.push(Issue::new(format!("{path}.username"), "bad_username", "имя пользователя: 1–64 символа без ':' и управляющих"));
     }
     if let Some(fp) = &e.cert_sha256 {
@@ -376,6 +417,147 @@ fn check_endpoint(issues: &mut Vec<Issue>, path: &str, e: &Endpoint) {
             issues.push(Issue::new(format!("{path}.cert_sha256"), "bad_fingerprint", m));
         }
     }
+    // проверка TLS не отключается: сервер по IP без SNI и без закреплённого сертификата проверить нельзя
+    let tls_checked = hy || (vl && e.security == Some(VlessSecurity::Tls));
+    if tls_checked && e.server.parse::<IpAddr>().is_ok() && e.sni.is_none() && e.cert_sha256.is_none() {
+        issues.push(Issue::new(path.to_string(), "tls_unverifiable", "сервер задан IP-адресом: нужен sni (имя в сертификате) или cert_sha256 (закреплённый сертификат)"));
+    }
+    if vl {
+        match e.security {
+            None => issues.push(Issue::new(format!("{path}.security"), "required", "для VLESS нужна защита транспорта: tls или reality")),
+            Some(VlessSecurity::Reality) => {
+                match &e.reality {
+                    None => issues.push(Issue::new(format!("{path}.reality"), "required", "для REALITY нужны public_key и short_id сервера")),
+                    Some(r) => {
+                        if data_encoding::BASE64URL_NOPAD.decode(r.public_key.as_bytes()).map(|k| k.len()) != Ok(32) {
+                            issues.push(Issue::new(format!("{path}.reality.public_key"), "bad_key", "открытый ключ REALITY — 32 байта x25519 в base64url"));
+                        }
+                        if r.short_id.len() > 16 || r.short_id.len() % 2 != 0 || !r.short_id.bytes().all(|c| c.is_ascii_hexdigit()) {
+                            issues.push(Issue::new(format!("{path}.reality.short_id"), "bad_short_id", "short id — до 16 шестнадцатеричных символов, чётная длина"));
+                        }
+                    }
+                }
+                if e.sni.is_none() {
+                    issues.push(Issue::new(format!("{path}.sni"), "required", "для REALITY нужен sni — имя сайта, под который маскируется соединение"));
+                }
+            }
+            Some(VlessSecurity::Tls) => na(issues, e.reality.is_some(), "reality"),
+        }
+        if let Some(f) = &e.client_fingerprint {
+            if !["chrome", "firefox", "safari", "ios", "edge", "random"].contains(&f.as_str()) {
+                issues.push(Issue::new(format!("{path}.client_fingerprint"), "bad_fingerprint", "client_fingerprint: chrome, firefox, safari, ios, edge или random"));
+            }
+        }
+    }
+    if wg {
+        match &e.public_key {
+            None => issues.push(Issue::new(format!("{path}.public_key"), "required", "нужен открытый ключ сервера WireGuard")),
+            Some(k) if !is_wg_key(k) => issues.push(Issue::new(format!("{path}.public_key"), "bad_key", "ключ WireGuard — 32 байта в base64")),
+            _ => {}
+        }
+        match e.address.as_deref().map(parse_cidr) {
+            None => issues.push(Issue::new(format!("{path}.address"), "required", "нужен адрес клиента в туннеле, например 10.66.66.2/32")),
+            Some(Ok(c)) if c.addr.is_ipv4() && c.prefix == 32 => {}
+            Some(_) => issues.push(Issue::new(format!("{path}.address"), "bad_address", "адрес клиента в туннеле — IPv4/32")),
+        }
+        if let Some(m) = e.mtu {
+            if !(1280..=1500).contains(&m) {
+                issues.push(Issue::new(format!("{path}.mtu"), "bad_mtu", "MTU туннеля — от 1280 до 1500"));
+            }
+        }
+        if let Some(a) = &e.awg {
+            let mut bad = |f: &str, m: &str| issues.push(Issue::new(format!("{path}.awg.{f}"), "bad_awg", m.to_string()));
+            if a.jc > 128 {
+                bad("jc", "jc — от 0 до 128");
+            }
+            if a.jmin > a.jmax || a.jmax > 1280 {
+                bad("jmax", "нужно jmin ≤ jmax ≤ 1280");
+            }
+            if a.s1 > 1132 || a.s2 > 1188 || a.s1 + 56 == a.s2 {
+                bad("s2", "s1 ≤ 1132, s2 ≤ 1188 и s1 + 56 ≠ s2 (иначе размеры init и response совпадут)");
+            }
+            let h = [a.h1, a.h2, a.h3, a.h4];
+            if h.iter().any(|x| *x < 5) || (0..4).any(|i| (i + 1..4).any(|j| h[i] == h[j])) {
+                bad("h1", "h1–h4 различны и не меньше 5 (1–4 — заголовки обычного WireGuard)");
+            }
+        }
+    }
+}
+
+fn check_dns(issues: &mut Vec<Issue>, d: &DnsConfig) {
+    let host = |issues: &mut Vec<Issue>, p: &str, h: &str| {
+        if let Err(m) = normalize_domain(h, 2) {
+            issues.push(Issue::new(format!("{p}.host"), "bad_host", m));
+        }
+    };
+    let ip = |issues: &mut Vec<Issue>, p: &str, v: &str| {
+        if v.parse::<IpAddr>().is_err() {
+            issues.push(Issue::new(format!("{p}.ip"), "bad_ip", "нужен IP-адрес сервера: имя не разрешается через открытый DNS"));
+        }
+    };
+    let path_ok = |v: &str| v.starts_with('/') && v.len() <= 128 && v.bytes().all(|c| c.is_ascii_graphic() && c != b'?' && c != b'#');
+    if d.transport == DnsTransport::Odoh {
+        if !d.servers.is_empty() {
+            issues.push(Issue::new("dns.servers", "not_applicable", "для ODoH серверы задаются в dns.odoh"));
+        }
+        match &d.odoh {
+            None => issues.push(Issue::new("dns.odoh", "required", "для ODoH нужны target и хотя бы один relay")),
+            Some(o) => {
+                let eps = std::iter::once(("dns.odoh.target".to_string(), &o.target)).chain(o.relays.iter().enumerate().map(|(i, r)| (format!("dns.odoh.relays[{i}]"), r)));
+                for (p, e) in eps {
+                    host(issues, &p, &e.host);
+                    ip(issues, &p, &e.ip);
+                    if !path_ok(&e.path) {
+                        issues.push(Issue::new(format!("{p}.path"), "bad_path", "путь начинается с / и без ? и #"));
+                    }
+                    if e.port == Some(0) {
+                        issues.push(Issue::new(format!("{p}.port"), "bad_port", "порт от 1 до 65535"));
+                    }
+                }
+                if o.relays.is_empty() || o.relays.len() > 4 {
+                    issues.push(Issue::new("dns.odoh.relays", "bad_relays", "от 1 до 4 relay; без relay ODoH не отличается от DoH"));
+                }
+                if o.relays.iter().any(|r| r.host == o.target.host || r.ip == o.target.ip) {
+                    issues.push(Issue::new("dns.odoh.relays", "relay_is_target", "relay и target должны быть разными серверами"));
+                }
+            }
+        }
+    } else {
+        if d.odoh.is_some() {
+            issues.push(Issue::new("dns.odoh", "not_applicable", "dns.odoh задаётся только для transport odoh"));
+        }
+        if d.servers.is_empty() || d.servers.len() > 4 {
+            issues.push(Issue::new("dns.servers", "bad_servers", "от 1 до 4 серверов"));
+        }
+        for (i, sv) in d.servers.iter().enumerate() {
+            let p = format!("dns.servers[{i}]");
+            host(issues, &p, &sv.host);
+            ip(issues, &p, &sv.ip);
+            if sv.port == Some(0) {
+                issues.push(Issue::new(format!("{p}.port"), "bad_port", "порт от 1 до 65535"));
+            }
+            match (&sv.path, matches!(d.transport, DnsTransport::Doh | DnsTransport::Doh3)) {
+                (Some(_), false) => issues.push(Issue::new(format!("{p}.path"), "not_applicable", "путь задаётся только для DoH и DoH3")),
+                (Some(v), true) if !path_ok(v) => issues.push(Issue::new(format!("{p}.path"), "bad_path", "путь начинается с / и без ? и #")),
+                _ => {}
+            }
+        }
+    }
+    if let Some(a) = &d.adblock {
+        if a.exceptions.len() > 256 {
+            issues.push(Issue::new("dns.adblock.exceptions", "too_many", "не больше 256 исключений"));
+        }
+        for (i, e) in a.exceptions.iter().enumerate() {
+            if let Err(m) = normalize_domain(e, 2) {
+                issues.push(Issue::new(format!("dns.adblock.exceptions[{i}]"), "bad_domain", m));
+            }
+        }
+    }
+}
+
+/// Ключ WireGuard: 32 байта в стандартном base64.
+pub fn is_wg_key(k: &str) -> bool {
+    data_encoding::BASE64.decode(k.as_bytes()).map(|b| b.len() == 32).unwrap_or(false)
 }
 
 pub fn check_destination(issues: &mut Vec<Issue>, path: &str, d: &Destination, idx: &Index) {
@@ -393,6 +575,11 @@ pub fn check_destination(issues: &mut Vec<Issue>, path: &str, d: &Destination, i
         Destination::Cidr { value } => {
             if let Err(e) = parse_cidr(value) {
                 issues.push(Issue::new(format!("{path}.value"), "bad_cidr", e));
+            }
+        }
+        Destination::Category { id } => {
+            if !idx.categories.contains_key(id.as_str()) {
+                issues.push(Issue::new(format!("{path}.id"), "unknown_category", format!("категория «{id}» не найдена")));
             }
         }
         Destination::Group { id } => {

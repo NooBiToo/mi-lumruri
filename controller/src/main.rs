@@ -1,12 +1,12 @@
 //! mi-tt-ctl — контроллер mi-trusttunnel, срез «чтение, проверка и предпросмотр правила».
 //! Ничего не применяет к сети и не записывает настройки.
 
-use mi_tt::{api, model, render, store};
+use mi_tt::{api, auth, gate, model, render, store};
 
 use std::io::{self, Read, Write};
 use std::process::ExitCode;
 
-use api::{MAX_BODY_BYTES, MAX_CONFIG_BYTES, Response, WriteAccess, check_origin, handle, handle_with, read_limited, reason};
+use api::{MAX_BODY_BYTES, MAX_CONFIG_BYTES, Response, WriteAccess, check_origin, handle, read_limited, reason};
 
 const DEFAULT_CONFIG: &str = "/data/mi-trusttunnel/config.json";
 const USAGE: &str = "mi-tt-ctl — чтение, проверка и предпросмотр правил (срез без применения)
@@ -14,8 +14,11 @@ const USAGE: &str = "mi-tt-ctl — чтение, проверка и предп�
   mi-tt-ctl validate <config.json>
   mi-tt-ctl preview <config.json> <request.json>
   mi-tt-ctl save <config.json> <request.json>        # {\"base_revision\", \"rule\"}: атомарно, с блокировкой
-  mi-tt-ctl render <config.json> <secrets.json> <dhcp.leases> <out-dir>   # config.yaml для Mihomo и routes.json
-  mi-tt-ctl cgi            # CGI для uhttpd: MI_TT_CONFIG, MI_TT_ALLOWED_ORIGINS, REQUEST_METHOD, PATH_INFO, CONTENT_LENGTH
+  mi-tt-ctl render <config.json> <secrets.json> <dhcp.leases> <out-dir>   # config.yaml для Mihomo, routes.json, DNS-файлы
+  mi-tt-ctl adblock-update <config.json> <list>      # проверить и атомарно заменить adblock.list рядом с настройками
+  mi-tt-ctl category-update <config.json> <id> <list> # проверить и атомарно заменить categories/<id>.list
+  mi-tt-ctl cgi            # CGI для uhttpd (HTTPS): вход паролем и TOTP, затем /config, /preview, /rules
+                           # MI_TT_CONFIG, MI_TT_ALLOWED_ORIGINS, MI_TT_AUTH_DIR, MI_TT_SESSION_DIR
   mi-tt-ctl --version
 
 Код выхода: 0 — проверка пройдена, 1 — найдены ошибки, 2 — ошибка запуска или чтения.";
@@ -38,6 +41,8 @@ fn main() -> ExitCode {
             Err(m) => cli(Response::error(500, "request_unreadable", m)),
         },
         ["render", cfg, secrets, leases, out] => cli(render_cmd(cfg, secrets, leases, out)),
+        ["adblock-update", cfg, list] => cli(adblock_update(cfg, list)),
+        ["category-update", cfg, id, list] => cli(category_update(cfg, id, list)),
         ["cgi"] => cgi(),
         _ => {
             eprintln!("{USAGE}");
@@ -90,14 +95,148 @@ fn render_cmd(cfg: &str, secrets: &str, leases: &str, out: &str) -> Response {
             if let Err(m) = std::fs::create_dir_all(dir).map_err(|e| format!("не удалось создать каталог {}: {e}", dir.display()))
                 .and_then(|_| store::write_atomic(&dir.join("config.yaml"), &yaml))
                 .and_then(|_| store::write_atomic(&dir.join("routes.json"), &routes))
+                .and_then(|_| write_dns_files(&config, std::path::Path::new(cfg), dir))
+                .and_then(|_| write_category_lists(&config, &r.categories, std::path::Path::new(cfg), dir))
+                .and_then(|_| {
+                    // аргументы nfqws2 для службы Zapret (по одному на строку); без Zapret файла нет
+                    let f = dir.join("nfqws2.args");
+                    if r.nfqws2_args.is_empty() {
+                        let _ = std::fs::remove_file(&f);
+                        Ok(())
+                    } else {
+                        store::write_atomic(&f, format!("{}\n", r.nfqws2_args.join("\n")).as_bytes())
+                    }
+                })
             {
                 return Response::error(500, "write_failed", m);
             }
             warnings.extend(r.warnings.iter().cloned());
             Response { status: 200, body: json!({ "ok": true, "source_revision": store::revision(&c), "mihomo_sha256": store::revision(&yaml),
                 "rules": r.rules, "capture": r.capture,
-                "plan": r.plan.iter().map(|e| e.label()).collect::<Vec<_>>(), "routes": r.routes, "warnings": warnings, "issues": [] }) }
+                "plan": r.plan.iter().map(|e| e.label()).collect::<Vec<_>>(), "routes": r.routes, "nfqws2_args": r.nfqws2_args, "warnings": warnings, "issues": [] }) }
         }
+    }
+}
+
+/// DNS-файлы службы: conf для dnsmasq (с блокировкой рекламы из `adblock.list` рядом с настройками) и dnscrypt-proxy.toml
+/// для ODoH. Без раздела dns — файлов нет. Ошибочный список рекламы — отказ (действующие файлы не меняются).
+fn write_dns_files(config: &model::Config, cfg: &std::path::Path, dir: &std::path::Path) -> Result<(), String> {
+    use mi_tt::dns;
+    let (conf, toml) = (dir.join("dnsmasq-mitt.conf"), dir.join("dnscrypt-proxy.toml"));
+    let Some(d) = &config.dns else {
+        let _ = std::fs::remove_file(&conf);
+        let _ = std::fs::remove_file(&toml);
+        return Ok(());
+    };
+    let mut blocked = Vec::new();
+    if d.adblock.as_ref().is_some_and(|a| a.enabled) {
+        let list = cfg.with_file_name("adblock.list");
+        if list.exists() {
+            let text = read_limited(&list.to_string_lossy(), dns::ADBLOCK_MAX_BYTES as u64)?;
+            blocked = dns::parse_adblock_list(&String::from_utf8_lossy(&text))
+                .map_err(|i| format!("adblock.list не прошёл проверку: {}", i.iter().map(|x| format!("{} {}", x.path, x.message)).collect::<Vec<_>>().join("; ")))?;
+        }
+    }
+    store::write_atomic(&conf, dns::dnsmasq_conf(d, &blocked).as_bytes())?;
+    match dns::dnscrypt_toml(d) {
+        Some(t) => store::write_atomic(&toml, t.as_bytes()),
+        None => {
+            let _ = std::fs::remove_file(&toml);
+            Ok(())
+        }
+    }
+}
+
+/// Списки категорий для Mihomo (rules/<id>.txt) из categories/<id>.list рядом с настройками. Нет или ошибочный список
+/// категории, на которую ссылаются правила, — отказ: правило не применяется молча без своих назначений.
+fn write_category_lists(config: &model::Config, used: &[String], cfg: &std::path::Path, dir: &std::path::Path) -> Result<(), String> {
+    let rules = dir.join("rules");
+    let _ = std::fs::remove_dir_all(&rules);
+    if used.is_empty() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(&rules).map_err(|e| e.to_string())?;
+    for id in used {
+        let c = config.categories.iter().find(|c| &c.id == id).ok_or(format!("категория {id} не найдена"))?;
+        let src = cfg.with_file_name("categories").join(format!("{id}.list"));
+        let text = read_limited(&src.to_string_lossy(), 8 * 1024 * 1024).map_err(|e| format!("список категории «{id}»: {e}"))?;
+        let entries = render::parse_category_list(c.kind, &String::from_utf8_lossy(&text))
+            .map_err(|i| format!("список категории «{id}» не прошёл проверку: {}", i.iter().map(|x| format!("{} {}", x.path, x.message)).collect::<Vec<_>>().join("; ")))?;
+        store::write_atomic(&rules.join(format!("{id}.txt")), format!("{}\n", entries.join("\n")).as_bytes())?;
+    }
+    Ok(())
+}
+
+/// Обновление списка категории: проверка по виду категории (домены или IP-префиксы), атомарная замена
+/// categories/<id>.list (предыдущий — .prev). Ошибочный список не применяется.
+fn category_update(cfg: &str, id: &str, list: &str) -> Response {
+    use serde_json::json;
+    let config: model::Config = match read_limited(cfg, MAX_CONFIG_BYTES).map_err(|m| Response::error(500, "unreadable", m)).and_then(|b| {
+        api::parse_json(&b, "config").map_err(|i| Response { status: 422, body: json!({ "ok": false, "error": { "code": "config_invalid", "message": "настройки не разобраны" }, "issues": i }) })
+    }) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let Some(c) = config.categories.iter().find(|c| c.id == id) else {
+        return Response::error(404, "unknown_category", format!("категория «{id}» не найдена в настройках"));
+    };
+    let text = match read_limited(list, 8 * 1024 * 1024) {
+        Ok(t) => t,
+        Err(m) => return Response::error(500, "unreadable", m),
+    };
+    let entries = match render::parse_category_list(c.kind, &String::from_utf8_lossy(&text)) {
+        Ok(e) => e,
+        Err(i) => return Response { status: 422, body: json!({ "ok": false, "error": { "code": "category_invalid", "message": "список не прошёл проверку; действующий список сохранён" }, "issues": i }) },
+    };
+    let dir = std::path::Path::new(cfg).with_file_name("categories");
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return Response::error(500, "write_failed", e.to_string());
+    }
+    let target = dir.join(format!("{id}.list"));
+    let _g = match store::lock(&target) {
+        Ok(g) => g,
+        Err(m) => return Response::error(503, "busy", m),
+    };
+    if target.exists() {
+        let _ = std::fs::copy(&target, store::sidecar(&target, ".prev"));
+    }
+    let body = format!("{}\n", entries.iter().map(|e| e.trim_start_matches("+.")).collect::<Vec<_>>().join("\n"));
+    match store::write_atomic(&target, body.as_bytes()) {
+        Ok(()) => Response { status: 200, body: json!({ "ok": true, "category": id, "entries": entries.len(), "sha256": store::revision(body.as_bytes()), "issues": [] }) },
+        Err(m) => Response::error(500, "write_failed", m),
+    }
+}
+
+/// Обновление списка блокировки: новый список проверяется целиком и атомарно заменяет прежний (копия — .prev).
+/// Ошибочный или пустой список не применяется, действующий остаётся.
+fn adblock_update(cfg: &str, list: &str) -> Response {
+    use mi_tt::dns;
+    use serde_json::json;
+    let text = match read_limited(list, dns::ADBLOCK_MAX_BYTES as u64 + 1) {
+        Ok(t) => t,
+        Err(m) => return Response::error(500, "unreadable", m),
+    };
+    let domains = match dns::parse_adblock_list(&String::from_utf8_lossy(&text)) {
+        Ok(d) if !d.is_empty() => d,
+        Ok(_) => return Response::error(422, "adblock_empty", "пустой список не применяется; действующий список сохранён"),
+        Err(i) => {
+            return Response { status: 422, body: json!({ "ok": false, "error": { "code": "adblock_invalid", "message": "список не прошёл проверку; действующий список сохранён" }, "issues": i }) };
+        }
+    };
+    let target = std::path::Path::new(cfg).with_file_name("adblock.list");
+    let _g = match store::lock(&target) {
+        Ok(g) => g,
+        Err(m) => return Response::error(503, "busy", m),
+    };
+    if target.exists() {
+        if let Err(e) = std::fs::copy(&target, store::sidecar(&target, ".prev")) {
+            return Response::error(500, "write_failed", e.to_string());
+        }
+    }
+    let body = format!("{}\n", domains.join("\n"));
+    match store::write_atomic(&target, body.as_bytes()) {
+        Ok(()) => Response { status: 200, body: json!({ "ok": true, "domains": domains.len(), "sha256": store::revision(body.as_bytes()), "issues": [] }) },
+        Err(m) => Response::error(500, "write_failed", m),
     }
 }
 
@@ -105,7 +244,7 @@ fn env(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.is_empty())
 }
 
-fn cgi_request() -> Response {
+fn cgi_request() -> gate::Reply {
     let config = env("MI_TT_CONFIG").unwrap_or_else(|| DEFAULT_CONFIG.into());
     let method = env("REQUEST_METHOD").unwrap_or_default();
     let path = env("PATH_INFO").unwrap_or_else(|| "/".into());
@@ -113,40 +252,60 @@ fn cgi_request() -> Response {
     if method == "POST" {
         let ctype = env("CONTENT_TYPE").unwrap_or_default();
         if !ctype.to_ascii_lowercase().starts_with("application/json") {
-            return Response::error(415, "unsupported_media_type", "ожидается Content-Type: application/json");
+            return Response::error(415, "unsupported_media_type", "ожидается Content-Type: application/json").into();
         }
         let Some(len) = env("CONTENT_LENGTH") else {
-            return Response::error(411, "length_required", "нужен заголовок Content-Length");
+            return Response::error(411, "length_required", "нужен заголовок Content-Length").into();
         };
         let Ok(len) = len.parse::<usize>() else {
-            return Response::error(400, "bad_length", "некорректный Content-Length");
+            return Response::error(400, "bad_length", "некорректный Content-Length").into();
         };
-        if len > MAX_BODY_BYTES {
-            return Response::error(413, "too_large", format!("тело запроса больше {MAX_BODY_BYTES} байт"));
+        let max = if mi_tt::manage::is_list_upload(&path) { mi_tt::manage::MAX_LIST_BODY } else { MAX_BODY_BYTES };
+        if len > max {
+            return Response::error(413, "too_large", format!("тело запроса больше {max} байт")).into();
         }
         let mut buf = vec![0u8; len];
         if io::stdin().lock().read_exact(&mut buf).is_err() {
-            return Response::error(400, "short_body", "тело запроса короче Content-Length");
+            return Response::error(400, "short_body", "тело запроса короче Content-Length").into();
         }
         body = Some(buf);
     }
-    let access = if method == "GET" {
+    let origin = if method == "GET" {
         WriteAccess::Denied(Response::error(405, "method_not_allowed", "чтение"))
     } else {
         check_origin(&env("MI_TT_ALLOWED_ORIGINS").unwrap_or_default(), env("HTTP_ORIGIN").as_deref(), env("HTTP_SEC_FETCH_SITE").as_deref())
     };
-    handle_with(&method, &path, body.as_deref(), &config, access)
+    let cookie = env("HTTP_COOKIE");
+    // HTTPS от самого веб-сервера (uhttpd с TLS) или от локального TLS-терминатора: на стоке 1.1.38 uhttpd без ustream-ssl,
+    // TLS завершает свой экземпляр штатного nginx и проксирует на отдельный uhttpd, слушающий только 127.0.0.1.
+    // Штатный uhttpd передаёт CGI лишь фиксированный набор заголовков (X-Forwarded-Proto среди них нет), поэтому
+    // признак HTTPS — сам этот экземпляр: CGI-обёртка установщика задаёт MI_TT_TRUST_PROXY=1, а соединение должно прийти
+    // с loopback на loopback-слушатель (единственный клиент — nginx с TLS). Если X-Forwarded-Proto всё же передан — он https.
+    let direct = matches!(env("HTTPS").as_deref().map(str::to_ascii_lowercase).as_deref(), Some("on" | "1"));
+    let lo = |k: &str| matches!(env(k).as_deref(), Some("127.0.0.1" | "::1"));
+    let proxied = env("MI_TT_TRUST_PROXY").as_deref() == Some("1")
+        && lo("REMOTE_ADDR")
+        && lo("SERVER_ADDR")
+        && env("HTTP_X_FORWARDED_PROTO").is_none_or(|v| v.eq_ignore_ascii_case("https"));
+    let https = direct || proxied;
+    // CSRF-токен: заголовок X-MITT-CSRF. Штатный uhttpd его не передаёт, поэтому за доверенным nginx токен приходит
+    // в Authorization: MITT-CSRF <токен> (nginx всегда перезаписывает этот заголовок значением из X-MITT-CSRF клиента).
+    let csrf = env("HTTP_X_MITT_CSRF")
+        .or_else(|| proxied.then(|| env("HTTP_AUTHORIZATION").and_then(|v| v.strip_prefix("MITT-CSRF ").map(str::to_string))).flatten());
+    let req = gate::Request { method: &method, path: &path, body: body.as_deref(), cookie: cookie.as_deref(), csrf: csrf.as_deref(), origin, https };
+    gate::serve(&auth::Paths::from_env(), req, &config)
 }
 
 fn cgi() -> ExitCode {
-    let r = cgi_request();
+    let gate::Reply { resp: r, headers } = cgi_request();
     let body = serde_json::to_vec(&r.body).unwrap_or_default();
     let mut out = io::stdout().lock();
     let head = format!(
-        "Status: {} {}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n\r\n",
+        "Status: {} {}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n{}\r\n",
         r.status,
         reason(r.status),
-        body.len()
+        body.len(),
+        headers.iter().map(|h| format!("{h}\r\n")).collect::<String>()
     );
     let _ = out.write_all(head.as_bytes()).and_then(|_| out.write_all(&body)).and_then(|_| out.flush());
     ExitCode::SUCCESS

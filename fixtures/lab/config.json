@@ -11,7 +11,7 @@
         "port": 443,
         "sni": "vpn.lab.test",
         "username": "tv-user",
-        "cert_sha256": "7A:5A:63:A5:C7:B3:C2:BE:D2:AC:F9:A7:F5:CD:C2:60:22:E2:13:60:01:25:7F:BE:56:28:0D:7B:83:7D:1E:8F"
+        "cert_sha256": "EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE"
       }
     }
   ],

@@ -6,6 +6,8 @@ use std::process::{Command, Stdio};
 
 use serde_json::{Value, json};
 
+mod common;
+
 const ORIGIN: &str = "http://127.0.0.1:8787";
 
 fn bin() -> &'static str {
@@ -42,6 +44,8 @@ fn lab_copy(name: &str) -> PathBuf {
 fn cgi(method: &str, path: &str, body: Option<&[u8]>, config: &str, extra: &[(&str, &str)]) -> (u16, Value) {
     let mut c = Command::new(bin());
     c.arg("cgi").env_clear().env("MI_TT_CONFIG", config).env("REQUEST_METHOD", method).env("PATH_INFO", path);
+    // действующая сессия (пароль + TOTP) и CSRF; Origin задают сами тесты, как на этапе 2
+    c.envs(common::shared_env(false));
     c.stdin(Stdio::piped()).stdout(Stdio::piped());
     if let Some(b) = body {
         c.env("CONTENT_TYPE", "application/json").env("CONTENT_LENGTH", b.len().to_string());
@@ -175,13 +179,15 @@ fn concurrent_saves_on_one_revision_admit_exactly_one() {
     assert_eq!(v["config"]["rules"].as_array().unwrap().len(), 1);
 }
 
-fn saved_lab(name: &str) -> (PathBuf, String) {
+fn saved_lab(name: &str) -> (PathBuf, String, String) {
     let dir = lab_copy(name);
     let cfg = dir.join("config.json").to_string_lossy().into_owned();
     let req = tmp(&format!("{name}-save.json"), &String::from_utf8(save_body(&rev_of(&cfg), "r-tv-video", "tv")).unwrap());
     assert_eq!(run(&["save", &cfg, &req]).0, 0);
-    std::fs::write(dir.join("secrets.json"), r#"{"version":1,"profiles":{"tt-lab":{"password":"s3cret-lab"}}}"#).unwrap();
-    (dir, cfg)
+    // пароль профиля — случайный на прогон теста, не постоянное значение в исходниках
+    let pw = format!("tt-{}", common::rand_hex(24));
+    std::fs::write(dir.join("secrets.json"), serde_json::json!({ "version": 1, "profiles": { "tt-lab": { "password": pw } } }).to_string()).unwrap();
+    (dir, cfg, pw)
 }
 
 fn p(dir: &std::path::Path, f: &str) -> String {
@@ -190,13 +196,13 @@ fn p(dir: &std::path::Path, f: &str) -> String {
 
 #[test]
 fn render_mihomo_for_saved_trusttunnel_rule() {
-    let (dir, cfg) = saved_lab("render-ok");
+    let (dir, cfg, pw) = saved_lab("render-ok");
     std::fs::write(dir.join("leases"), "1999999999 02:00:00:00:0a:02 10.10.1.2 tv *\n").unwrap();
     let out = dir.join("mihomo");
     let o = Command::new(bin()).args(["render", &cfg, &p(&dir, "secrets.json"), &p(&dir, "leases"), &p(&dir, "mihomo")]).output().unwrap();
     let stdout = String::from_utf8(o.stdout).unwrap();
     assert_eq!(o.status.code(), Some(0), "{stdout}");
-    assert!(!stdout.contains("s3cret-lab"), "пароль не печатается");
+    assert!(!stdout.contains(&pw), "пароль не печатается");
     let v: Value = serde_json::from_str(&stdout).unwrap();
     // этап 4: источник для маршрутизации — MAC на входе моста (метка), IP нужен только Mihomo
     assert_eq!(v["capture"]["devices"], json!([{"id": "tv", "mac": "02:00:00:00:0a:02", "ipv4": "10.10.1.2", "bridge": "br-lan", "mark": 0x0a01_0000u32}]));
@@ -213,8 +219,8 @@ fn render_mihomo_for_saved_trusttunnel_rule() {
     let m: Value = serde_json::from_slice(&std::fs::read(out.join("config.yaml")).unwrap()).unwrap();
     let px = &m["proxies"][0];
     assert_eq!((px["type"].as_str(), px["server"].as_str(), px["port"].as_u64()), (Some("trusttunnel"), Some("10.30.0.2"), Some(443)));
-    assert_eq!(px["password"], "s3cret-lab");
-    assert_eq!(px["fingerprint"], "7a5a63a5c7b3c2bed2acf9a7f5cdc26022e2136001257fbe56280d7b837d1e8f");
+    assert_eq!(px["password"], pw.as_str());
+    assert_eq!(px["fingerprint"], "ee".repeat(32)  /* заглушка фикстуры: лаборатории ставят отпечаток эфемерного сертификата */);
     assert_eq!(m["tun"]["auto-route"], false);
     let routes: Value = serde_json::from_slice(&std::fs::read(out.join("routes.json")).unwrap()).unwrap();
     let apply: Vec<String> =
@@ -240,7 +246,7 @@ fn render_mihomo_for_saved_trusttunnel_rule() {
 
 #[test]
 fn render_refuses_when_rule_cannot_be_applied_exactly() {
-    let (dir, cfg) = saved_lab("render-bad");
+    let (dir, cfg, _pw) = saved_lab("render-bad");
     let out = p(&dir, "mihomo");
     // этап 4: нет аренды для MAC телевизора — не ошибка: устройство защищается по MAC (метка → unreachable),
     // в Mihomo его правило не попадает, в предупреждениях это видно

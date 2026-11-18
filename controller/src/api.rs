@@ -125,6 +125,15 @@ fn save(body: Option<&[u8]>, config_path: &str) -> Response {
 
 pub fn handle_with(method: &str, path: &str, body: Option<&[u8]>, config_path: &str, access: WriteAccess) -> Response {
     let path = path.trim_end_matches('/');
+    // управление (этап 11): изменения только при разрешённом доступе (локально или после шлюза CGI)
+    if crate::manage::is_manage_path(path) {
+        if method == "POST" {
+            if let WriteAccess::Denied(r) = access {
+                return r;
+            }
+        }
+        return crate::manage::handle(method, path, body, config_path).unwrap_or_else(|| Response::error(404, "not_found", format!("неизвестный адрес {path}")));
+    }
     match (method, path) {
         ("GET", "/config") => {
             let rev = read_limited(config_path, MAX_CONFIG_BYTES).ok().map(|b| revision(&b));
@@ -172,7 +181,9 @@ pub fn handle_with(method: &str, path: &str, body: Option<&[u8]>, config_path: &
 pub fn reason(status: u16) -> &'static str {
     match status {
         200 => "OK",
+        202 => "Accepted",
         400 => "Bad Request",
+        401 => "Unauthorized",
         404 => "Not Found",
         405 => "Method Not Allowed",
         409 => "Conflict",
@@ -181,6 +192,7 @@ pub fn reason(status: u16) -> &'static str {
         413 => "Payload Too Large",
         415 => "Unsupported Media Type",
         422 => "Unprocessable Entity",
+        429 => "Too Many Requests",
         503 => "Service Unavailable",
         _ => "Internal Server Error",
     }

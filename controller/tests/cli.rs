@@ -6,6 +6,8 @@ use std::process::{Command, Output, Stdio};
 
 use serde_json::Value;
 
+mod common;
+
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_mi-tt-ctl")
 }
@@ -38,6 +40,7 @@ fn cgi(method: &str, path: &str, ctype: Option<&str>, body: Option<&[u8]>, lengt
         .env("MI_TT_CONFIG", config)
         .env("REQUEST_METHOD", method)
         .env("PATH_INFO", path)
+        .envs(common::shared_env(true))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped());
     if let Some(t) = ctype {

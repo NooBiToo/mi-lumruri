@@ -25,10 +25,12 @@ cgi() {
   fi
   printf '\nexit=%s\n' "$?" >>"$OUT/$name.out"
 }
-cgi cgi-get-config GET /config
-cgi cgi-preview-tv POST /preview "$F/request.tv-video-trusttunnel.json"
-cgi cgi-preview-bad POST /preview "$F/invalid/request.unknown-refs.json"
-cgi cgi-apply-404 POST /apply "$F/request.tv-video-trusttunnel.json"
+# Этап 6: без входа CGI закрыт одинаково на обеих архитектурах (503 без настройки входа, 403 POST без Origin);
+# вход и защищённые адреса ARM64 проверяются в лаборатории (tools/lab), на хосте — в controller/tests/stage6.rs.
+cgi cgi-noauth-get-config GET /config
+cgi cgi-noauth-preview-tv POST /preview "$F/request.tv-video-trusttunnel.json"
+cgi cgi-noauth-preview-bad POST /preview "$F/invalid/request.unknown-refs.json"
+cgi cgi-noauth-apply POST /apply "$F/request.tv-video-trusttunnel.json"
 for f in "$OUT"/*.out; do
   printf '%-24s %-7s %s\n' "$(basename "$f" .out)" "$(tail -1 "$f")" "$(head -1 "$f" | tr -d '\r' | cut -c1-40)"
 done

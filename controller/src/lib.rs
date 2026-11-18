@@ -2,9 +2,15 @@
 //! Здесь нет кода, меняющего сеть: его содержит только административный бинарник `mi-tt-admin`.
 
 pub mod api;
+pub mod auth;
+pub mod caps;
+pub mod dns;
+pub mod gate;
+pub mod manage;
 pub mod model;
 pub mod plan;
 pub mod preview;
+pub mod release;
 pub mod render;
 pub mod store;
 pub mod validate;

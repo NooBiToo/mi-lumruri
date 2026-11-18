@@ -93,10 +93,37 @@ pub struct Saved {
 
 /// Добавляет или заменяет правило по id. Пишет только если ревизия совпала и вся новая конфигурация проходит проверку.
 pub fn save_rule(path: &Path, req: &SaveRequest, max_bytes: u64) -> Result<Saved, SaveError> {
+    update_config(path, &req.base_revision, max_bytes, |cfg| {
+        let mut issues = Vec::new();
+        check_rule_refs(&mut issues, "rule", &req.rule, &Index::new(cfg));
+        if !issues.is_empty() {
+            return Err(issues);
+        }
+        let mut rule = req.rule.clone();
+        rule.destination = normalize_destination(&rule.destination);
+        Ok(match cfg.rules.iter().position(|r| r.id == rule.id) {
+            Some(i) => {
+                cfg.rules[i] = rule;
+                "replace"
+            }
+            None => {
+                if cfg.rules.len() >= MAX_RULES {
+                    return Err(vec![Issue::new("rule", "too_many", format!("не больше {MAX_RULES} правил"))]);
+                }
+                cfg.rules.push(rule);
+                "add"
+            }
+        })
+    })
+}
+
+/// Общий путь изменения настроек: блокировка, проверка ревизии, проверка текущих настроек, изменение `f`,
+/// проверка всей новой конфигурации, копия предыдущей версии и атомарная запись. Ошибка `f` — RuleInvalid (422).
+pub fn update_config(path: &Path, base_revision: &str, max_bytes: u64, f: impl FnOnce(&mut Config) -> Result<&'static str, Vec<Issue>>) -> Result<Saved, SaveError> {
     let _guard = lock(path).map_err(SaveError::Busy)?;
     let current = crate::api::read_limited(&path.to_string_lossy(), max_bytes).map_err(SaveError::Io)?;
     let current_rev = revision(&current);
-    if !req.base_revision.eq_ignore_ascii_case(&current_rev) {
+    if !base_revision.eq_ignore_ascii_case(&current_rev) {
         return Err(SaveError::Conflict { current: current_rev });
     }
     let mut cfg: Config = crate::api::parse_json(&current, "").map_err(|i| SaveError::ConfigInvalid(prefix(i)))?;
@@ -104,26 +131,7 @@ pub fn save_rule(path: &Path, req: &SaveRequest, max_bytes: u64) -> Result<Saved
     if !base.is_empty() {
         return Err(SaveError::ConfigInvalid(prefix(base)));
     }
-    let mut issues = Vec::new();
-    check_rule_refs(&mut issues, "rule", &req.rule, &Index::new(&cfg));
-    if !issues.is_empty() {
-        return Err(SaveError::RuleInvalid(issues));
-    }
-    let mut rule = req.rule.clone();
-    rule.destination = normalize_destination(&rule.destination);
-    let mode = match cfg.rules.iter().position(|r| r.id == rule.id) {
-        Some(i) => {
-            cfg.rules[i] = rule;
-            "replace"
-        }
-        None => {
-            if cfg.rules.len() >= MAX_RULES {
-                return Err(SaveError::RuleInvalid(vec![Issue::new("rule", "too_many", format!("не больше {MAX_RULES} правил"))]));
-            }
-            cfg.rules.push(rule);
-            "add"
-        }
-    };
+    let mode = f(&mut cfg).map_err(SaveError::RuleInvalid)?;
     let after = validate_config(&cfg);
     if !after.is_empty() {
         return Err(SaveError::RuleInvalid(after));

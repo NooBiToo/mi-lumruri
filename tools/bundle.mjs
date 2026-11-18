@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const VERSION = JSON.parse(readFileSync(join(ROOT, 'panel', 'package.json'), 'utf8')).version
-const NAME = `mi-trusttunnel-${VERSION}-stage4`
+const NAME = `mi-trusttunnel-${VERSION}-stage12`
 const BIN = join(ROOT, 'controller', 'target', 'aarch64-unknown-linux-musl', 'release', 'mi-tt-ctl')
 const ADMIN = join(ROOT, 'controller', 'target', 'aarch64-unknown-linux-musl', 'release', 'mi-tt-admin')
 const WWW = join(ROOT, 'panel', 'dist')
@@ -31,6 +31,15 @@ const ENGINES_DOC = [
 ]
 
 // Этап 1 (VERTICAL-SLICE.md): для расчёта прироста размера.
+// Этап 4 (tc-механизм).
+const STAGE11 = { ctl_raw: 931_616, ctl_xz: 384_008, admin_raw: 1_024_632, admin_xz: 419_096, tar: 860_160, tmp: 2_094_911 }
+const STAGE10 = { ctl_raw: 844_968, ctl_xz: 350_804, admin_raw: 1_015_560, admin_xz: 415_844, tar: 819_200, tmp: 1_972_204 }
+const STAGE9 = { ctl_raw: 795_408, ctl_xz: 331_500, admin_raw: 988_856, admin_xz: 405_016, tar: 788_480, tmp: 1_895_940 }
+const STAGE8 = { ctl_raw: 785_608, ctl_xz: 327_424, admin_raw: 972_904, admin_xz: 398_620, tar: 778_240, tmp: 1_870_188 }
+const STAGE7 = { ctl_raw: 749_320, ctl_xz: 314_580, admin_raw: 938_328, admin_xz: 386_448, tar: 757_760, tmp: 1_799_304 }
+const STAGE6 = { ctl_raw: 743_440, ctl_xz: 312_140, admin_raw: 933_296, admin_xz: 384_548, tar: 747_520, tmp: 1_788_236 }
+const STAGE5 = { ctl_raw: 657_024, ctl_xz: 277_004, admin_raw: 833_640, admin_xz: 346_880, tar: 675_840, tmp: 1_594_032 }
+const STAGE4 = { ctl_raw: 654_928, ctl_xz: 276_332, admin_raw: 774_632, admin_xz: 323_444, tar: 645_120, tmp: 1_524_251 }
 // Этап 3 (захват по IP источника).
 const STAGE3 = { ctl_raw: 634_848, ctl_xz: 267_680, admin_raw: 693_768, admin_xz: 289_824, tar: 604_160, tmp: 1_423_307 }
 // Этап 2 (до разделения на mi-tt-ctl и mi-tt-admin).
@@ -86,6 +95,7 @@ function add(rel, raw) {
 }
 add('bin/mi-tt-ctl', bin)
 add('bin/mi-tt-admin', adminBin)
+add('tools/preflight.sh', readFileSync(join(ROOT, 'tools', 'device', 'preflight.sh')))
 for (const f of wwwFiles) add('www/' + relative(WWW, f).split('\\').join('/'), readFileSync(f))
 
 const manifest = {
@@ -94,7 +104,7 @@ const manifest = {
   target: 'aarch64-unknown-linux-musl (BE7000 RC06, прошивка 1.1.38)',
   compression: 'xz preset 6, CRC32; распаковка штатным BusyBox unxz — на роутере не проверялась',
   signature: null,
-  scope: 'этап 4 (захват по MAC/порту моста через tc, метки, запрет IPv6 по метке): mi-tt-ctl (проверка, предпросмотр, сохранение, config.yaml Mihomo; CGI без привилегий) и mi-tt-admin (план, применение, статус, снятие собственных правил маршрутизации). Без установщика, движков и автозапуска',
+  scope: 'этап 5 (механизм netfilter для стока RC06 1.1.38, проверка возможностей до изменений, preflight только для чтения; tc-механизм этапа 4 сохранён): mi-tt-ctl (проверка, предпросмотр, сохранение, config.yaml Mihomo; CGI без привилегий) и mi-tt-admin (план, применение, статус, снятие собственных правил маршрутизации). Без установщика, движков и автозапуска',
   files,
 }
 writeFileSync(join(STAGE, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
@@ -113,7 +123,8 @@ const report = {
   elf_admin: elfAdmin,
   controller: { raw: bin.length, raw_sha256: sha(bin), xz: files[0].size, xz_sha256: files[0].sha256 },
   admin: { raw: adminBin.length, raw_sha256: sha(adminBin), xz: files[1].size, xz_sha256: files[1].sha256 },
-  panel: { files: wwwFiles.length, raw: unpackedTotal - bin.length - adminBin.length, xz: packedTotal - files[0].size - files[1].size - statSync(join(STAGE, 'manifest.json')).size },
+  preflight: { raw: files[2].unpacked.size, xz: files[2].size },
+  panel: { files: wwwFiles.length, raw: unpackedTotal - bin.length - adminBin.length - files[2].unpacked.size, xz: packedTotal - files[0].size - files[1].size - files[2].size - statSync(join(STAGE, 'manifest.json')).size },
   bundle: { files_plus_manifest: packedTotal, tar: tar.length, tar_sha256: sha(tar), tmp_after_unpack: unpackedTotal },
   budget: {
     flash_budget: FLASH_BUDGET,
@@ -133,6 +144,73 @@ report.growth_vs_stage1 = {
   panel_xz: report.panel.xz - STAGE1.panel_xz,
   tar: tar.length - STAGE1.tar,
   tmp_after_unpack: unpackedTotal - STAGE1.tmp,
+}
+report.growth_vs_stage11 = {
+  ctl_raw: bin.length - STAGE11.ctl_raw,
+  ctl_xz: files[0].size - STAGE11.ctl_xz,
+  admin_raw: adminBin.length - STAGE11.admin_raw,
+  admin_xz: files[1].size - STAGE11.admin_xz,
+  tar: tar.length - STAGE11.tar,
+  tmp_after_unpack: unpackedTotal - STAGE11.tmp,
+}
+report.growth_vs_stage10 = {
+  ctl_raw: bin.length - STAGE10.ctl_raw,
+  ctl_xz: files[0].size - STAGE10.ctl_xz,
+  admin_raw: adminBin.length - STAGE10.admin_raw,
+  admin_xz: files[1].size - STAGE10.admin_xz,
+  tar: tar.length - STAGE10.tar,
+  tmp_after_unpack: unpackedTotal - STAGE10.tmp,
+}
+report.growth_vs_stage9 = {
+  ctl_raw: bin.length - STAGE9.ctl_raw,
+  ctl_xz: files[0].size - STAGE9.ctl_xz,
+  admin_raw: adminBin.length - STAGE9.admin_raw,
+  admin_xz: files[1].size - STAGE9.admin_xz,
+  tar: tar.length - STAGE9.tar,
+  tmp_after_unpack: unpackedTotal - STAGE9.tmp,
+}
+report.growth_vs_stage8 = {
+  ctl_raw: bin.length - STAGE8.ctl_raw,
+  ctl_xz: files[0].size - STAGE8.ctl_xz,
+  admin_raw: adminBin.length - STAGE8.admin_raw,
+  admin_xz: files[1].size - STAGE8.admin_xz,
+  tar: tar.length - STAGE8.tar,
+  tmp_after_unpack: unpackedTotal - STAGE8.tmp,
+}
+report.growth_vs_stage7 = {
+  ctl_raw: bin.length - STAGE7.ctl_raw,
+  ctl_xz: files[0].size - STAGE7.ctl_xz,
+  admin_raw: adminBin.length - STAGE7.admin_raw,
+  admin_xz: files[1].size - STAGE7.admin_xz,
+  tar: tar.length - STAGE7.tar,
+  tmp_after_unpack: unpackedTotal - STAGE7.tmp,
+}
+report.growth_vs_stage6 = {
+  ctl_raw: bin.length - STAGE6.ctl_raw,
+  ctl_xz: files[0].size - STAGE6.ctl_xz,
+  admin_raw: adminBin.length - STAGE6.admin_raw,
+  admin_xz: files[1].size - STAGE6.admin_xz,
+  tar: tar.length - STAGE6.tar,
+  tmp_after_unpack: unpackedTotal - STAGE6.tmp,
+}
+report.growth_vs_stage5 = {
+  ctl_raw: bin.length - STAGE5.ctl_raw,
+  ctl_xz: files[0].size - STAGE5.ctl_xz,
+  admin_raw: adminBin.length - STAGE5.admin_raw,
+  admin_xz: files[1].size - STAGE5.admin_xz,
+  tar: tar.length - STAGE5.tar,
+  tmp_after_unpack: unpackedTotal - STAGE5.tmp,
+}
+// release-сборка не должна содержать отладочную подмену времени для тестов входа
+const testHook = Buffer.from('MI_TT_TEST_NOW')
+report.release_without_test_hooks = !bin.includes(testHook) && !adminBin.includes(testHook)
+report.growth_vs_stage4 = {
+  ctl_raw: bin.length - STAGE4.ctl_raw,
+  ctl_xz: files[0].size - STAGE4.ctl_xz,
+  admin_raw: adminBin.length - STAGE4.admin_raw,
+  admin_xz: files[1].size - STAGE4.admin_xz,
+  tar: tar.length - STAGE4.tar,
+  tmp_after_unpack: unpackedTotal - STAGE4.tmp,
 }
 report.growth_vs_stage3 = {
   ctl_raw: bin.length - STAGE3.ctl_raw,
@@ -169,4 +247,23 @@ const g2 = report.growth_vs_stage2
 console.log(`прирост к этапу 2: mi-tt-ctl ${sg(g2.controller_raw)} Б (xz ${sg(g2.controller_xz)}), новый mi-tt-admin +${n(g2.admin_raw)} Б (xz +${n(g2.admin_xz)}), панель ${sg(g2.panel_raw)} Б, tar ${sg(g2.tar)} Б, /tmp ${sg(g2.tmp_after_unpack)} Б`)
 const g3 = report.growth_vs_stage3
 console.log(`прирост к этапу 3: mi-tt-ctl ${sg(g3.ctl_raw)} Б (xz ${sg(g3.ctl_xz)}), mi-tt-admin ${sg(g3.admin_raw)} Б (xz ${sg(g3.admin_xz)}), tar ${sg(g3.tar)} Б, /tmp ${sg(g3.tmp_after_unpack)} Б`)
+const g4 = report.growth_vs_stage4
+console.log(`preflight.sh: ${n(report.preflight.raw)} Б (xz ${n(report.preflight.xz)})`)
+console.log(`прирост к этапу 4: mi-tt-ctl ${sg(g4.ctl_raw)} Б (xz ${sg(g4.ctl_xz)}), mi-tt-admin ${sg(g4.admin_raw)} Б (xz ${sg(g4.admin_xz)}), tar ${sg(g4.tar)} Б, /tmp ${sg(g4.tmp_after_unpack)} Б`)
+const g5 = report.growth_vs_stage5
+console.log(`прирост к этапу 5 (вход: Argon2id, TOTP, сессии): mi-tt-ctl ${sg(g5.ctl_raw)} Б (xz ${sg(g5.ctl_xz)}), mi-tt-admin ${sg(g5.admin_raw)} Б (xz ${sg(g5.admin_xz)}), tar ${sg(g5.tar)} Б, /tmp ${sg(g5.tmp_after_unpack)} Б`)
+const g6 = report.growth_vs_stage6
+console.log(`прирост к этапу 6 (Hysteria2): mi-tt-ctl ${sg(g6.ctl_raw)} Б (xz ${sg(g6.ctl_xz)}), mi-tt-admin ${sg(g6.admin_raw)} Б (xz ${sg(g6.admin_xz)}), tar ${sg(g6.tar)} Б, /tmp ${sg(g6.tmp_after_unpack)} Б`)
+const g7 = report.growth_vs_stage7
+console.log(`прирост к этапу 7 (VLESS, WireGuard/AmneziaWG): mi-tt-ctl ${sg(g7.ctl_raw)} Б (xz ${sg(g7.ctl_xz)}), mi-tt-admin ${sg(g7.admin_raw)} Б (xz ${sg(g7.admin_xz)}), tar ${sg(g7.tar)} Б, /tmp ${sg(g7.tmp_after_unpack)} Б`)
+const g8 = report.growth_vs_stage8
+console.log(`прирост к этапу 8 (Zapret): mi-tt-ctl ${sg(g8.ctl_raw)} Б (xz ${sg(g8.ctl_xz)}), mi-tt-admin ${sg(g8.admin_raw)} Б (xz ${sg(g8.admin_xz)}), tar ${sg(g8.tar)} Б, /tmp ${sg(g8.tmp_after_unpack)} Б`)
+const g9 = report.growth_vs_stage9
+console.log(`прирост к этапу 9 (DNS, ODoH, реклама): mi-tt-ctl ${sg(g9.ctl_raw)} Б (xz ${sg(g9.ctl_xz)}), mi-tt-admin ${sg(g9.admin_raw)} Б (xz ${sg(g9.admin_xz)}), tar ${sg(g9.tar)} Б, /tmp ${sg(g9.tmp_after_unpack)} Б`)
+const g10 = report.growth_vs_stage10
+console.log(`прирост к этапу 10 (категории, управление): mi-tt-ctl ${sg(g10.ctl_raw)} Б (xz ${sg(g10.ctl_xz)}), mi-tt-admin ${sg(g10.admin_raw)} Б (xz ${sg(g10.admin_xz)}), tar ${sg(g10.tar)} Б, /tmp ${sg(g10.tmp_after_unpack)} Б`)
+const g11 = report.growth_vs_stage11
+console.log(`прирост к этапу 11 (установка, release verify, HTTPS за nginx, устройства и сети): mi-tt-ctl ${sg(g11.ctl_raw)} Б (xz ${sg(g11.ctl_xz)}), mi-tt-admin ${sg(g11.admin_raw)} Б (xz ${sg(g11.admin_xz)}), tar ${sg(g11.tar)} Б, /tmp ${sg(g11.tmp_after_unpack)} Б`)
+console.log(`отладочная подмена времени (MI_TT_TEST_NOW) в release: ${report.release_without_test_hooks ? 'отсутствует' : 'НАЙДЕНА'}`)
+if (!report.release_without_test_hooks) process.exit(1)
 if (!report.budget.fits) process.exit(1)

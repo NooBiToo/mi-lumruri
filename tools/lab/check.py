@@ -2,11 +2,13 @@
 сервер TrustTunnel и Mihomo (журналы), mi-tt-admin (коды и JSON), снимки правил, маршрутов и tc роутера.
 Пишет summary.json и summary.md; код выхода 0 — всё совпало с ожиданиями."""
 import json
+import os
 import re
 import sys
 from pathlib import Path
 
 OUT = Path(sys.argv[1])
+MARKER = os.environ.get("MARKER", "tc")
 TV, TV_NEW, PHONE, LAPTOP, LAPTOP_NEW = "10.10.1.2", "10.10.1.50", "10.10.1.3", "10.10.2.2", "10.10.2.77"
 TV6, TV6_NEW, PHONE6, LAPTOP6 = "fd00:10::2", "fd00:10::99", "fd00:10::3", "fd00:11::2"
 ROUTER_WAN, VPN = "10.20.0.2", "10.30.0.2"
@@ -151,10 +153,19 @@ a8 = adm("A8-status-addr-changed")
 srcs = a8["out"].get("sources", [])
 check("status видит у защищённого MAC адреса вне плана (новые IPv4/IPv6)", any("вне плана" in s.get("note", "") for s in srcs), json.dumps(srcs, ensure_ascii=False)[:200])
 a9 = adm("A9-apply-new-lease")
-check("apply с новой арендой меняет только захват ТВ", a9["exit"] == 0 and 1 <= len(a9["out"].get("steps", [])) <= 3, f"exit={a9['exit']} шаги={[s['op'] + ' ' + s['entry'] for s in a9['out'].get('steps', [])]}")
-for step, what in [("K1-foreign-rule-in-zone", "чужое правило в зоне"), ("K2-foreign-mark-overlap", "чужое правило на битах наших меток"),
-                   ("K3-foreign-tc-in-zone", "чужой фильтр tc в нашем диапазоне pref"), ("K4-foreign-tc-before-ours", "чужой фильтр tc раньше нашего"),
-                   ("K5-firewall-mark-overlap", "MARK в firewall (iptables-save) на наших битах")]:
+a9_steps = a9["out"].get("steps", [])
+check("apply с новой арендой меняет только записи ТВ (старый адрес → новый)", a9["exit"] == 0 and 1 <= len(a9_steps) <= 4
+      and all("10.10.1.50" in x["entry"] or "10.10.1.2 " in x["entry"] + " " or "10.10.1.2/" in x["entry"] for x in a9_steps), f"exit={a9['exit']} шаги={[s['op'] + ' ' + s['entry'] for s in a9['out'].get('steps', [])]}")
+if MARKER == "tc":
+    kchecks = [("K1-foreign-rule-in-zone", "чужое правило в зоне"), ("K2-foreign-mark-overlap", "чужое правило на битах наших меток"),
+               ("K3-foreign-tc-in-zone", "чужой фильтр tc в нашем диапазоне pref"), ("K4-foreign-tc-before-ours", "чужой фильтр tc раньше нашего"),
+               ("K5-firewall-mark-overlap", "MARK в firewall (iptables-save) на наших битах")]
+else:
+    kchecks = [("K1-foreign-rule-in-zone", "чужое правило в зоне"), ("K3-foreign-rule-in-our-chain", "чужое правило внутри MITT_FWD"),
+               ("K4-untracked-mitt-chain", "неучтённая цепочка MITT_* (ip6tables)"), ("K5-untracked-jump", "неучтённый переход в MITT_FWD")]
+    k2 = adm("K2-foreign-mark-overlap")
+    check("netfilter-путь не использует метки: чужое fwmark 0x10000/0xff0000 не конфликт, apply без изменений", k2["exit"] == 0 and k2["out"].get("noop") is True, f"exit={k2['exit']}")
+for step, what in kchecks:
     a = adm(step)
     check(f"{what}: отказ без изменений (3)", a["exit"] == 3 and a.get("outside_unchanged"), f"exit={a['exit']} {str(a['out'].get('conflicts'))[:150]}")
 check("после устранения конфликтов apply — без изменений", adm("K6-clean-after-conflicts")["exit"] == 0 and adm("K6-clean-after-conflicts")["out"].get("noop"), "")
@@ -178,14 +189,65 @@ check("таблицы маршрутов после revert совпадают с
 check("чужие правила после revert и остановки Mihomo совпадают с исходными", snapf("foreign-rules.16-final") == snapf("foreign-rules.00-initial"), "")
 check("Mihomo (ipv6: false) не добавил правил вне зоны при запуске", snapf("foreign-rules.05-before-mihomo") == snapf("foreign-rules.05-mihomo-started"),
       "; ".join(sorted(set(snapf("foreign-rules.05-mihomo-started").splitlines()) - set(snapf("foreign-rules.05-before-mihomo").splitlines()))) or "ничего")
+au = json.loads(text("auth.json") or "{}")
+ast = json.loads(text("auth-status.json") or "{}")
+check("вход (ARM64): без подтверждения TOTP и без сессии API закрыт (503/401); одного пароля мало",
+      au.get("unconfirmed") == "503 auth_not_configured" and au.get("noauth") == "401 auth_required"
+      and au.get("pending_only") == "401 auth_required" and au.get("pending_as_sess") == "401 auth_required", str({k: au.get(k) for k in ("unconfirmed", "noauth", "pending_only", "pending_as_sess")}))
+check("вход (ARM64): пароль → TOTP даёт сессию; повтор кода отклонён; recovery-код одноразовый; POST без CSRF отклонён",
+      au.get("login") == "200" and au.get("second") == "200" and au.get("replay") == "401 code_reused" and au.get("recovery") == "200"
+      and au.get("recovery_again") == "401 invalid_code" and au.get("nocsrf") == "403 csrf_failed", str({k: au.get(k) for k in ("second", "replay", "recovery", "recovery_again", "nocsrf")}))
+check("вход (ARM64): cookie __Host- Secure/HttpOnly/SameSite=Strict; каталоги 700, auth.json 600; Argon2id по умолчанию",
+      all(f in au.get("cookie_attrs", "") for f in ("Path=/", "Secure", "HttpOnly", "SameSite=Strict"))
+      and (au.get("perm_auth_dir"), au.get("perm_auth_json"), au.get("perm_session_dir")) == ("700", "600", "700")
+      and ast.get("kdf") == "argon2id m=19456,t=2,p=1" and ast.get("permissions") == {"auth_dir": "700", "auth_json": "600"},
+      f"{au.get('cookie_attrs')}; {au.get('perm_auth_dir')}/{au.get('perm_auth_json')}/{au.get('perm_session_dir')}; {ast.get('kdf')}; init {au.get('init_ms')} мс, пароль {au.get('login_password_ms')} мс (qemu)")
+leak = json.loads(text("secret-leak.json") or "{}")
+check("пароль, секрет TOTP и recovery-коды не попали в артефакты и журналы лаборатории", leak.get("found") == [], str(leak))
 check("mi-tt-admin в CGI-окружении отказывается (77)", json.loads(text("admin-under-cgi.json") or "{}").get("exit") == 77, "")
 ndp = json.loads(text("ndp.json") or "{}")
 check("с нового IPv6 ТВ локальный обмен с роутером (NDP + ICMPv6) работает", ndp.get("ndp_ping_router_from_new_v6") == 0, str(ndp))
 plan = adm("A0-plan")["out"]
 desired = plan.get("desired", [])
-check("план: метка ТВ по MAC на br-lan, метка гостевой сети на порту r-gst, чужой хук br-lan используется без создания clsact",
-      any("flower src_mac 02:00:00:00:0a:02" in x and "br-lan" in x for x in desired) and any("dev r-gst" in x and "matchall" in x for x in desired)
-      and "br-lan" in plan.get("foreign_hooks", []) and not any(x == "tc qdisc dev br-lan clsact" for x in desired), "; ".join(x for x in desired if x.startswith("tc")))
+if MARKER == "tc":
+    check("план (tc): метка ТВ по MAC на br-lan, метка гостевой сети на порту r-gst, чужой clsact br-lan не создаётся заново",
+          any("flower src_mac 02:00:00:00:0a:02" in x and "br-lan" in x for x in desired) and any("dev r-gst" in x and "matchall" in x for x in desired)
+          and not any(x == "tc qdisc dev br-lan clsact" for x in desired), "; ".join(x for x in desired if x.startswith("tc")))
+else:
+    check("план (netfilter): привязка MAC↔IP ТВ в FORWARD (IPv4 и IPv6), гостевая сеть по iif br-guest, без tc и без меток",
+          plan.get("marker") == "netfilter"
+          and "iptables -w -t filter -A MITT_FWD ! -s 10.10.1.2/32 -i br-lan -m mac --mac-source 02:00:00:00:0a:02 -j REJECT --reject-with icmp-port-unreachable" in desired
+          and "ip6tables -w -t filter -A MITT_FWD -i br-lan -m mac --mac-source 02:00:00:00:0a:02 -j REJECT --reject-with icmp6-port-unreachable" in desired
+          and "ip rule priority 3110 from 10.10.2.0/24 iif br-guest lookup 3100" in desired
+          and not any(x.startswith("tc ") or "fwmark" in x for x in desired), "; ".join(x for x in desired if "iptables" in x)[:220])
+    n0, n1 = adm("N0-caps-lab")["out"], adm("N1-caps-stock")["out"]
+    c1 = n1.get("caps", {})
+    check("возможности ядра стока (конфигурация и модули из образа 1.1.38): tc недоступен, netfilter доступен, auto выбирает netfilter",
+          n1.get("chosen") == "netfilter" and c1.get("tc_ok") is False and c1.get("netfilter_ok") is True,
+          "tc: " + "; ".join(f"{i['what']}={i['detail']}" for i in c1.get("tc", []) if not i["ok"])[:200])
+    check("возможности лаборатории: MARK rev2 недоступен (xt_mark не загружается из userns) — фиксируется, а не предполагается",
+          n0.get("caps", {}).get("netfilter_mark_ok") is False, "; ".join(f"{i['what']}" for i in n0.get("caps", {}).get("netfilter_mark", []) if not i["ok"]))
+    n2, n3, n4, n5 = adm("N2-apply-stock-without-xt_mac"), adm("N3-apply-tc-on-stock"), adm("N4-plan-stock-auto"), adm("N5-partial-bridge-without-mark")
+    check("отсутствующий набор (ядро стока без xt_mac): apply отказывает (2, capabilities), сеть не изменена",
+          n2["exit"] == 2 and code("N2-apply-stock-without-xt_mac") == "capabilities" and n2.get("outside_unchanged") and snapf("zone.00b-nomac").strip() == "",
+          str(n2["out"].get("missing"))[:200])
+    check("tc на ядре стока: отказ (2), перечислены NET_CLS_ACT и др.", n3["exit"] == 2 and "NET_CLS_ACT" in json.dumps(n3["out"], ensure_ascii=False), str(n3["out"].get("missing"))[:160])
+    check("план на ядре стока (auto): netfilter, без конфликтов", n4["exit"] == 0 and n4["out"].get("marker") == "netfilter", f"exit={n4['exit']} marker={n4['out'].get('marker')}")
+    check("сеть на части моста (physdev+MARK) при недоступной ревизии 2 MARK: отказ (2, capabilities) без изменений",
+          n5["exit"] == 2 and code("N5-partial-bridge-without-mark") == "capabilities" and n5.get("outside_unchanged") and snapf("zone.00c-kids").strip() == "",
+          str(n5["out"].get("missing"))[:220])
+    pf_syntax = json.loads(text("preflight.syntax.json") or "{}")
+    pf1, pf2 = json.loads(text("preflight.stock-userland.exit.json") or "{}"), json.loads(text("preflight.lab-iptables.exit.json") or "{}")
+    t1, t2 = text("preflight.stock-userland.txt"), text("preflight.lab-iptables.txt")
+    mac_re = re.compile(r"\b[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}\b")
+    ip_re = re.compile(r"\b10\.10\.\d+\.\d+\b|fd00:1[01]::[0-9a-f]+\b")
+    check("preflight: ARM64 BusyBox 1.25.1 прошивки разбирает (sh -n) и выполняет скрипт; код 0; итоговые строки есть",
+          pf_syntax.get("exit") == 0 and pf1.get("exit") == 0 and pf2.get("exit") == 0 and "verdict.marker_netfilter=" in t1 and "verdict.marker_tc=" in t2,
+          f"строк: {len(t1.splitlines())}/{len(t2.splitlines())}; {[l for l in t2.splitlines() if l.startswith('verdict.')][:3]}")
+    check("preflight ничего не меняет (правила, маршруты, tc, iptables до и после равны)", json.loads(text("preflight.mutation.json") or "{}").get("unchanged") is True, "")
+    check("preflight не выводит MAC и адреса клиентов", not mac_re.search(t1 + t2) and not ip_re.search(t1 + t2), "")
+    check("preflight видит наши цепочки и маски меток в firewall (iptables лаборатории)", "fw.iptables.mitt_chains=1" in t2, [l for l in t2.splitlines() if l.startswith("fw.")][:4].__str__()[:200])
+    check("чужие правила iptables/ip6tables сохранены после revert", snapf("foreign-nf.16-final") == snapf("foreign-nf.00-initial") and "-i br-guest -o br-lan -j ACCEPT" in snapf("foreign-nf.00-initial"), "")
 tt = [l for l in text("trusttunnel.log").splitlines() if "CONNECT" in l and ("10.99.0.10" in l or "10.98.0.10" in l)]
 mh = text("mihomo.log").splitlines()
 check("сервер TrustTunnel получил CONNECT к цели", bool(tt), f"{len(tt)} строк")

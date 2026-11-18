@@ -118,3 +118,35 @@ input[type='radio'], input[type='checkbox'] { width: auto; }
   .app__grid { grid-template-columns: 1fr; }
   .app__head { flex-direction: column; }
 }
+
+.app__actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.app__logout { font-size: 0.85rem; }
+.login { max-width: 26rem; margin: 2rem auto; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.25rem 1.5rem; }
+.login h2 { margin: 0 0 1rem; font-size: 1.2rem; }
+.login__form { display: flex; flex-direction: column; gap: 0.5rem; }
+.login__form button[type='submit'] { margin-top: 0.4rem; background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.login__alt { background: none; border: none; color: var(--accent); padding: 0.2rem 0; text-align: left; cursor: pointer; }
+.login__error { margin: 0.8rem 0 0; padding: 0.5rem 0.7rem; background: var(--bad-bg); border: 1px solid var(--bad-line); border-radius: var(--radius); }
+.login__note { margin: 0.3rem 0 0; padding: 0.4rem 0.6rem; background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: var(--radius); font-size: 0.9rem; }
+.login__hint { margin: 1rem 0 0; color: var(--muted); font-size: 0.85rem; }
+
+.tabs { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.75rem 0; }
+.tabs__btn { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 999px; padding: 0.3rem 0.8rem; cursor: pointer; }
+.tabs__btn--on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.mg { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem 1.2rem; }
+.mg h2 { margin: 0 0 0.6rem; font-size: 1.1rem; }
+.mg__hint { color: var(--muted); font-size: 0.9rem; }
+.mg__warn { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: var(--radius); padding: 0.4rem 0.6rem; font-size: 0.9rem; }
+.mg__msg { padding: 0.5rem 0.7rem; border-radius: var(--radius); border: 1px solid var(--info-line); background: var(--info-bg); }
+.mg__msg--bad { border-color: var(--bad-line); background: var(--bad-bg); }
+.mg__table { width: 100%; border-collapse: collapse; margin: 0.5rem 0 0.8rem; font-size: 0.92rem; }
+.mg__table th, .mg__table td { border-bottom: 1px solid var(--line); padding: 0.35rem 0.4rem; text-align: left; vertical-align: top; }
+.mg__actions { white-space: nowrap; }
+.mg__actions button { margin-right: 0.25rem; }
+.mg__form { display: flex; flex-direction: column; gap: 0.45rem; margin: 0.8rem 0; max-width: 40rem; }
+.mg__form label { display: flex; flex-direction: column; gap: 0.2rem; }
+.mg__check { flex-direction: row !important; align-items: center; gap: 0.4rem !important; }
+.mg__row { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: flex-end; }
+.mg__secret { border: 1px dashed var(--line); border-radius: var(--radius); padding: 0.5rem 0.7rem; display: flex; flex-direction: column; gap: 0.4rem; }
+.mg__pre { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 0.5rem; overflow: auto; max-height: 20rem; }
+@media (max-width: 640px) { .mg__table { font-size: 0.82rem; } .mg__actions { white-space: normal; } }

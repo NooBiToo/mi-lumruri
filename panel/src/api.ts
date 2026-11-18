@@ -2,9 +2,14 @@
 
 export type ProfileKind = 'trusttunnel' | 'vless' | 'hysteria2' | 'wireguard'
 
-export interface Endpoint { server: string; port: number; sni?: string; username: string; cert_sha256?: string; quic?: boolean }
+export interface AwgParams { jc: number; jmin: number; jmax: number; s1: number; s2: number; h1: number; h2: number; h3: number; h4: number }
+export interface Endpoint {
+  server: string; port: number; sni?: string; username?: string; cert_sha256?: string; quic?: boolean; obfs?: 'salamander'
+  security?: 'tls' | 'reality'; flow?: 'xtls-rprx-vision'; reality?: { public_key: string; short_id: string }; client_fingerprint?: string
+  public_key?: string; address?: string; mtu?: number; awg?: AwgParams
+}
 export interface Profile { id: string; name: string; kind: ProfileKind; on_failure: 'block' | 'direct'; endpoint?: Endpoint }
-export interface Network { id: string; name: string; ssid: string; segment?: string; subnet?: string }
+export interface Network { id: string; name: string; ssid: string; segment?: string; subnet?: string; bridge?: string; ports?: string[] }
 export interface Device { id: string; name: string; mac: string; network: string }
 
 export type Destination =
@@ -12,6 +17,19 @@ export type Destination =
   | { type: 'domain_suffix'; value: string }
   | { type: 'cidr'; value: string }
   | { type: 'group'; id: string }
+  | { type: 'category'; id: string }
+
+export interface Category { id: string; name: string; kind: 'domain' | 'ip'; source?: string }
+export interface DnsServer { host: string; ip: string; port?: number; path?: string }
+export interface OdohEndpoint { host: string; ip: string; port?: number; path: string }
+export interface DnsConfig {
+  transport: 'doh' | 'dot' | 'doq' | 'doh3' | 'odoh'
+  servers?: DnsServer[]
+  odoh?: { target: OdohEndpoint; relays: OdohEndpoint[] }
+  adblock?: { enabled: boolean; exceptions?: string[] }
+}
+export interface ZapretConfig { strategy: 'multisplit' | 'multidisorder'; pos?: number; tcp_ports?: number[] }
+export interface ProfileSecret { password?: string; obfs_password?: string; uuid?: string; private_key?: string; preshared_key?: string }
 
 export interface Group { id: string; name: string; destinations: Destination[] }
 
@@ -28,6 +46,9 @@ export interface Config {
   groups: Group[]
   rules: Rule[]
   default_action: Action
+  categories?: Category[]
+  dns?: DnsConfig
+  zapret?: ZapretConfig
 }
 
 export interface Issue { path: string; code: string; message: string }
@@ -75,27 +96,111 @@ export interface PreviewResponse { ok: boolean; preview?: Preview; issues: Issue
 /** Ответ API с HTTP-статусом. Сетевые сбои и не-JSON превращаются в status 0 с понятной ошибкой. */
 export interface ApiResult<T> { status: number; body: T }
 
+export interface SessionResponse {
+  ok: boolean
+  authenticated?: boolean
+  stage?: 'password' | 'second_factor'
+  csrf?: string
+  expires?: number
+  idle_timeout?: number
+  recovery_codes_left?: number
+  clock_trusted?: boolean
+  methods?: string[]
+  retry_after?: number
+  issues: Issue[]
+  error?: ApiError
+}
+export type SecondFactor = { totp: string } | { recovery_code: string }
+
 const BASE: string = import.meta.env.VITE_API_BASE ?? 'cgi-bin/api'
+
+/** CSRF-токен текущей сессии: контроллер выдаёт его после входа, панель отправляет в X-MITT-CSRF с каждым POST. */
+let csrf: string | null = null
+/** Вызывается, когда контроллер ответил 401 на защищённый адрес (сессия истекла, отозвана или её нет). */
+let onUnauthorized: (() => void) | null = null
+
+export function setCsrf(token: string | null): void {
+  csrf = token
+}
+export function onAuthLost(fn: (() => void) | null): void {
+  onUnauthorized = fn
+}
 
 async function call<T extends { ok: boolean; issues: Issue[]; error?: ApiError }>(path: string, init?: RequestInit): Promise<ApiResult<T>> {
   let res: Response
+  const headers = new Headers(init?.headers)
+  if (init?.method === 'POST' && csrf) headers.set('X-MITT-CSRF', csrf)
   try {
-    res = await fetch(`${BASE}${path}`, { ...init, cache: 'no-store' })
+    // cookie сессии HttpOnly: браузер отправляет его сам только на тот же origin
+    res = await fetch(`${BASE}${path}`, { ...init, headers, cache: 'no-store', credentials: 'same-origin' })
   } catch (e) {
     return { status: 0, body: { ok: false, issues: [], error: { code: 'network', message: `контроллер недоступен: ${String(e)}` } } as unknown as T }
   }
+  let body: T
   try {
-    return { status: res.status, body: (await res.json()) as T }
+    body = (await res.json()) as T
   } catch {
     return { status: res.status, body: { ok: false, issues: [], error: { code: 'bad_response', message: `ответ ${res.status} не является JSON` } } as unknown as T }
   }
+  if (res.status === 401 && !path.startsWith('/auth/')) {
+    csrf = null
+    onUnauthorized?.()
+  }
+  return { status: res.status, body }
+}
+
+const json = (body: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+
+/** Клиент из аренд DHCP роутера; hostname — данные клиента LAN, показываются только как текст. */
+export interface Lease { mac: string; ip: string; hostname: string; device: string | null }
+
+export interface ManageResponse {
+  ok: boolean
+  mode?: string
+  revision?: string
+  config?: Config
+  current_revision?: string
+  profiles?: Record<string, boolean>
+  domains?: number
+  entries?: number
+  queued?: boolean
+  service?: unknown
+  apply_pending?: boolean
+  leases?: Lease[]
+  issues: Issue[]
+  error?: ApiError
+}
+
+export const manage = {
+  deleteRule: (base_revision: string, id: string) => call<ManageResponse>('/rules/delete', json({ base_revision, id })),
+  moveRule: (base_revision: string, id: string, position: number) => call<ManageResponse>('/rules/move', json({ base_revision, id, position })),
+  saveProfile: (base_revision: string, profile: Profile) => call<ManageResponse>('/profiles', json({ base_revision, profile })),
+  deleteProfile: (base_revision: string, id: string) => call<ManageResponse>('/profiles/delete', json({ base_revision, id })),
+  saveCategory: (base_revision: string, category: Category) => call<ManageResponse>('/categories', json({ base_revision, category })),
+  deleteCategory: (base_revision: string, id: string) => call<ManageResponse>('/categories/delete', json({ base_revision, id })),
+  categoryList: (id: string, list: string) => call<ManageResponse>('/categories/list', json({ id, list })),
+  saveNetwork: (base_revision: string, network: Network) => call<ManageResponse>('/networks', json({ base_revision, network })),
+  deleteNetwork: (base_revision: string, id: string) => call<ManageResponse>('/networks/delete', json({ base_revision, id })),
+  saveDevice: (base_revision: string, device: Device) => call<ManageResponse>('/devices', json({ base_revision, device })),
+  deleteDevice: (base_revision: string, id: string) => call<ManageResponse>('/devices/delete', json({ base_revision, id })),
+  leases: () => call<ManageResponse>('/leases'),
+  saveDns: (base_revision: string, dns: DnsConfig | null) => call<ManageResponse>('/dns', json({ base_revision, dns })),
+  adblockList: (list: string) => call<ManageResponse>('/adblock/list', json({ list })),
+  saveZapret: (base_revision: string, zapret: ZapretConfig | null) => call<ManageResponse>('/zapret', json({ base_revision, zapret })),
+  secrets: () => call<ManageResponse>('/secrets'),
+  // секрет только записывается: панель не получает его обратно
+  setSecret: (profile_id: string, secret: ProfileSecret) => call<ManageResponse>('/secrets', json({ profile_id, secret })),
+  applyRequest: () => call<ManageResponse>('/apply-request', json({})),
+  status: () => call<ManageResponse>('/status'),
 }
 
 export const api = {
   config: () => call<ConfigResponse>('/config'),
-  preview: (req: PreviewRequest) =>
-    call<PreviewResponse>('/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(req) }),
-  // Браузер сам добавляет Origin и Sec-Fetch-Site; контроллер принимает запись только с origin панели.
-  saveRule: (base_revision: string, rule: Rule) =>
-    call<SaveResponse>('/rules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ base_revision, rule }) }),
+  preview: (req: PreviewRequest) => call<PreviewResponse>('/preview', json(req)),
+  // Браузер сам добавляет Origin и Sec-Fetch-Site; контроллер принимает запись только с origin панели, с сессией и CSRF.
+  saveRule: (base_revision: string, rule: Rule) => call<SaveResponse>('/rules', json({ base_revision, rule })),
+  session: () => call<SessionResponse>('/auth/session'),
+  login: (password: string) => call<SessionResponse>('/auth/login', json({ password })),
+  second: (factor: SecondFactor) => call<SessionResponse>('/auth/second', json(factor)),
+  logout: () => call<SessionResponse>('/auth/logout', json({})),
 }

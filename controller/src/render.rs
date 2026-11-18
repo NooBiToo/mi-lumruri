@@ -13,13 +13,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::model::*;
-use crate::plan::{CaptureSpec, DevCap, Entry, LanCap, MAX_MARKS, NetCap, build_plan, device_mark, network_mark};
+use crate::plan::{CaptureSpec, DevCap, Entry, LanCap, MAX_MARKS, NF_MARK, NetCap, ZAPRET_DESYNC_MARK, ZAPRET_QNUM, ZapretSpec, build_plan, device_mark, network_mark};
 use crate::preview::{Dest, evaluation_order, expand};
 use crate::validate::{Index, Issue, normalize_mac, normalize_sha256, parse_cidr, validate_config};
 
 pub const TUN_DEVICE: &str = "mitt0";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Secrets {
     pub version: u32,
@@ -27,10 +27,73 @@ pub struct Secrets {
     pub profiles: BTreeMap<String, ProfileSecret>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProfileSecret {
-    pub password: String,
+    /// Пароль TrustTunnel и Hysteria2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    /// Пароль обфускации salamander (только Hysteria2 с `obfs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub obfs_password: Option<String>,
+    /// UUID клиента VLESS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uuid: Option<String>,
+    /// Закрытый ключ клиента WireGuard/AmneziaWG (base64).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub private_key: Option<String>,
+    /// Общий ключ WireGuard (необязательно).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preshared_key: Option<String>,
+}
+
+fn is_uuid(u: &str) -> bool {
+    let b = u.as_bytes();
+    b.len() == 36 && b.iter().enumerate().all(|(i, c)| if [8, 13, 18, 23].contains(&i) { *c == b'-' } else { c.is_ascii_hexdigit() })
+}
+
+/// Набор секретов соответствует виду профиля: нужные заданы и корректны, лишних нет.
+pub fn check_secret(kind: ProfileKind, s: &ProfileSecret) -> Result<(), &'static str> {
+    let filled = |x: &Option<String>| x.as_deref().is_some_and(|v| !v.is_empty());
+    let clean = |x: &Option<String>| x.as_deref().is_none_or(|v| !v.chars().any(char::is_control));
+    if ![&s.password, &s.obfs_password, &s.uuid, &s.private_key, &s.preshared_key].iter().all(|x| clean(x)) {
+        return Err("секрет содержит управляющие символы");
+    }
+    match kind {
+        ProfileKind::Trusttunnel | ProfileKind::Hysteria2 => {
+            if !filled(&s.password) {
+                return Err("нужен непустой password");
+            }
+            if s.uuid.is_some() || s.private_key.is_some() || s.preshared_key.is_some() {
+                return Err("uuid и ключи WireGuard к этому профилю не относятся");
+            }
+        }
+        ProfileKind::Vless => {
+            if !s.uuid.as_deref().is_some_and(is_uuid) {
+                return Err("нужен uuid клиента VLESS (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)");
+            }
+            if s.password.is_some() || s.private_key.is_some() || s.preshared_key.is_some() {
+                return Err("password и ключи WireGuard к VLESS не относятся");
+            }
+        }
+        ProfileKind::Wireguard => {
+            if !s.private_key.as_deref().is_some_and(crate::validate::is_wg_key) {
+                return Err("нужен private_key клиента WireGuard (32 байта base64)");
+            }
+            if s.preshared_key.as_deref().is_some_and(|k| !crate::validate::is_wg_key(k)) {
+                return Err("preshared_key — 32 байта base64");
+            }
+            if s.password.is_some() || s.uuid.is_some() {
+                return Err("password и uuid к WireGuard не относятся");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Профили, которые этот срез формирует для Mihomo.
+pub fn renderable(kind: ProfileKind) -> bool {
+    matches!(kind, ProfileKind::Trusttunnel | ProfileKind::Hysteria2 | ProfileKind::Vless | ProfileKind::Wireguard)
 }
 
 #[derive(Debug, Serialize)]
@@ -51,6 +114,73 @@ pub struct Rendered {
     pub routes: Routes,
     pub rules: Vec<String>,
     pub warnings: Vec<String>,
+    /// Аргументы nfqws2 (по одному на строку в nfqws2.args), если используется Zapret.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub nfqws2_args: Vec<String>,
+    /// Категории, на которые ссылаются правила: их списки копируются в rules/<id>.txt.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub categories: Vec<String>,
+}
+
+/// Имя rule-provider Mihomo для категории (файл rules/<id>.txt рядом с config.yaml).
+pub fn category_provider(id: &str) -> String {
+    format!("cat-{id}")
+}
+
+/// Список категории: по записи в строке, `#` — комментарий. Домены — суффиксы (`+.домен` в формате Mihomo),
+/// IP — префиксы IPv4/IPv6. Ошибочная строка — отказ всего списка.
+pub fn parse_category_list(kind: CategoryKind, text: &str) -> Result<Vec<String>, Vec<Issue>> {
+    use crate::validate::normalize_domain;
+    let mut out = BTreeSet::new();
+    let mut issues = Vec::new();
+    for (n, raw) in text.lines().enumerate() {
+        let line = raw.split('#').next().unwrap_or_default().trim();
+        if line.is_empty() {
+            continue;
+        }
+        let r = match kind {
+            CategoryKind::Domain => normalize_domain(line.trim_start_matches("+.").trim_start_matches("*."), 1).map(|d| format!("+.{d}")),
+            CategoryKind::Ip => parse_cidr(line).map(|c| c.to_string()),
+        };
+        match r {
+            Ok(v) => {
+                out.insert(v);
+            }
+            Err(m) => issues.push(Issue::new(format!("list[{}]", n + 1), "bad_entry", m)),
+        }
+        if issues.len() > 20 {
+            break;
+        }
+    }
+    if out.len() > 100_000 {
+        issues.push(Issue::new("list", "too_many", "больше 100 000 записей"));
+    }
+    if issues.is_empty() && out.is_empty() {
+        issues.push(Issue::new("list", "empty", "пустой список"));
+    }
+    if issues.is_empty() { Ok(out.into_iter().collect()) } else { Err(issues) }
+}
+
+/// Имя выхода Mihomo для действия «напрямую с Zapret».
+pub const ZAPRET_PROXY: &str = "mitt-zapret";
+
+/// Аргументы nfqws2 для проверенной стратегии. Lua-библиотеки zapret2 лежат рядом с nfqws2 (`--chdir` без пути = каталог программы).
+pub fn nfqws2_args_for(z: &ZapretConfig) -> Vec<String> {
+    let ports = z.tcp_ports.iter().map(u16::to_string).collect::<Vec<_>>().join(",");
+    let f = match z.strategy {
+        ZapretStrategy::Multisplit => "multisplit",
+        ZapretStrategy::Multidisorder => "multidisorder",
+    };
+    vec![
+        format!("--qnum={ZAPRET_QNUM}"),
+        format!("--fwmark=0x{ZAPRET_DESYNC_MARK:x}"),
+        "--chdir".into(),
+        "--lua-init=@zapret-lib.lua.gz".into(),
+        "--lua-init=@zapret-antidpi.lua.gz".into(),
+        format!("--filter-tcp={ports}"),
+        "--payload=tls_client_hello,http_req".into(),
+        format!("--lua-desync={f}:pos={}", z.pos),
+    ]
 }
 
 /// dnsmasq: `<expiry> <mac> <ip> <hostname> <client-id>`; берём IPv4 с наибольшим сроком.
@@ -78,6 +208,7 @@ fn matcher(d: &Dest) -> String {
         Dest::Suffix(x) => format!("DOMAIN-SUFFIX,{x}"),
         Dest::Net(c) if c.addr.is_ipv4() => format!("IP-CIDR,{c}"),
         Dest::Net(c) => format!("IP-CIDR6,{c}"),
+        Dest::Category(id) => format!("RULE-SET,{}", category_provider(id)),
     }
 }
 
@@ -93,18 +224,19 @@ pub fn render(cfg: &Config, secrets: &Secrets, leases: &HashMap<String, IpAddr>)
         issues.push(Issue::new("secrets.version", "unsupported_version", "поддерживается версия secrets.json 1"));
     }
     let mut used_profiles: BTreeSet<&str> = BTreeSet::new();
+    let mut uses_zapret = false;
 
-    let mut target = |a: &Action, path: &str, issues: &mut Vec<Issue>, warnings: &mut Vec<String>| -> Option<String> {
+    let mut target = |a: &Action, path: &str, issues: &mut Vec<Issue>, _warnings: &mut Vec<String>| -> Option<String> {
         match a {
             Action::Direct => Some("DIRECT".into()),
             Action::DirectZapret => {
-                warnings.push(format!("{path}: Zapret в этом этапе не подключён, трафик идёт напрямую без обработки"));
-                Some("DIRECT".into())
+                uses_zapret = true;
+                Some(ZAPRET_PROXY.into())
             }
             Action::Block => Some("REJECT".into()),
             Action::Profile { id } => {
                 let p = idx.profiles[id.as_str()];
-                if p.kind != ProfileKind::Trusttunnel {
+                if !renderable(p.kind) {
                     issues.push(Issue::new(path, "profile_not_supported", format!("профиль «{id}» ({}) этим этапом не формируется", p.kind.label())));
                     return None;
                 }
@@ -116,8 +248,17 @@ pub fn render(cfg: &Config, secrets: &Secrets, leases: &HashMap<String, IpAddr>)
                     issues.push(Issue::new(path, "no_endpoint", format!("у профиля «{id}» нет точки подключения")));
                     return None;
                 }
-                if !secrets.profiles.contains_key(id) {
+                let Some(sec) = secrets.profiles.get(id) else {
                     issues.push(Issue::new(path, "no_secret", format!("нет пароля профиля «{id}» в secrets.json")));
+                    return None;
+                };
+                let obfs = p.endpoint.as_ref().and_then(|e| e.obfs);
+                if obfs.is_some() != sec.obfs_password.as_deref().is_some_and(|x| !x.is_empty()) {
+                    issues.push(Issue::new(path, "obfs_secret_mismatch", format!("профиль «{id}»: obfs и obfs_password в secrets.json задаются вместе")));
+                    return None;
+                }
+                if let Err(m) = check_secret(p.kind, sec) {
+                    issues.push(Issue::new(path, "bad_secret", format!("секреты профиля «{id}»: {m}")));
                     return None;
                 }
                 used_profiles.insert(idx.profiles[id.as_str()].id.as_str());
@@ -231,18 +372,81 @@ pub fn render(cfg: &Config, secrets: &Secrets, leases: &HashMap<String, IpAddr>)
         lanwide,
         lan_subnets,
         tun: TUN_DEVICE.into(),
+        zapret: None,
     };
+    let zcfg = cfg.zapret.clone().unwrap_or_default();
+    let mut capture = capture;
+    let mut nfqws2_args = Vec::new();
+    if uses_zapret {
+        capture.zapret = Some(ZapretSpec { qnum: ZAPRET_QNUM, mark: NF_MARK, tcp_ports: zcfg.tcp_ports.clone() });
+        nfqws2_args = nfqws2_args_for(&zcfg);
+        warnings.push(format!("Zapret: прямые соединения Mihomo через «{ZAPRET_PROXY}» помечаются 0x{NF_MARK:x} и обрабатываются nfqws2 (очередь {ZAPRET_QNUM}); без nfqws2 они идут напрямую без обработки"));
+    }
 
-    let proxies: Vec<Value> = used_profiles
+    let mut proxies: Vec<Value> = used_profiles
         .iter()
         .map(|id| {
             let p = idx.profiles[id];
             let e = p.endpoint.as_ref().expect("checked");
-            let mut v = json!({
-                "name": p.id, "type": "trusttunnel", "server": e.server, "port": e.port,
-                "username": e.username, "password": secrets.profiles[p.id.as_str()].password,
-                "udp": true, "quic": e.quic,
-            });
+            let sec = &secrets.profiles[p.id.as_str()];
+            let mut v = match p.kind {
+                ProfileKind::Hysteria2 => {
+                    // проверка TLS никогда не отключается: skip-cert-verify явно false; ALPN h3 — как у сервера Hysteria2
+                    let mut v = json!({
+                        "name": p.id, "type": "hysteria2", "server": e.server, "port": e.port,
+                        "password": sec.password.as_deref().unwrap_or_default(), "udp": true, "skip-cert-verify": false, "alpn": ["h3"],
+                    });
+                    if let (Some(Obfs::Salamander), Some(op)) = (e.obfs, &sec.obfs_password) {
+                        v["obfs"] = json!("salamander");
+                        v["obfs-password"] = json!(op);
+                    }
+                    v
+                }
+                ProfileKind::Vless => {
+                    // TLS: проверка цепочки по servername или закреплённому SHA-256; REALITY: открытый ключ сервера.
+                    // skip-cert-verify явно false; uTLS-отпечаток по умолчанию chrome
+                    let mut v = json!({
+                        "name": p.id, "type": "vless", "server": e.server, "port": e.port, "uuid": sec.uuid.as_deref().unwrap_or_default(),
+                        "network": "tcp", "tls": true, "udp": true, "skip-cert-verify": false,
+                        "client-fingerprint": e.client_fingerprint.as_deref().unwrap_or("chrome"),
+                    });
+                    if let Some(sni) = &e.sni {
+                        v["servername"] = json!(sni);
+                    }
+                    if e.flow == Some(VlessFlow::Vision) {
+                        v["flow"] = json!("xtls-rprx-vision");
+                    }
+                    if let (Some(VlessSecurity::Reality), Some(r)) = (e.security, &e.reality) {
+                        v["reality-opts"] = json!({ "public-key": r.public_key, "short-id": r.short_id });
+                    }
+                    if let Some(fp) = &e.cert_sha256 {
+                        v["fingerprint"] = json!(normalize_sha256(fp).unwrap_or_default());
+                    }
+                    return v;
+                }
+                ProfileKind::Wireguard => {
+                    let ip = e.address.as_deref().unwrap_or_default().split('/').next().unwrap_or_default();
+                    let mut v = json!({
+                        "name": p.id, "type": "wireguard", "server": e.server, "port": e.port, "ip": ip,
+                        "private-key": sec.private_key.as_deref().unwrap_or_default(),
+                        "public-key": e.public_key.as_deref().unwrap_or_default(),
+                        "allowed-ips": ["0.0.0.0/0"], "udp": true, "mtu": e.mtu.unwrap_or(1408),
+                    });
+                    if let Some(k) = &sec.preshared_key {
+                        v["pre-shared-key"] = json!(k);
+                    }
+                    if let Some(a) = e.awg {
+                        v["amnezia-wg-option"] = json!({ "jc": a.jc, "jmin": a.jmin, "jmax": a.jmax, "s1": a.s1, "s2": a.s2,
+                            "h1": a.h1.to_string(), "h2": a.h2.to_string(), "h3": a.h3.to_string(), "h4": a.h4.to_string() });
+                    }
+                    return v;
+                }
+                ProfileKind::Trusttunnel => json!({
+                    "name": p.id, "type": "trusttunnel", "server": e.server, "port": e.port,
+                    "username": e.username, "password": sec.password.as_deref().unwrap_or_default(),
+                    "udp": true, "quic": e.quic,
+                }),
+            };
             if let Some(sni) = &e.sni {
                 v["sni"] = json!(sni);
             }
@@ -253,6 +457,10 @@ pub fn render(cfg: &Config, secrets: &Secrets, leases: &HashMap<String, IpAddr>)
         })
         .collect();
 
+    if uses_zapret {
+        // DIRECT с меткой сокета: по ней mi-tt-admin отправляет пакеты в NFQUEUE (mangle OUTPUT)
+        proxies.push(json!({ "name": ZAPRET_PROXY, "type": "direct", "udp": true, "routing-mark": NF_MARK }));
+    }
     let has_domains = ordered.iter().any(|r| expand(&r.destination, &idx).iter().any(|d| !matches!(d, Dest::Net(_))));
     // ipv6: false — IPv6 не туннелируется (защищённые источники блокируются по метке), а TUN без IPv6-адреса
     // не заставляет sing-tun добавлять своё правило «oif mitt0 lookup 2022» вне нашей зоны.
@@ -268,6 +476,29 @@ pub fn render(cfg: &Config, secrets: &Secrets, leases: &HashMap<String, IpAddr>)
         "proxies": proxies,
         "rules": rules_out,
     });
+    let used_categories: BTreeSet<String> = ordered.iter().flat_map(|r| expand(&r.destination, &idx)).filter_map(|d| match d {
+        Dest::Category(id) => Some(id),
+        _ => None,
+    }).collect();
+    if !used_categories.is_empty() {
+        let mut rp = serde_json::Map::new();
+        for id in &used_categories {
+            let behavior = match idx.categories[id.as_str()].kind {
+                CategoryKind::Domain => "domain",
+                CategoryKind::Ip => "ipcidr",
+            };
+            rp.insert(category_provider(id), json!({ "type": "file", "behavior": behavior, "format": "text", "path": format!("./rules/{id}.txt") }));
+        }
+        mihomo["rule-providers"] = Value::Object(rp);
+    }
+    if let Some(d) = &cfg.dns {
+        let mut dd = crate::dns::mihomo_dns(d);
+        // hosts в Mihomo — ключ верхнего уровня; dns.use-hosts включает его для DNS-слушателя
+        if let Some(h) = dd.as_object_mut().and_then(|o| o.remove("hosts")).filter(|h| h.as_object().is_some_and(|m| !m.is_empty())) {
+            mihomo["hosts"] = h;
+        }
+        mihomo["dns"] = dd;
+    }
     if has_domains {
         mihomo["sniffer"] = json!({ "enable": true, "override-destination": false,
             "sniff": { "HTTP": { "ports": [80, 8080] }, "TLS": { "ports": [443, 8443] } } });
@@ -295,6 +526,8 @@ pub fn render(cfg: &Config, secrets: &Secrets, leases: &HashMap<String, IpAddr>)
         plan,
         routes,
         warnings,
+        nfqws2_args,
+        categories: used_categories.into_iter().collect(),
     })
 }
 

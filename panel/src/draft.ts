@@ -1,7 +1,7 @@
 // Состояние формы правила и его преобразование в запрос предпросмотра. Проверку выполняет контроллер;
 // здесь только сборка JSON и привязка ошибок контроллера к полям формы.
 
-import type { ApiResult, Config, Destination, PreviewRequest, Probe, Rule, SaveResponse } from './api'
+import type { ApiResult, Config, Destination, PreviewRequest, Probe, Profile, Rule, SaveResponse } from './api'
 
 export type SourceType = 'device' | 'network' | 'lan'
 export type DestType = Destination['type']
@@ -26,7 +26,10 @@ export type Field = 'id' | 'source' | 'destination' | 'action' | `probe-${number
 
 export function toRequest(f: DraftForm): PreviewRequest {
   const source: Rule['source'] = f.sourceType === 'lan' ? { type: 'lan' } : { type: f.sourceType, id: f.sourceId }
-  const destination: Destination = f.destType === 'group' ? { type: 'group', id: f.destGroup } : { type: f.destType, value: f.destValue.trim() }
+  const destination: Destination =
+    f.destType === 'group' ? { type: 'group', id: f.destGroup }
+    : f.destType === 'category' ? { type: 'category', id: f.destGroup }
+    : { type: f.destType, value: f.destValue.trim() }
   const action: Rule['action'] = f.actionType === 'profile' ? { type: 'profile', id: f.actionProfile } : { type: f.actionType }
   const probes: Probe[] = f.probes
     .filter((p) => p.host.trim() !== '')
@@ -63,13 +66,14 @@ export function sampleHost(d: Destination | undefined): string {
       return ''
     }
     case 'group':
+    case 'category':
       return ''
   }
 }
 
 /** Черновик по умолчанию — сценарий TrustTunnel для первого устройства и первой группы. */
 export function defaultForm(cfg: Config): DraftForm {
-  const tt = cfg.profiles.find((p) => p.kind === 'trusttunnel') ?? cfg.profiles[0]
+  const tt = cfg.profiles.find((p) => p.kind === 'trusttunnel') ?? cfg.profiles.find(profileReady) ?? cfg.profiles[0]
   const dev = cfg.devices[0]
   const group = cfg.groups[0]
   const host = sampleHost(group?.destinations[0])
@@ -110,4 +114,12 @@ export function saveOutcome(r: ApiResult<SaveResponse>): SaveOutcome {
   if (r.status === 422) return { kind: 'invalid', message: b.error?.message ?? 'правило не прошло проверку' }
   if (r.status === 403) return { kind: 'forbidden', message: b.error?.message ?? 'запись запрещена' }
   return { kind: 'error', message: b.error?.message ?? `ошибка ${r.status}` }
+}
+
+/** Виды профилей, которые контроллер формирует для Mihomo (render.rs: renderable). */
+export const RENDERABLE_KINDS: readonly Profile['kind'][] = ['trusttunnel', 'hysteria2', 'vless', 'wireguard']
+
+/** Профиль можно применить: вид поддерживается и задана точка подключения. Иначе правило сохранится, но не применится. */
+export function profileReady(p: Profile): boolean {
+  return RENDERABLE_KINDS.includes(p.kind) && !!p.endpoint
 }

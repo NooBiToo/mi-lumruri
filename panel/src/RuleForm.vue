@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
 import type { Config } from './api'
-import type { DraftForm, Field } from './draft'
+import { profileReady, type DraftForm, type Field } from './draft'
 
 const form = defineModel<DraftForm>({ required: true })
 const props = defineProps<{ config: Config; errors: Partial<Record<Field, string[]>>; busy: boolean }>()
@@ -80,9 +80,13 @@ function addProbe() {
         <option value="domain">Точный домен</option>
         <option value="domain_suffix">Домен с поддоменами</option>
         <option value="cidr">IPv4/IPv6-подсеть</option>
+        <option v-if="config.categories?.length" value="category">Категория (геокатегория, список)</option>
       </select>
       <select v-if="form.destType === 'group'" v-model="form.destGroup" name="dest-group" :aria-invalid="!!errors.destination">
         <option v-for="g in config.groups" :key="g.id" :value="g.id">{{ g.name }} ({{ g.destinations.length }})</option>
+      </select>
+      <select v-else-if="form.destType === 'category'" v-model="form.destGroup" name="dest-category" :aria-invalid="!!errors.destination">
+        <option v-for="c in config.categories ?? []" :key="c.id" :value="c.id">{{ c.name }} ({{ c.kind === 'domain' ? 'домены' : 'IP' }})</option>
       </select>
       <input
         v-else
@@ -100,7 +104,7 @@ function addProbe() {
       <span class="rule-form__label">Действие</span>
       <select v-model="action" name="action" :aria-invalid="!!errors.action">
         <optgroup label="VPN-профили">
-          <option v-for="p in config.profiles" :key="p.id" :value="`profile:${p.id}`">{{ p.name }} · {{ kindLabel[p.kind] }}</option>
+          <option v-for="p in config.profiles" :key="p.id" :value="`profile:${p.id}`">{{ p.name }} · {{ kindLabel[p.kind] }}{{ profileReady(p) ? '' : ' · не настроен' }}</option>
         </optgroup>
         <option value="direct">Прямой выход</option>
         <option value="direct_zapret">Прямой выход с Zapret</option>

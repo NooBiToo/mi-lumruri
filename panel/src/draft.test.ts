@@ -69,3 +69,19 @@ describe('сохранение', () => {
     expect(saveOutcome({ status: 422, body: { ok: false, issues: [] } }).kind).toBe('invalid')
   })
 })
+
+describe('профили (этап 7)', () => {
+  it('профиль с точкой подключения готов к применению, без точки — нет', async () => {
+    const { profileReady } = await import('./draft')
+    expect(profileReady({ id: 'h', name: 'H', kind: 'hysteria2', on_failure: 'block', endpoint: { server: 'hy.example.com', port: 443, obfs: 'salamander' } })).toBe(true)
+    expect(profileReady({ id: 't', name: 'T', kind: 'trusttunnel', on_failure: 'block' })).toBe(false)
+    expect(profileReady({ id: 'v', name: 'V', kind: 'vless', on_failure: 'block' })).toBe(false)
+    // этап 8: VLESS и WireGuard/AmneziaWG с точкой подключения применимы
+    expect(profileReady({ id: 'v', name: 'V', kind: 'vless', on_failure: 'block', endpoint: { server: 'a.b', port: 1 } })).toBe(true)
+    expect(profileReady({ id: 'w', name: 'W', kind: 'wireguard', on_failure: 'block', endpoint: { server: 'a.b', port: 51820 } })).toBe(true)
+  })
+  it('без TrustTunnel по умолчанию выбирается готовый профиль Hysteria2', () => {
+    const c = { ...cfg, profiles: [cfg.profiles[0]!, { id: 'hy', name: 'HY', kind: 'hysteria2' as const, on_failure: 'block' as const, endpoint: { server: 'hy.example.com', port: 443 } }] }
+    expect(defaultForm(c).actionProfile).toBe('hy')
+  })
+})

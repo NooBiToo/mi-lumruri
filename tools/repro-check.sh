@@ -18,6 +18,8 @@ cmp "${A%/*}/mi-tt-admin" "${B%/*}/mi-tt-admin" && echo "mi-tt-admin: побай
 (cd "$R/panel-b" && find . -type f | sort | xargs sha256sum) >"$R/panel-b.sha"
 diff "$R/panel-a.sha" "$R/panel-b.sha" && echo "панель: побайтно совпадает ($(wc -l <"$R/panel-a.sha") файла)"
 cmp "$A" "$ROOT/controller/target/aarch64-unknown-linux-musl/release/mi-tt-ctl" && echo "контроллер совпадает с основной сборкой"
-node "$ROOT/tools/bundle.mjs" >/dev/null; T1=$(sha256sum "$ROOT"/out/bundle/*.tar | cut -d' ' -f1)
-node "$ROOT/tools/bundle.mjs" >/dev/null; T2=$(sha256sum "$ROOT"/out/bundle/*.tar | cut -d' ' -f1)
+node "$ROOT/tools/bundle.mjs" >/dev/null; T1=$(sha256sum "$ROOT"/out/bundle/*-stage12.tar | cut -d' ' -f1)
+node "$ROOT/tools/bundle.mjs" >/dev/null; T2=$(sha256sum "$ROOT"/out/bundle/*-stage12.tar | cut -d' ' -f1)
 [ "$T1" = "$T2" ] && echo "комплект: tar совпадает при повторной сборке ($T1)"
+P1=$(node "$ROOT/tools/package.mjs" --out "$R/pkg-a" | sed -n 's/.*sha256 //p'); P2=$(node "$ROOT/tools/package.mjs" --out "$R/pkg-b" | sed -n 's/.*sha256 //p')
+[ -n "$P1" ] && [ "$P1" = "$P2" ] && echo "установочный пакет: tar совпадает при повторной сборке ($P1)"
