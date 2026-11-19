@@ -9,3 +9,16 @@ Zapret Manager (files/Zapret2/zapret2, коммит 18c008bc98329727d3b3676c2490
   https://github.com/StressOzz/Zapret-Manager
   Licensed under the Apache License, Version 2.0
   https://www.apache.org/licenses/LICENSE-2.0
+
+Файл package/zapret/tls_clienthello_www_4pda_to.bin (образец TLS ClientHello) взят из проекта
+zapret-openwrt (zapret2/files/fake/4pda.bin, коммит 1b04a87558ec7965bfed0ef7fb557997872dd699).
+
+  zapret-openwrt
+  Copyright (c) 2016-2024 bol-van
+  https://github.com/remittor/zapret-openwrt
+  Licensed under the MIT License
+
+Блобы nfqws2 и Lua-библиотеки из zapret2 v1.0.7 (bol-van, лицензия MIT): https://github.com/bol-van/zapret2
+
+Список хостов package/zapret/zapret-hosts-discord.txt взят из Zapret Manager (Apache-2.0, см. выше),
+package/zapret/zapret-hosts-youtube.txt — перечень доменов YouTube из itdoginfo/allow-domains (Services/youtube.lst).

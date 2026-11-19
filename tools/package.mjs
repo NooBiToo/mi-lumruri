@@ -55,7 +55,14 @@ xz(join(T, 'mi-tt-ctl'), 'payload/bin/mi-tt-ctl.xz', 'mi-tt-ctl')
 xz(join(T, 'mi-tt-admin'), 'payload/bin/mi-tt-admin.xz', 'mi-tt-admin')
 xz(TT_BIN, 'payload/engines/trusttunnel_client.xz', 'trusttunnel_client')
 xz(join(ZAP, 'binaries', 'linux-arm64', 'nfqws2'), 'payload/engines/nfqws2.xz', 'nfqws2')
-for (const l of ['zapret-lib.lua.gz', 'zapret-antidpi.lua.gz']) plain(join(ZAP, 'lua', l), `payload/engines/${l}`)
+for (const l of ['zapret-lib.lua.gz', 'zapret-antidpi.lua.gz', 'zapret-auto.lua.gz']) plain(join(ZAP, 'lua', l), `payload/engines/${l}`)
+// Блобы и списки хостов из каталога стратегий лежат рядом с nfqws2 (--chdir); блобы — из zapret2, остальное — из package/zapret
+const CAT = JSON.parse(readFileSync(join(ROOT, 'controller', 'data', 'zapret-strategies.json'), 'utf8'))
+for (const f of [...Object.values(CAT.blobs), ...Object.values(CAT.hostlists)]) {
+  const src = [join(ZAP, 'files', 'fake', f), join(ROOT, 'package', 'zapret', f)].find(existsSync)
+  if (!src) throw new Error(`нет файла Zapret «${f}» из каталога стратегий: ни в .tools/lab/zapret2/.../files/fake, ни в package/zapret`)
+  plain(src, `payload/engines/${f}`)
+}
 const WWW = join(ROOT, 'panel', 'dist')
 for (const f of readdirSync(WWW)) {
   if (statSync(join(WWW, f)).isDirectory()) {
@@ -65,6 +72,7 @@ for (const f of readdirSync(WWW)) {
 for (const s of readdirSync(join(ROOT, 'package', 'scripts'))) plain(join(ROOT, 'package', 'scripts', s), `payload/scripts/${s}`)
 plain(join(ROOT, 'package', 'defaults', 'config.json'), 'payload/defaults/config.json')
 copyFileSync(join(ROOT, 'package', 'install.sh'), join(PKG, 'install.sh'))
+copyFileSync(join(ROOT, 'NOTICE'), join(PKG, 'NOTICE'))
 
 // --- ключ и подпись ---
 const KEYF = args.includes('--key') ? args[args.indexOf('--key') + 1] : join(ROOT, '.tools', 'keys', 'release-ed25519.pem')

@@ -1,6 +1,6 @@
 {
   "blobs": {
-    "blob_quic_initial_steamcommunity_com": "quic_initial_steamcommunity_com.bin",
+    "blob_quic_initial_www_google_com": "quic_initial_www_google_com.bin",
     "blob_stun": "stun.bin",
     "blob_tls_clienthello_gosuslugi_ru": "tls_clienthello_gosuslugi_ru.bin",
     "blob_tls_clienthello_vk_com": "tls_clienthello_vk_com.bin",
@@ -39,7 +39,7 @@
       "ports": "19294-19344,50000-50100",
       "l7": ["stun", "discord"],
       "args": [
-        "--lua-desync=fake:blob=blob_quic_initial_steamcommunity_com:repeats=6"
+        "--lua-desync=fake:blob=blob_quic_initial_www_google_com:repeats=6"
       ]
     },
     {

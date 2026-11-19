@@ -237,7 +237,7 @@ mod tests {
         assert!(v3.iter().any(|x| x.starts_with("--lua-desync=tls_client_hello_clone:blob=cloned_tls")));
         // загружаются только блобы выбранных профилей (cloned_tls создаёт сам профиль)
         let blobs: Vec<&str> = v3.iter().filter(|x| x.starts_with("--blob=")).map(String::as_str).collect();
-        assert_eq!(blobs, ["--blob=blob_quic_initial_steamcommunity_com:@quic_initial_steamcommunity_com.bin", "--blob=blob_tls_clienthello_www_google_com:@tls_clienthello_www_google_com.bin"]);
+        assert_eq!(blobs, ["--blob=blob_quic_initial_www_google_com:@quic_initial_www_google_com.bin", "--blob=blob_tls_clienthello_www_google_com:@tls_clienthello_www_google_com.bin"]);
     }
 
     #[test]
