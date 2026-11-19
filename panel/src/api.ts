@@ -179,6 +179,36 @@ export interface ManageResponse {
   error?: ApiError
 }
 
+/** LAN роутера из uci (`network.lan`): мост, подсеть и адрес роутера. */
+export interface Lan { bridge: string; subnet: string; address: string }
+export interface RouterResponse { ok: boolean; lan?: Lan; issues: Issue[]; error?: ApiError }
+
+/** Запись каталога готовых списков (снимок itdoginfo/allow-domains в пакете). */
+export interface CatalogService { id: string; name: string; group: string; domains: string; ipv4: string | null }
+export interface ListCatalog { source: string; commit: string; date: string; services: CatalogService[] }
+/** Итог последней проверки обновлений списков (mitt-lists.sh update); время — unix-секунды. */
+export interface ListsStatus { snapshot: string; updated: number | null; checked: number; ok: boolean; errors: string[] }
+export interface ListsResponse { ok: boolean; catalog?: ListCatalog; status?: ListsStatus | null; requested?: boolean; queued?: boolean; issues: Issue[]; error?: ApiError }
+
+/** Состояние подбора стратегии Zapret (mitt-zapret-test.sh); до первого подбора — только `state: 'idle'`. */
+export interface ZapretTestState {
+  state: 'idle' | 'running' | 'done' | 'failed'
+  pid?: number
+  started?: number
+  finished?: number | null
+  progress?: { done: number; total: number; current: string }
+  /** Сколько целей открылось без Zapret. */
+  control?: { opened: number; total: number }
+  best?: { id: string; opened: number } | null
+  youtube?: { id: string; opened: number; total: number } | null
+  applied?: boolean
+  message?: string
+}
+export interface ZapretTestResponse { ok: boolean; test?: ZapretTestState; requested?: boolean; queued?: boolean; issues: Issue[]; error?: ApiError }
+
+/** Ответ замены настроек целиком: при успехе — новая ревизия, настройки и заявка на применение (`queued`). */
+export interface ReplaceResponse extends SaveResponse { queued?: boolean }
+
 export const manage = {
   deleteRule: (base_revision: string, id: string) => call<ManageResponse>('/rules/delete', json({ base_revision, id })),
   moveRule: (base_revision: string, id: string, position: number) => call<ManageResponse>('/rules/move', json({ base_revision, id, position })),
@@ -211,4 +241,11 @@ export const api = {
   login: (password: string) => call<SessionResponse>('/auth/login', json({ password })),
   second: (factor: SecondFactor) => call<SessionResponse>('/auth/second', json(factor)),
   logout: () => call<SessionResponse>('/auth/logout', json({})),
+  router: () => call<RouterResponse>('/router'),
+  /** Замена настроек целиком с проверкой ревизии; контроллер сразу ставит заявку на применение. */
+  replaceConfig: (base_revision: string, config: Config) => call<ReplaceResponse>('/config', json({ base_revision, config })),
+  lists: () => call<ListsResponse>('/lists'),
+  updateLists: () => call<ListsResponse>('/lists/update', json({})),
+  zapretTest: () => call<ZapretTestResponse>('/zapret/test'),
+  startZapretTest: () => call<ZapretTestResponse>('/zapret/test', json({ mode: 'quick' })),
 }
