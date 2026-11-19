@@ -32,9 +32,9 @@ function remove(d: string) {
   <div class="card dlist">
     <div class="dlist__head">
       <div class="dlist__titles">
-        <h2 id="hosts-title" class="card__title">Свои DNS-записи<span class="count" :aria-label="plural(model.length, 'запись', 'записи', 'записей')">{{ model.length }}</span></h2>
+        <h2 id="hosts-title" class="card__title">Записи<span class="count" :aria-label="plural(model.length, 'запись', 'записи', 'записей')">{{ model.length }}</span></h2>
         <p class="card__sub">Домен и все его поддомены открываются по указанному адресу — например, домашний сервер с Traefik.
-          Запись для <span class="num">home.example.com</span> подходит и для <span class="num">pve.home.example.com</span>.</p>
+          Запись для <span class="num">home.example.com</span> подходит и для <span class="num">pve.home.example.com</span>. Изменения сохраняются сами.</p>
       </div>
     </div>
 

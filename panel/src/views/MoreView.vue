@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import ToggleSwitch from 'primevue/toggleswitch'
-import { ChevronDown } from 'lucide-vue-next'
+import { ChevronDown, ChevronRight } from 'lucide-vue-next'
 import { api, type ZapretTestState } from '../api'
 import { CUSTOM_DNS, DNS_PRESETS, dnsPresetIp, dnsPresetOf, dnsToForm, formToDns, type DnsForm } from '../manage'
 import { AUTO, strategyLabel, usesZapret } from '../status'
@@ -11,10 +11,9 @@ import { config, save, saveZapret, scrollTarget, simple } from '../store'
 import { saveNow, useAutosave, type Blocker } from '../autosave'
 import { dnsIcon } from '../brand'
 import ServiceLogo from '../components/ServiceLogo.vue'
-import HostList from '../components/HostList.vue'
 
 defineProps<{ totp: boolean }>()
-const emit = defineEmits<{ navigate: [tab: 'sites'] }>()
+const emit = defineEmits<{ navigate: [tab: 'sites' | 'hosts' | 'diag'] }>()
 
 interface Draft { dns: DnsForm }
 const toDraft = (): Draft => ({ dns: dnsToForm(config.value?.dns) })
@@ -84,7 +83,19 @@ useAutosave({
 
 <template>
   <section class="sect" aria-label="Дополнительно">
-    <p class="lead">Обычно здесь ничего менять не нужно. Изменения сохраняются сами.</p>
+    <p class="lead">Обычно здесь ничего менять не нужно. Изменения сохраняются сами</p>
+
+    <!-- телефон: разделы, которых нет в нижней панели -->
+    <nav class="card card--flush settings more-links" aria-label="Другие разделы">
+      <button type="button" class="setrow more-link" @click="emit('navigate', 'hosts')">
+        <span class="setrow__text"><span class="setrow__title">Свои DNS-записи</span><span class="setrow__desc">Домашние серверы по своим именам</span></span>
+        <ChevronRight :size="18" class="more-link__icon" aria-hidden="true" />
+      </button>
+      <button type="button" class="setrow more-link" @click="emit('navigate', 'diag')">
+        <span class="setrow__text"><span class="setrow__title">Диагностика</span><span class="setrow__desc">Проверка работы, журналы, перезапуск службы</span></span>
+        <ChevronRight :size="18" class="more-link__icon" aria-hidden="true" />
+      </button>
+    </nav>
 
     <div class="card card--flush settings">
       <label class="setrow">
@@ -149,6 +160,5 @@ useAutosave({
       </div>
     </div>
 
-    <HostList v-model="draft.dns.hosts" />
   </section>
 </template>

@@ -535,6 +535,12 @@ svg.lucide.logo__svg { fill: none; }
 .formfoot__text { color: var(--muted); font-size: 0.875rem; }
 .formfoot .p-button { min-width: 9rem; }
 
+/* ссылки на разделы со страницы «Ещё» — только на телефоне, где их нет в нижней панели */
+.more-links { display: none; }
+.more-link { width: 100%; font: inherit; color: inherit; background: none; border: 0; text-align: left; cursor: pointer; }
+.more-link:hover { background: var(--surface-2); }
+.more-link__icon { color: var(--faint); flex: none; }
+
 /* ---------- «Диагностика» ---------- */
 .diag__total { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; padding-bottom: 1rem; border-bottom: 1px solid var(--line); }
 .diag__total-text { font-size: 1.125rem; font-weight: 500; }
@@ -623,6 +629,7 @@ svg.lucide.logo__svg { fill: none; }
   .dlist__items { max-height: calc(10 * 2.375rem + 2px); }
   .setrow__input { width: 100%; }
   .setrow__actions { justify-content: flex-start; flex-basis: 100%; }
+  .more-links { display: block; }
   .diag__row { grid-template-columns: auto minmax(0, 1fr); }
   .diag__form { flex-wrap: wrap; }
   .diag__form .p-button, .diag__restart .p-button { flex: 1 1 100%; }
@@ -630,7 +637,7 @@ svg.lucide.logo__svg { fill: none; }
   .formfoot .p-button { width: 100%; }
 
   .tabbar {
-    display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); position: fixed; inset: auto 0 0 0; z-index: 10;
+    display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); position: fixed; inset: auto 0 0 0; z-index: 10;
     background: var(--surface); border-top: 1px solid var(--line); padding: 0.25rem 0.25rem calc(0.25rem + env(safe-area-inset-bottom));
   }
   .tabbar__item {

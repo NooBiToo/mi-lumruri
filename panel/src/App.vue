@@ -6,7 +6,7 @@ import Message from 'primevue/message'
 import Skeleton from 'primevue/skeleton'
 import ToggleSwitch from 'primevue/toggleswitch'
 import Toast from 'primevue/toast'
-import { Activity, Check, CircleAlert, Globe, LayoutDashboard, LoaderCircle, LogOut, MonitorSmartphone, Server, SlidersHorizontal, Waypoints } from 'lucide-vue-next'
+import { Activity, BookOpenText, Check, CircleAlert, Globe, LayoutDashboard, LoaderCircle, LogOut, MonitorSmartphone, Server, SlidersHorizontal, Waypoints } from 'lucide-vue-next'
 import { useToast } from 'primevue/usetoast'
 import { api, onAuthLost, setCsrf, type SessionResponse } from './api'
 import type { LoginStage } from './auth'
@@ -20,6 +20,7 @@ import DevicesView from './views/DevicesView.vue'
 import ServerView from './views/ServerView.vue'
 import MoreView from './views/MoreView.vue'
 import DiagView from './views/DiagView.vue'
+import HostsView from './views/HostsView.vue'
 import ManualBanner from './views/ManualBanner.vue'
 
 const toast = useToast()
@@ -34,13 +35,15 @@ const totpOn = ref(true)
 const lost = ref(false)
 const loading = ref(false)
 
-type Tab = 'status' | 'sites' | 'devices' | 'server' | 'diag' | 'more'
-const TABS: { value: Tab; label: string; short: string; icon: Component }[] = [
+type Tab = 'status' | 'sites' | 'devices' | 'server' | 'hosts' | 'diag' | 'more'
+/** inBar — пункт нижней панели телефона; остальные открываются со страницы «Ещё». */
+const TABS: { value: Tab; label: string; short: string; icon: Component; inBar?: false }[] = [
   { value: 'status', label: 'Обзор', short: 'Обзор', icon: LayoutDashboard },
   { value: 'sites', label: 'Сайты', short: 'Сайты', icon: Globe },
   { value: 'devices', label: 'Устройства', short: 'Устройства', icon: MonitorSmartphone },
   { value: 'server', label: 'Сервер', short: 'Сервер', icon: Server },
-  { value: 'diag', label: 'Диагностика', short: 'Проверка', icon: Activity },
+  { value: 'hosts', label: 'Свои DNS-записи', short: 'DNS', icon: BookOpenText, inBar: false },
+  { value: 'diag', label: 'Диагностика', short: 'Проверка', icon: Activity, inBar: false },
   { value: 'more', label: 'Дополнительно', short: 'Ещё', icon: SlidersHorizontal },
 ]
 const fromHash = (): Tab | null => TABS.find((t) => `#${t.value}` === location.hash)?.value ?? null
@@ -207,13 +210,15 @@ onBeforeUnmount(() => { removeEventListener('hashchange', onHash); clearInterval
         <SitesView v-else-if="tab === 'sites'" @navigate="go" />
         <DevicesView v-else-if="tab === 'devices'" @navigate="go" />
         <ServerView v-else-if="tab === 'server'" @navigate="go" />
+        <HostsView v-else-if="tab === 'hosts'" />
         <DiagView v-else-if="tab === 'diag'" />
         <MoreView v-else :totp="totpOn" @navigate="go" />
       </main>
     </div>
 
     <nav class="tabbar" aria-label="Разделы">
-      <a v-for="t in TABS" :key="t.value" :href="`#${t.value}`" :class="['tabbar__item', { 'tabbar__item--on': tab === t.value }]"
+      <a v-for="t in TABS.filter((x) => x.inBar !== false)" :key="t.value" :href="`#${t.value}`"
+        :class="['tabbar__item', { 'tabbar__item--on': tab === t.value || (t.value === 'more' && TABS.some((x) => x.value === tab && x.inBar === false)) }]"
         :aria-current="tab === t.value ? 'page' : undefined" :aria-label="t.label" @click.prevent="go(t.value)">
         <component :is="t.icon" :size="20" :stroke-width="1.5" aria-hidden="true" />
         <span>{{ t.short }}</span>
