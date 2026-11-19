@@ -39,6 +39,8 @@ case "$(resp "$p")" in
   404) echo "curl: (22) The requested URL returned error: 404" >&2; exit 22;;
   html) printf '<!DOCTYPE html>\n<html><body>Rate limit exceeded</body></html>\n' >"$out";;
   empty) : >"$out";;
+  cert) echo "curl: (60) SSL certificate problem: certificate is not yet valid" >&2; exit 60;;
+  short) printf 'youtube.com\nytimg.com\ngooglevideo.com\n' >"$out";;
   *) cat "$LT/remote/$p" >"$out";;
 esac
 EOF
@@ -69,6 +71,7 @@ check() { local r; r="$(j "$1" "$3")"; if [ "$r" = True ]; then ok "$1: $2"; els
 ino() { stat -c %i "$1" 2>/dev/null; }
 
 NFILES="$(python3 -I -c 'import json,sys;c=json.load(open(sys.argv[1]));print(len(c["services"])+sum(1 for s in c["services"] if s["ipv4"]))' "$ROOT/package/lists/catalog.json")"
+COMMIT="$(python3 -I -c 'import json,sys;print(json.load(open(sys.argv[1]))["commit"])' "$ROOT/package/lists/catalog.json")"
 SNAPDATE="$(python3 -I -c 'import json,sys;print(json.load(open(sys.argv[1]))["date"])' "$ROOT/package/lists/catalog.json")"
 A="$W/a/root"; CATD="$A/data/mi-trusttunnel/etc/categories"; UPD="$A/data/mi-trusttunnel/lists"; RUNS="$A/tmp/mi-trusttunnel/run"
 
@@ -118,9 +121,10 @@ check g "ok=false, одна ошибка «нет связи», updated null" 'n
 t "g: после первой неудачи связи остальные файлы не запрашивались" '[ "$(wc -l <"$W/g/lt/curl.log")" = 1 ]'
 t "g: svc-youtube.list — из пакета" 'cmp -s "$B/data/mi-trusttunnel/etc/categories/svc-youtube.list" "$ROOT/package/lists/Services/youtube.lst"'
 t "g: в /data списков нет" '[ -z "$(find "$B/data/mi-trusttunnel/lists" -name "*.lst")" ]'
-t "g: повтор не раньше чем через час (метка сдвинута)" '! due g && [ "$(( $(date +%s) - $(cat "$B/data/mi-trusttunnel/lists/.checked") ))" -ge 82700 ]'
-t "g: метка из будущего (часы ушли назад) — проверка нужна" 'echo $(( $(date +%s) + 999 )) >"$B/data/mi-trusttunnel/lists/.checked"; due g'
-t "g: прошли сутки — проверка нужна" 'echo $(( $(date +%s) - 86401 )) >"$B/data/mi-trusttunnel/lists/.checked"; due g'
+t "g: повтор не раньше чем через час (метка сдвинута)" '! due g && [ "$(( $(date +%s) - $(cut -d " " -f 1 "$B/data/mi-trusttunnel/lists/.checked") ))" -ge 82700 ]'
+t "g: метка из будущего (часы ушли назад) — проверка нужна" 'echo "$(( $(date +%s) + 999 )) $COMMIT" >"$B/data/mi-trusttunnel/lists/.checked"; due g'
+t "g: прошли сутки — проверка нужна" 'echo "$(( $(date +%s) - 86401 )) $COMMIT" >"$B/data/mi-trusttunnel/lists/.checked"; due g'
+t "g: метка свежая, коммит снимка тот же — проверка не нужна" 'echo "$(date +%s) $COMMIT" >"$B/data/mi-trusttunnel/lists/.checked"; ! due g'
 
 echo "(д) после перезагрузки (RAM пуста) состояние проверки восстанавливается из /data"
 rm -f "$RUNS/lists.json"; lists a sync
@@ -131,6 +135,39 @@ echo 'resp() { echo ok; }' >"$W/a/lt/scenario"; printf '\nlab-new2.example.com\n
 lists a update
 t "e: svc-meta.list обновлён (из /data)" 'grep -qx lab-new2.example.com "$CATD/svc-meta.list"'
 check a "ok=true, updated новее" 's["ok"] is True and s["updated"]>='"$UPD1"
+
+echo "(ж) пустая копия в /data — берётся снимок"
+: >"$UPD/Services/meta.lst"; lists a sync
+t "f: svc-meta.list — из снимка" 'cmp -s "$CATD/svc-meta.list" "$ROOT/package/lists/Services/meta.lst"'
+
+echo "(з) обрезанный ответ (меньше половины записей) и ошибка сертификата"
+cp "$CATD/svc-youtube.list" "$W/yt.before"
+echo 'resp() { case "$1" in Services/youtube.lst) echo short;; *) echo ok;; esac; }' >"$W/a/lt/scenario"
+lists a update
+check a "ok=false, ошибка «меньше половины» у YouTube" 'not s["ok"] and len(s["errors"])==1 and s["errors"][0].startswith("Services/youtube.lst: ") and "меньше половины" in s["errors"][0]'
+t "h: svc-youtube.list прежний" 'cmp -s "$CATD/svc-youtube.list" "$W/yt.before"'
+: >"$W/a/lt/curl.log"; echo 'resp() { echo cert; }' >"$W/a/lt/scenario"
+lists a update
+check a "сертификат (код 60) — «нет связи», одна ошибка" 'not s["ok"] and len(s["errors"])==1 and "нет связи" in s["errors"][0] and "(60)" in s["errors"][0]'
+t "h: после ошибки сертификата остальные не запрашивались, повтор через час" '[ "$(wc -l <"$W/a/lt/curl.log")" = 1 ] && ! due a && [ "$(( $(date +%s) - $(cut -d " " -f 1 "$UPD/.checked") ))" -ge 82700 ]'
+
+echo "(и) новый релиз с другим снимком: старая копия в /data не используется"
+REL2="$A/data/mi-trusttunnel/releases/0.9.0/payload/lists"
+sed -i "s/$COMMIT/$(printf 'f%.0s' $(seq 40))/" "$REL2/catalog.json"
+printf '\nsnap-new.example.com\n' >>"$REL2/Services/youtube.lst"
+t "i: в /data старая копия YouTube (lab-new)" 'grep -qx lab-new.example.com "$UPD/Services/youtube.lst"'
+lists a sync
+t "i: svc-youtube.list — из нового снимка" 'cmp -s "$CATD/svc-youtube.list" "$REL2/Services/youtube.lst"'
+t "i: сменился коммит снимка — проверка нужна сразу (метка свежая)" 'due a'
+echo 'resp() { echo ok; }' >"$W/a/lt/scenario"; lists a update
+t "i: после проверки .base — коммит нового снимка, YouTube снова из /data" '[ "$(cat "$UPD/.base")" = "$(printf "f%.0s" $(seq 40))" ] && grep -qx lab-new.example.com "$CATD/svc-youtube.list" && ! due a'
+
+echo "(к) нет каталога: проверка не нужна, журнал — не чаще раза в час"
+Z="$W/k/root"; root k; rm -f "$Z/data/mi-trusttunnel/releases/0.9.0/payload/lists/catalog.json"
+t "k: без каталога проверка не нужна" '! due k'
+lists k update; lists k update; lists k sync
+t "k: «нет каталога» в журнале один раз" '[ "$(grep -c "нет каталога" "$Z/tmp/mi-trusttunnel/log/mitt.log")" = 1 ]'
+t "k: метка повтора через час, curl не вызывался" '[ "$(( $(date +%s) - $(cut -d " " -f 1 "$Z/data/mi-trusttunnel/lists/.checked") ))" -ge 82700 ] && [ ! -e "$W/k/lt/curl.log" ]'
 
 [ $FAIL -eq 0 ] && echo "PASS" || echo "FAIL"
 exit $FAIL

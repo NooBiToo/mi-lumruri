@@ -65,8 +65,8 @@ while [ -f "$STATE/service.wanted" ]; do
   fi
   # готовые списки: проверка обновлений в фоне — раз в сутки и по заявке панели (цикл службы не ждёт загрузку)
   if [ -f "$STATE/lists-update.request" ] || lists_due; then
-    rm -f "$STATE/lists-update.request"
-    pid_alive lists-update || { start_bg lists-update sh "$SCR/mitt-lists.sh" update; mlog "проверка обновлений списков запущена"; }
+    # идущая проверка: заявка остаётся до следующего прохода
+    pid_alive lists-update || { rm -f "$STATE/lists-update.request"; start_bg lists-update sh "$SCR/mitt-lists.sh" update; mlog "проверка обновлений списков запущена"; }
   fi
   for e in trusttunnel nfqws2; do
     if [ -f "$STATE/$e.wanted" ] && ! pid_alive "$e"; then

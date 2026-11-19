@@ -160,11 +160,17 @@ status_write() {
 
 # --- готовые списки сайтов (mitt-lists.sh) ---
 LISTS_PERIOD="${MITT_LISTS_PERIOD:-86400}"   # проверка обновлений раз в сутки
-LISTS_RETRY="${MITT_LISTS_RETRY:-3600}"      # без связи — повтор через час
-# пора проверять обновления: метки нет, прошли сутки или часы роутера ушли назад (метка из будущего)
+LISTS_RETRY="${MITT_LISTS_RETRY:-3600}"      # без связи или без каталога — повтор через час
+LISTS_CAT="$REL/payload/lists/catalog.json"
+lists_commit() { sed -n 's/^ *"commit": *"\([0-9a-f]*\)".*/\1/p' "$LISTS_CAT" 2>/dev/null | head -n 1; }
+# пора проверять обновления. Метка .checked: «<unix> <коммит каталога>». Каталога нет — нет (повтор только по заявке);
+# метки нет, сменился релиз (другой коммит снимка), прошли сутки или часы роутера ушли назад — да.
 lists_due() {
-  local c now; c="$(cat "$DATA/lists/.checked" 2>/dev/null)"; now="$(date +%s)"
+  local c cm now
+  [ -f "$LISTS_CAT" ] || return 1
+  { read -r c cm <"$DATA/lists/.checked"; } 2>/dev/null; now="$(date +%s)"
   case "$c" in ''|*[!0-9]*) return 0;; esac
+  [ "$cm" = "$(lists_commit)" ] || return 0
   [ "$c" -gt "$now" ] || [ $((now - c)) -ge "$LISTS_PERIOD" ]
 }
 
