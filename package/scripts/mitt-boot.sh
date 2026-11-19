@@ -20,12 +20,14 @@ trap 'lock_drop boot' EXIT
 
 case "${1:-auto}" in
   stop)
-    # mihomo и dnscrypt — движки версий до 0.2: при обновлении их останавливает уже новый загрузчик
-    # подбор Zapret: сначала флаг stop — сценарий сам вернёт прежние стратегии (до 10 с), иначе — сигнал и разбор метки
+    # подбор Zapret: сначала флаг stop — сценарий сам вернёт прежние стратегии (до MITT_ZT_STOP_WAIT, 10 с),
+    # иначе — сигнал (pid_stop) и разбор метки отката
     if pid_alive zapret-test; then
       touch "$STATE/zapret-test.stop"; i=0
-      while [ $i -lt 10 ] && pid_alive zapret-test; do sleep 1; i=$((i + 1)); done
+      while [ $i -lt "${MITT_ZT_STOP_WAIT:-10}" ] && pid_alive zapret-test; do sleep 1; i=$((i + 1)); done
+      pid_alive zapret-test && mlog "подбор Zapret не остановился по флагу — сигнал"
     fi
+    # mihomo и dnscrypt — движки версий до 0.2: при обновлении их останавливает уже новый загрузчик
     for n in service trusttunnel nfqws2 mihomo dnscrypt nginx uhttpd zapret-test zapret-nfqws; do rm -f "$STATE/$n.wanted"; pid_stop "$n"; done
     [ -x "$BIN/mi-tt-ctl" ] && zt_recover
     [ -x "$BIN/mi-tt-admin" ] && adm revert --state-dir "$RUN/admin" >"$STATE/revert.json" 2>&1

@@ -156,10 +156,12 @@ status_write() {
 }
 
 # --- подбор стратегии Zapret (mitt-zapret-test.sh) ---
-# Метка отката в /data (переживает перезагрузку): строки «<general|youtube> <прежний id>» пишутся до смены стратегии
-# и снимаются, только когда подбор закончился (стратегия подтверждена или возвращена). Оставшуюся метку — подбор убит
-# сигналом, KILL или перезагрузкой — разбирают служба (zt_recover) и следующий подбор: прежние стратегии возвращаются.
+# Метка отката в /data (переживает перезагрузку): строки «<general|youtube> <прежний id> <применённый id>» пишутся до смены
+# стратегии и снимаются, только когда подбор закончился (стратегия подтверждена или возвращена). Оставшуюся метку — подбор
+# убит сигналом, KILL или перезагрузкой — разбирают служба (zt_recover, zt_service_recover) и следующий подбор.
+# Если стратегию после подбора уже сменили (в настройках не применённый id), прежняя не возвращается — строка снимается.
 ZT_ROLLBACK="$ETC/zapret-test.rollback"
+ZT_RETRY="$STATE/zapret-test.retry"   # повторы службы: «<попыток> <не раньше unix>» (RAM)
 zt_apply_request() { printf '{"requested_unix":%s,"by":"zapret-test"}\n' "$(date +%s)" >"$STATE/apply.request"; }
 zt_set() { # zt_set <general|youtube> <id>: вывод mi-tt-ctl zapret-set; занятые настройки (busy) — до 5 попыток
   local n=0 o
@@ -170,16 +172,30 @@ zt_set() { # zt_set <general|youtube> <id>: вывод mi-tt-ctl zapret-set; з�
     sleep 1
   done
 }
-zt_undo() { # вернуть всё из метки отката; ZT_LEFT — что вернуть не удалось («вид=id …»), тогда метка остаётся
-  local k id
-  ZT_LEFT=""
+# Вернуть всё из метки отката. ZT_LEFT — что вернуть не удалось («вид=id …», тогда в метке остаются только эти строки),
+# ZT_RESTORED — что-то возвращено.
+zt_undo() {
+  local k id new cur now left=""
+  ZT_LEFT=""; ZT_RESTORED=""
   [ -f "$ZT_ROLLBACK" ] || return 0
-  while read -r k id; do
+  now="$(ctl zapret-get "$ETC/config.json" </dev/null)" || { ZT_LEFT=" (настройки не прочитаны)"; mlog "подбор Zapret: настройки не прочитаны, откат отложен"; return 1; }
+  while read -r k id new; do
     [ -n "$k" ] || continue
-    if zt_set "$k" "$id" >/dev/null; then mlog "подбор Zapret: возвращена стратегия $k = $id"; else ZT_LEFT="$ZT_LEFT $k=$id"; fi
+    cur="$(echo "$now" | sed -n "s/^$k //p")"
+    if [ -n "$new" ] && [ "$cur" != "$new" ]; then
+      [ "$cur" = "$id" ] || mlog "подбор Zapret: $k = $cur выбрана после подбора — прежняя ($id) не возвращается"
+      continue
+    fi
+    if zt_set "$k" "$id" >/dev/null; then mlog "подбор Zapret: возвращена стратегия $k = $id"; ZT_RESTORED=1
+    else ZT_LEFT="$ZT_LEFT $k=$id"; left="$left$k $id $new
+"; fi
   done <"$ZT_ROLLBACK"
-  [ -z "$ZT_LEFT" ] || { mlog "подбор Zapret: не удалось вернуть$ZT_LEFT"; return 1; }
-  rm -f "$ZT_ROLLBACK"; zt_apply_request
+  [ -z "$ZT_RESTORED" ] || zt_apply_request
+  if [ -n "$ZT_LEFT" ]; then
+    printf '%s' "$left" >"$ZT_ROLLBACK.t" && mv -f "$ZT_ROLLBACK.t" "$ZT_ROLLBACK"
+    mlog "подбор Zapret: не удалось вернуть$ZT_LEFT"; return 1
+  fi
+  rm -f "$ZT_ROLLBACK"
 }
 zt_fail_state() { # zt_fail_state <сообщение> <true|false: применено>
   local f="$STATE/zapret-test.json" now; now="$(date +%s)"
@@ -191,7 +207,7 @@ zt_fail_state() { # zt_fail_state <сообщение> <true|false: примен
       "$now" "$now" "$2" "$1" >"$f"
   fi
 }
-# Подбор, завершившийся без итога: вернуть прежние стратегии, состояние — failed. Вызывать, только когда сценарий не идёт.
+# Подбор, завершившийся без итога: вернуть прежние стратегии, состояние — failed. Не трогает идущий сценарий.
 zt_recover() {
   local had="" lp
   # сценарий подбора идёт (держит блокировку) — не мешать; сам сценарий вызывает разбор под своей блокировкой
@@ -201,9 +217,26 @@ zt_recover() {
   [ -f "$ZT_ROLLBACK" ] && had=1
   [ -n "$had" ] || grep -q '"state":"running"' "$STATE/zapret-test.json" 2>/dev/null || return 0
   if zt_undo; then
-    if [ -n "$had" ]; then zt_fail_state "Подбор прервался; прежняя стратегия восстановлена" false; else zt_fail_state "Подбор прервался; настройки не изменены" false; fi
+    rm -f "$ZT_RETRY"
+    if [ -n "$ZT_RESTORED" ]; then zt_fail_state "Подбор прервался; прежняя стратегия восстановлена" false
+    elif [ -n "$had" ]; then zt_fail_state "Подбор прервался; стратегию уже сменили вручную — она оставлена" false
+    else zt_fail_state "Подбор прервался; настройки не изменены" false; fi
     mlog "подбор Zapret: незавершённый подбор разобран"
   else
     zt_fail_state "Подбор прервался; не удалось вернуть прежнюю стратегию:$ZT_LEFT" true; return 1
   fi
+}
+# Служба в цикле: не больше 3 попыток (сразу, через 1 мин, через 5 мин); затем метка и failed остаются до запуска
+# службы или следующего подбора — без повторов в журнале.
+zt_service_recover() {
+  local n=0 next=0 now d
+  [ -f "$ZT_ROLLBACK" ] || { grep -q '"state":"running"' "$STATE/zapret-test.json" 2>/dev/null && zt_recover; return 0; }
+  [ -f "$ZT_RETRY" ] && read -r n next <"$ZT_RETRY"
+  [ "$n" -lt 3 ] || return 0
+  now="$(date +%s)"; [ "$now" -ge "$next" ] || return 0
+  n=$((n + 1)); set -- ${MITT_ZT_RETRY_DELAYS:-60 300}
+  case "$n" in 1) d="$1";; *) d="$2";; esac
+  echo "$n $((now + d))" >"$ZT_RETRY"
+  zt_recover && return 0
+  [ "$n" -lt 3 ] || mlog "подбор Zapret: служба прекращает попытки вернуть прежнюю стратегию (3 неудачи); метка отката оставлена"
 }

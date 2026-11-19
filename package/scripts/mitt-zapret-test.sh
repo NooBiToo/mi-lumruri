@@ -101,12 +101,15 @@ try() { # try <id> <all|yt>
   return $rc
 }
 
-# Выбор до подбора: к нему возвращает откат. Строка «вид прежний-id» попадает в метку до смены стратегии.
+# Выбор до подбора: к нему возвращает откат. Строка «вид прежний-id новый-id» попадает в метку до смены стратегии.
 ORIG="$(ctl zapret-get "$CFG")" || { st failed "Настройки не прочитаны"; exit 1; }
 orig() { echo "$ORIG" | sed -n "s/^$1 //p"; }
 set_choice() { # set_choice <general|youtube> <id>: смена и заявка на применение
   local o
-  grep -q "^$1 " "$ZT_ROLLBACK" 2>/dev/null || echo "$1 $(orig "$1")" >>"$ZT_ROLLBACK"
+  # без записанной метки стратегию не меняем: иначе её некому будет вернуть
+  if ! grep -q "^$1 " "$ZT_ROLLBACK" 2>/dev/null; then
+    { echo "$1 $(orig "$1") $2" >>"$ZT_ROLLBACK"; } 2>/dev/null || { mlog "подбор Zapret: метка отката не записана — $1 не меняется"; return 1; }
+  fi
   o="$(zt_set "$1" "$2")" || { mlog "подбор Zapret: zapret-set $1 $2 не прошёл: $(echo "$o" | tr '\n' ' ' | cut -c1-300)"; return 1; }
   zt_apply_request
   mlog "подбор Zapret: $1 = $2 (было $(orig "$1"))"
@@ -188,8 +191,6 @@ if [ "$NY" -gt 0 ] && [ "$YT_CTRL_N" -lt "$NY" ]; then
 fi
 CUR=""
 if [ -n "$GEN$YT_MSG" ]; then APPLIED=true; else APPLIED=false; fi
-# итог есть: применённое подтверждено, метка отката больше не нужна
-rm -f "$ZT_ROLLBACK"
 if [ -n "$GEN" ]; then
   st done "Применена стратегия $GEN: открылось $BEST_N из $NT, без Zapret — $CTRL_N$YT_MSG"
 elif [ -n "$YT_MSG" ]; then
@@ -197,4 +198,6 @@ elif [ -n "$YT_MSG" ]; then
 else
   st done "Подходящей стратегии лучше, чем без Zapret, не нашлось"
 fi
+# итог записан: применённое подтверждено, метка отката больше не нужна
+rm -f "$ZT_ROLLBACK"
 mlog "подбор Zapret: $(sed -n 's/.*"message":"\([^"]*\)".*/\1/p' "$OUT")"

@@ -93,7 +93,9 @@ run() {
   printf '%s\n' "$3" >"$ZT/scenario"
   printf '{\n  "version": 1,\n  "zapret": {\n    "strategy": "auto",\n    "youtube": "auto"\n  }\n}\n' >"$RR/data/mi-trusttunnel/etc/config.json"
   cp "$RR/data/mi-trusttunnel/etc/config.json" "$d/config.before"
+  [ -z "${PRE:-}" ] || eval "$PRE"
   local t0=$(date +%s)
+  if [ -n "${BG:-}" ]; then bb "$n" "$RR/tmp/mi-trusttunnel/scripts/mitt-zapret-test.sh" >"$d/out" 2>&1 & echo $! >"$d/bgpid"; return 0; fi
   bb "$n" "$RR/tmp/mi-trusttunnel/scripts/mitt-zapret-test.sh" >"$d/out" 2>&1
   echo "$?" >"$d/rc"
   echo "[$n] код $(cat "$d/rc"), $(( $(date +%s) - t0 )) с"
@@ -104,7 +106,7 @@ run() {
 bb() {
   local d="$W/$1"; shift
   timeout 300 env -i PATH="$SB" MITT_ROOT="$d/root" MITT_QUIET=1 MITT_CURL="$ST/curl" MITT_NFQWS="$ST/nfqws2" MITT_ZAPRET_TARGETS="$d/targets.txt" \
-    MITT_ZT_SETTLE=0 MITT_ZT_APPLY_WAIT=1 ZT="$d/zt" ZSTATE="$d/root/tmp/mi-trusttunnel/run" \
+    MITT_ZT_SETTLE=0 MITT_ZT_APPLY_WAIT=1 MITT_ZT_STOP_WAIT=4 MITT_ZT_RETRY_DELAYS="0 0" ZT="$d/zt" ZSTATE="$d/root/tmp/mi-trusttunnel/run" \
     "$Q" -L "$F" "$F/bin/busybox" ash "$@"
 }
 # служба: разбор остатка прерванного подбора (zt_recover из mitt-lib.sh)
@@ -188,7 +190,7 @@ check g "failed, прежняя стратегия, не применено" 's[
 echo "(з) KILL во время повторной проверки — откат при разборе службой"
 NOCHECK=1 run h "$TEN" "$(recheck "kill -KILL $SPID; sleep 1; echo 9")"
 check h "после KILL: running, действует v3" 's["state"]=="running" and c["zapret"]["strategy"]=="v3"'
-[ "$(cat "$W/h/$MARK" 2>/dev/null)" = "general auto" ] && ok "h: метка отката «general auto»" || bad "h: метки отката нет: $(cat "$W/h/$MARK" 2>/dev/null)"
+[ "$(cat "$W/h/$MARK" 2>/dev/null)" = "general auto v3" ] && ok "h: метка отката «general auto v3»" || bad "h: метки отката нет: $(cat "$W/h/$MARK" 2>/dev/null)"
 rm -f "$W/h/root/tmp/mi-trusttunnel/run/apply.request"
 recover h; after h
 check h "после разбора: failed, прежняя стратегия, заявка" 's["state"]=="failed" and s["applied"] is False and c["zapret"]["strategy"]=="auto" and "восстановлена" in s["message"] and areq'
@@ -206,6 +208,53 @@ run k "$TEN" "$(recheck "echo 1")
 set_hook() { if [ \"\$2\" = auto ] && [ \"\$(grep -c 'general auto' \"\$ZT/calls\")\" -lt 2 ]; then echo busy; fi; }"
 check k "откат после двух busy" 's["state"]=="done" and s["applied"] is False and c["zapret"]["strategy"]=="auto"'
 [ "$(grep -c 'zapret-set general auto' "$W/k/zt/calls")" = 3 ] && ok "k: три попытки" || bad "k: $(grep 'general auto' "$W/k/zt/calls")"
+
+echo "(л) метка отката не записалась — стратегия не меняется"
+PRE='mkdir -p "$RR/data/mi-trusttunnel/etc/zapret-test.rollback"' run l "$TEN" 'lim() { case "$1" in control) echo 2;; v3) echo 9;; *) echo 4;; esac; }'
+check l "готово, не применено, настройки прежние" 's["state"]=="done" and s["applied"] is False and c["zapret"]["strategy"]=="auto"'
+grep -q 'zapret-set' "$W/l/zt/calls" 2>/dev/null && bad "l: zapret-set вызывался" || ok "l: zapret-set не вызывался"
+
+echo "(м) служба: стойкий сбой записи — не больше 3 попыток; ручная смена не перезаписывается"
+LOGM="$W/m/root/tmp/mi-trusttunnel/log/mitt.log"
+svc() { bb "$1" -c '. "$MITT_ROOT/tmp/mi-trusttunnel/scripts/mitt-lib.sh"; zt_service_recover' >>"$W/$1/out" 2>&1; }
+run m "$TEN" "$(recheck "echo 1")
+set_hook() { [ \"\$2\" = auto ] && echo fail; }"
+for x in 1 2 3 4 5; do svc m; done
+[ "$(grep -c 'zapret-set general auto' "$W/m/zt/calls")" = 4 ] && ok "m: 1 попытка сценария + 3 службы" || bad "m: попыток $(grep -c 'zapret-set general auto' "$W/m/zt/calls")"
+[ "$(grep -c 'прекращает попытки' "$LOGM")" = 1 ] && ok "m: отказ от попыток — одна строка журнала" || bad "m: $(grep -c 'прекращает попытки' "$LOGM") строк"
+check m "failed, applied=true, действует v3" 's["state"]=="failed" and s["applied"] is True and c["zapret"]["strategy"]=="v3"'
+[ -f "$W/m/$MARK" ] && ok "m: метка оставлена" || bad "m: метки нет"
+sed -i 's/"strategy": "v3"/"strategy": "v5"/' "$W/m/root/data/mi-trusttunnel/etc/config.json"
+recover m
+[ "$(grep -c 'zapret-set general auto' "$W/m/zt/calls")" = 4 ] && ok "m: после ручной смены возврата нет" || bad "m: был возврат"
+check m "ручной выбор v5 сохранён, сообщение" 'c["zapret"]["strategy"]=="v5" and "вручную" in s["message"]'
+[ -f "$W/m/$MARK" ] && bad "m: метка осталась" || ok "m: метка снята"
+[ "$(grep -c 'выбрана после подбора' "$LOGM")" = 1 ] && ok "m: одна строка журнала о ручной смене" || bad "m: строк $(grep -c 'выбрана после подбора' "$LOGM")"
+
+# stopcase <имя> <lim>: подбор в фоне, на повторной проверке — mitt-boot.sh stop
+stopcase() {
+  local n="$1" d="$W/$1" RS="$W/$1/root/tmp/mi-trusttunnel/run" i=0 t0
+  BG=1 run "$n" "$TEN" "$2"
+  while [ $i -lt 600 ] && [ "$(cat "$d/zt/curl.log" 2>/dev/null | grep -c '^v3 ')" -le 10 ]; do sleep 0.1; i=$((i + 1)); done
+  sed -n 's/.*"pid":\([0-9]*\).*/\1/p' "$RS/zapret-test.json" >"$RS/zapret-test.pid"
+  t0=$(date +%s.%N)
+  bb "$n" "$d/root/tmp/mi-trusttunnel/scripts/mitt-boot.sh" stop >"$d/stop.out" 2>&1
+  python3 -c "import sys;print(round(float(sys.argv[2])-float(sys.argv[1]),1))" "$t0" "$(date +%s.%N)" >"$d/stop.time"
+  wait "$(cat "$d/bgpid")" 2>/dev/null
+  echo "[$n] остановка: $(cat "$d/stop.time") с"; after "$n"
+}
+echo "(н) mitt-boot.sh stop: сценарий слушает флаг"
+stopcase n1 "$(recheck "sleep 0.3; echo 9")"
+check n1 "прерван по флагу, прежняя стратегия" 's["state"]=="failed" and s["applied"] is False and c["zapret"]["strategy"]=="auto" and "прерван" in s["message"]'
+awk '{exit !($1 < 4)}' "$W/n1/stop.time" && ok "n1: без ожидания до предела" || bad "n1: $(cat "$W/n1/stop.time") с"
+grep -q 'не остановился по флагу' "$W/n1/root/tmp/mi-trusttunnel/log/mitt.log" && bad "n1: был сигнал" || ok "n1: сигнал не понадобился"
+echo "(о) mitt-boot.sh stop: сценарий завис — ожидание, затем сигнал"
+stopcase n2 "$(recheck "sleep 30; echo 9")"
+check n2 "остановлен сигналом, прежняя стратегия" 's["state"]=="failed" and c["zapret"]["strategy"]=="auto"'
+awk '{exit !($1 >= 4 && $1 < 12)}' "$W/n2/stop.time" && ok "n2: ожидание флага, затем сигнал" || bad "n2: $(cat "$W/n2/stop.time") с"
+grep -q 'не остановился по флагу' "$W/n2/root/tmp/mi-trusttunnel/log/mitt.log" && ok "n2: сигнал записан в журнал" || bad "n2: нет записи о сигнале"
+[ -f "$W/n2/$MARK" ] && bad "n2: метка осталась" || ok "n2: метки нет"
+pkill -f "$ST/curl" 2>/dev/null
 
 [ $FAIL -eq 0 ] && echo "PASS" || echo "FAIL"
 exit $FAIL

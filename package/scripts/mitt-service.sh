@@ -46,8 +46,9 @@ full_cycle() { # full_cycle <причина>
   status_write
 }
 
-# подбор Zapret, оборванный остановкой или перезагрузкой: прежние стратегии — до первого рендера
-zt_recover
+# подбор Zapret, оборванный остановкой или перезагрузкой: прежние стратегии — до первого рендера (попытка при запуске
+# всегда; в цикле — не больше трёх)
+rm -f "$ZT_RETRY"; zt_recover
 full_cycle start
 while [ -f "$STATE/service.wanted" ]; do
   sleep "$INTERVAL"
@@ -56,7 +57,7 @@ while [ -f "$STATE/service.wanted" ]; do
   fi
   # подбор стратегии Zapret — в фоне, один одновременно (заявку повторного нажатия панель не ставит, пока идёт подбор);
   # сценарий умер без итога (KILL, сбой) — вернуть прежние стратегии и пометить подбор failed
-  pid_alive zapret-test || zt_recover
+  pid_alive zapret-test || zt_service_recover
   if [ -f "$STATE/zapret-test.request" ]; then
     rm -f "$STATE/zapret-test.request"
     pid_alive zapret-test || { start_bg zapret-test sh "$SCR/mitt-zapret-test.sh"; mlog "подбор стратегии Zapret запущен"; }
