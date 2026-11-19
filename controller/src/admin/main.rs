@@ -160,9 +160,15 @@ fn table_routes(v6: bool) -> Result<String, String> {
     let t = TABLE.to_string();
     let args: Vec<&str> = if v6 { vec!["-6", "route", "show", "table", &t] } else { vec!["route", "show", "table", &t] };
     match run_s("ip", &args) {
-        Err(e) if e.contains("does not exist") => Ok(String::new()),
+        Err(e) if table_missing(&e) => Ok(String::new()),
         r => r,
     }
+}
+
+/// Таблицы ещё нет (первое применение): новый iproute2 пишет «FIB table does not exist»,
+/// iproute2 прошивки RC06 текст ядра не показывает — только «Dump terminated».
+fn table_missing(err: &str) -> bool {
+    err.contains("does not exist") || err.trim_end().ends_with("Dump terminated")
 }
 
 fn read_live(warnings: &mut Vec<String>) -> Result<Live, String> {
@@ -696,5 +702,17 @@ fn main() -> ExitCode {
             eprintln!("{USAGE}");
             fail(2, "usage", format!("неизвестная команда {}", a.cmd))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::table_missing;
+
+    #[test]
+    fn missing_route_table_is_empty() {
+        assert!(table_missing("ip route show table 3100: Dump terminated"));
+        assert!(table_missing("ip route show table 3100: Error: ipv4: FIB table does not exist.\nDump terminated\n"));
+        assert!(!table_missing("ip route show table 3100: RTNETLINK answers: Operation not permitted"));
     }
 }
