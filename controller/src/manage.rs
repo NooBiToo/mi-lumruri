@@ -331,10 +331,18 @@ fn router_lan() -> Response {
     let Some(o) = parse_uci_lan(&text) else {
         return unavailable("в сетевых настройках роутера нет интерфейса lan".into());
     };
-    let (Some(ip), Some(mask)) = (o.get("ipaddr"), o.get("netmask")) else {
+    // адрес с длиной префикса (ipaddr '192.168.31.1/24', OpenWrt 21+) — маска из него, netmask не нужен
+    let (ip, mask) = match o.get("ipaddr").map(|a| a.split_once('/').map_or((a.as_str(), None), |(a, p)| (a, Some(p)))) {
+        Some((ip, Some(prefix))) => {
+            (ip, Some(prefix.parse::<u32>().ok().filter(|p| (1..=32).contains(p)).map(|p| std::net::Ipv4Addr::from(u32::MAX << (32 - p))).ok_or(())))
+        }
+        Some((ip, None)) => (ip, o.get("netmask").map(|m| m.parse::<std::net::Ipv4Addr>().map_err(|_| ()))),
+        None => return unavailable("у интерфейса lan не задан адрес".into()),
+    };
+    let Some(mask) = mask else {
         return unavailable("у интерфейса lan не заданы адрес и маска сети".into());
     };
-    let (Ok(ip), Ok(mask)) = (ip.parse::<std::net::Ipv4Addr>(), mask.parse::<std::net::Ipv4Addr>()) else {
+    let (Ok(ip), Ok(mask)) = (ip.parse::<std::net::Ipv4Addr>(), mask) else {
         return unavailable("адрес или маска интерфейса lan записаны в неизвестном виде".into());
     };
     let m = u32::from(mask);

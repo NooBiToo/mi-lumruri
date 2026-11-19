@@ -300,12 +300,14 @@ fn zapret_list_and_test_args() {
     assert!(general.len() >= 8 && !general.iter().any(|x| x == "auto"), "{general:?}");
     let (_, yt) = lines(&["zapret-list", "youtube"]);
     assert!(yt.iter().all(|x| x.starts_with("yv")) && !yt.is_empty(), "{yt:?}");
-    // аргументы проверки одной стратегии: очередь 201, только профили самой стратегии (без постоянных профилей Discord)
+    // аргументы проверки одной стратегии: очередь 201, постоянные TCP-профили (Discord) как в работе, затем стратегия
     let (code, a) = lines(&["zapret-args", "v3"]);
     assert_eq!(code, 0, "{a:?}");
     assert_eq!(&a[..3], ["--qnum=201", "--fwmark=0x40000000", "--chdir"]);
-    assert!(a.iter().any(|x| x == "--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-600000:tcp_md5:repeats=4"), "{a:?}");
-    assert!(!a.iter().any(|x| x.contains("discord") || x.contains("circular")), "{a:?}");
+    let discord = a.iter().position(|x| x == "--hostlist=zapret-hosts-discord.txt").expect("профиль Discord");
+    let own = a.iter().position(|x| x == "--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-600000:tcp_md5:repeats=4").expect("профиль v3");
+    assert!(discord < own, "{a:?}");
+    assert!(!a.iter().any(|x| x.starts_with("--filter-udp")), "{a:?}");
     let (code, a) = lines(&["zapret-args", "yv2"]);
     assert_eq!(code, 0);
     assert!(a.iter().any(|x| x == "--hostlist=zapret-hosts-youtube.txt"), "{a:?}");

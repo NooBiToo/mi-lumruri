@@ -60,15 +60,39 @@ pub struct AdblockConfig {
 }
 
 /// Выбор стратегий Zapret из встроенного каталога (`zapret::catalog`): произвольные аргументы nfqws2 не принимаются.
+/// Раздел версии 0.2.0 (`strategy`: `multisplit`|`multidisorder`, `pos`, `tcp_ports`) читается как `auto`/`auto`:
+/// иначе после обновления настройки не разобрать и панель не может их исправить.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "RawZapret")]
 pub struct ZapretConfig {
     /// Стратегия для всех сайтов: `auto` (круговой режим) или id стратегии каталога.
-    #[serde(default = "auto")]
     pub strategy: String,
     /// Стратегия для YouTube: `auto` или id YouTube-стратегии каталога.
-    #[serde(default = "auto")]
     pub youtube: String,
+}
+
+/// Раздел `zapret` как он записан: новый вид или вид 0.2.0.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawZapret {
+    strategy: Option<String>,
+    youtube: Option<String>,
+    pos: Option<serde_json::Value>,
+    tcp_ports: Option<serde_json::Value>,
+}
+
+impl TryFrom<RawZapret> for ZapretConfig {
+    type Error = String;
+    fn try_from(r: RawZapret) -> Result<Self, String> {
+        let legacy = matches!(r.strategy.as_deref(), Some("multisplit" | "multidisorder")) && r.youtube.is_none();
+        if legacy {
+            return Ok(ZapretConfig::default());
+        }
+        if let Some(f) = [("pos", &r.pos), ("tcp_ports", &r.tcp_ports)].iter().find_map(|(n, v)| v.as_ref().map(|_| *n)) {
+            return Err(format!("unknown field `{f}`, expected `strategy` or `youtube`"));
+        }
+        Ok(ZapretConfig { strategy: r.strategy.unwrap_or_else(auto), youtube: r.youtube.unwrap_or_else(auto) })
+    }
 }
 
 fn auto() -> String {

@@ -132,12 +132,15 @@ pub fn candidates(kind: Kind) -> Vec<&'static str> {
     catalog().strategies.iter().filter(|s| s.kind == kind && s.id != AUTO).map(|s| s.id.as_str()).collect()
 }
 
-/// Аргументы nfqws2 для проверки одной стратегии (подбор на роутере): только её собственные профили, без постоянных
-/// (Discord, QUIC) и без стратегии другого вида — проверочная очередь получает лишь TCP к портам 80 и 443.
+/// Аргументы nfqws2 для проверки одной стратегии (подбор на роутере): постоянные TCP-профили (Discord) в том же
+/// порядке, что и в работе (`selected`), затем профили самой стратегии. Сайты Discord в работе обрабатывает
+/// постоянный профиль, а не проверяемая стратегия, — так они дают одинаковый результат для каждого кандидата.
+/// UDP-профилей и стратегии другого вида нет: проверочная очередь получает лишь TCP к портам 80 и 443.
 /// Круговой режим (`auto`) не проверяется: он переключается по неудачам и за один проход не измеряется.
 pub fn test_args(id: &str, qnum: u16) -> Result<Vec<String>, String> {
-    match catalog().strategies.iter().find(|s| s.id == id) {
-        Some(s) if s.id != AUTO => Ok(render_args(&s.profiles.iter().collect::<Vec<_>>(), qnum)),
+    let c = catalog();
+    match c.strategies.iter().find(|s| s.id == id) {
+        Some(s) if s.id != AUTO => Ok(render_args(&c.always.iter().filter(|p| p.proto == Proto::Tcp).chain(&s.profiles).collect::<Vec<_>>(), qnum)),
         Some(_) => Err("круговой режим (auto) подбором не проверяется".into()),
         None => Err(format!("стратегии «{id}» нет в каталоге")),
     }
@@ -273,6 +276,23 @@ mod tests {
     }
 
     #[test]
+    fn test_args_put_permanent_tcp_profiles_first() {
+        // как в работе: постоянные TCP-профили (Discord) раньше проверяемой стратегии, UDP-профилей нет
+        let always: Vec<&ZProfile> = selected(&ZapretConfig::default()).into_iter().filter(|p| p.proto == Proto::Tcp && catalog().always.iter().any(|a| std::ptr::eq(a, *p))).collect();
+        assert!(!always.is_empty() && always[0].hostlist.as_deref() == Some("discord"));
+        for id in candidates(Kind::General).into_iter().chain(candidates(Kind::Youtube)) {
+            let s = catalog().strategies.iter().find(|s| s.id == id).unwrap();
+            let want: Vec<&ZProfile> = always.iter().copied().chain(&s.profiles).collect();
+            assert_eq!(test_args(id, 201).unwrap(), render_args(&want, 201), "{id}");
+            let a = test_args(id, 201).unwrap();
+            assert!(!a.iter().any(|x| x.starts_with("--filter-udp")), "{id}: {a:#?}");
+            // профиль Discord — первый, проверяемая стратегия — последней
+            let first = a.iter().position(|x| x.starts_with("--filter-tcp")).unwrap();
+            assert_eq!(a[first + 1..first + 3], ["--filter-l7=tls,discord", "--hostlist=zapret-hosts-discord.txt"], "{id}");
+        }
+    }
+
+    #[test]
     fn queue_fits_multiport_for_every_choice() {
         // multiport принимает до 15 портов, диапазон считается за два
         let c = catalog();
@@ -299,7 +319,24 @@ mod tests {
         assert!(codes(serde_json::json!({ "strategy": "v10", "youtube": "yv22" })).is_empty());
         assert_eq!(codes(serde_json::json!({ "strategy": "nope" })), ["zapret.strategy:unknown_strategy"]);
         assert_eq!(codes(serde_json::json!({ "strategy": "yv1", "youtube": "v1" })), ["zapret.strategy:wrong_kind", "zapret.youtube:wrong_kind"]);
-        // прежние поля не принимаются
+        // поля 0.2.0 при новой стратегии не принимаются
         assert!(serde_json::from_value::<Config>(serde_json::json!({ "version": 1, "default_action": { "type": "direct" }, "zapret": { "strategy": "auto", "pos": 2 } })).is_err());
+        assert!(serde_json::from_value::<Config>(serde_json::json!({ "version": 1, "default_action": { "type": "direct" }, "zapret": { "tcp_ports": [443] } })).is_err());
+        assert!(serde_json::from_value::<Config>(serde_json::json!({ "version": 1, "default_action": { "type": "direct" }, "zapret": { "strategy": "auto", "x": 1 } })).is_err());
+    }
+
+    #[test]
+    fn zapret_section_from_0_2_0_reads_as_auto() {
+        for z in [
+            serde_json::json!({ "strategy": "multisplit", "pos": 2, "tcp_ports": [80, 443] }),
+            serde_json::json!({ "strategy": "multidisorder", "pos": 1 }),
+            serde_json::json!({ "strategy": "multisplit" }),
+        ] {
+            let c = cfg(z.clone());
+            assert_eq!(c.zapret, Some(ZapretConfig::default()), "{z}");
+            assert!(validate_config(&c).is_empty());
+            // записывается уже в новом виде
+            assert_eq!(serde_json::to_value(&c.zapret).unwrap(), serde_json::json!({ "strategy": "auto", "youtube": "auto" }));
+        }
     }
 }

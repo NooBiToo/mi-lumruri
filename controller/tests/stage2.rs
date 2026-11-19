@@ -258,6 +258,26 @@ fn render_policy_and_client_for_saved_trusttunnel_rule() {
 }
 
 #[test]
+fn config_from_0_2_0_with_old_zapret_section_loads_and_renders() {
+    // 0.2.0 сохраняла zapret: {strategy: multisplit|multidisorder, pos, tcp_ports}; после обновления такой файл
+    // должен читаться (как auto/auto), иначе панель его не покажет и не сможет исправить
+    let dir = lab_copy("render-zapret-020");
+    let cfg = dir.join("config.json").to_string_lossy().into_owned();
+    let mut c: Value = serde_json::from_slice(&std::fs::read(&cfg).unwrap()).unwrap();
+    c["zapret"] = json!({ "strategy": "multidisorder", "pos": 2, "tcp_ports": [80, 443] });
+    c["default_action"] = json!({ "type": "direct_zapret" });
+    std::fs::write(&cfg, serde_json::to_vec_pretty(&c).unwrap()).unwrap();
+    std::fs::write(dir.join("secrets.json"), json!({ "version": 1, "profiles": {} }).to_string()).unwrap();
+    let (s, v) = cgi("GET", "/config", None, &cfg, &[]);
+    assert_eq!((s, &v["ok"]), (200, &json!(true)), "{v}");
+    assert_eq!(v["config"]["zapret"], json!({ "strategy": "auto", "youtube": "auto" }));
+    let o = Command::new(bin()).args(["render", &cfg, &p(&dir, "secrets.json"), &p(&dir, "state")]).output().unwrap();
+    assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stdout));
+    let args = std::fs::read_to_string(dir.join("state").join("nfqws2.args")).unwrap();
+    assert!(args.contains("=circular:"), "{args}");
+}
+
+#[test]
 fn render_refuses_when_rule_cannot_be_applied_exactly() {
     let (dir, cfg, _pw) = saved_lab("render-bad");
     let out = p(&dir, "state");

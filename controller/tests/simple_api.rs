@@ -116,6 +116,17 @@ fn router_uci_parser_edge_cases() {
 ").unwrap();
     let o = p.get("/router", &[("MI_TT_UCI_NETWORK", f.to_str().unwrap())]);
     assert_eq!(o.body["lan"], json!({ "bridge": "br-lan", "subnet": "10.1.0.0/16", "address": "10.1.2.3" }), "{}", o.body);
+    // адрес с префиксом (CIDR) без netmask; префикс главнее netmask
+    for (uci, subnet) in [("option ipaddr '192.168.31.1/24'", "192.168.31.0/24"), ("option ipaddr '10.1.2.3/20'\n\toption netmask '255.255.255.0'", "10.1.0.0/20")] {
+        std::fs::write(&f, format!("config interface 'lan'\n\toption device 'br-lan'\n\t{uci}\n")).unwrap();
+        let o = p.get("/router", &[("MI_TT_UCI_NETWORK", f.to_str().unwrap())]);
+        assert_eq!((o.status, &o.body["lan"]["subnet"]), (200, &json!(subnet)), "{}", o.body);
+        assert_eq!(o.body["lan"]["address"], json!(uci.split('\'').nth(1).unwrap().split('/').next().unwrap()));
+    }
+    for bad in ["192.168.31.1/33", "192.168.31.1/x", "192.168.31.1/0"] {
+        std::fs::write(&f, format!("config interface 'lan'\n\toption ipaddr '{bad}'\n")).unwrap();
+        assert_eq!(p.get("/router", &[("MI_TT_UCI_NETWORK", f.to_str().unwrap())]).status, 503, "{bad}");
+    }
 }
 
 #[test]
