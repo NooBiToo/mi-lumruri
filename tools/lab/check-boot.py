@@ -44,6 +44,9 @@ z = text("zone.boot-guard.txt")
 check("холодный старт без WAN (штатный BusyBox, вызов как из fw3): код 0, защита guard сразу — метка, unreachable в таблице 3100, цепочки MITT_ и наборы ipset на месте",
       "exit=0" in b1 and st.get("protection") == "guard" and "fwmark 0x4000/0x4000 lookup 3100" in z and "unreachable default" in z and "-j MITT_C" in z and "mitt" in z,
       [b1.strip()[-120:], st.get("protection"), z[:200]])
+eng = text("engines.ls").split()
+check("после холодного старта рядом с nfqws2 лежат блобы, списки хостов и Lua zapret2 (--chdir)",
+      all(n in eng for n in ("tls_clienthello_www_google_com.bin", "tls_clienthello_www_4pda_to.bin", "quic_initial_www_google_com.bin", "zapret-hosts-youtube.txt", "zapret-hosts-discord.txt", "zapret-auto.lua.gz")), eng)
 check("служебная команда mitt-boot.sh auth status (каталоги пакета): вход настроен, TOTP подтверждён",
       js("auth-status.json").get("configured") is True and js("auth-status.json").get("ok") is True, text("auth-status.json")[:200])
 check("без WAN: у ТВ нет связи (трафик правила упирается в unreachable), телефон без правил — тоже нет (WAN выключен)", seen("B-tv-no-wan")[0] == 1, [seen("B-tv-no-wan"), seen("B-phone-no-wan")])

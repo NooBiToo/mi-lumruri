@@ -21,4 +21,4 @@ zapret-openwrt (zapret2/files/fake/4pda.bin, коммит 1b04a87558ec7965bfed0e
 Блобы nfqws2 и Lua-библиотеки из zapret2 v1.0.7 (bol-van, лицензия MIT): https://github.com/bol-van/zapret2
 
 Список хостов package/zapret/zapret-hosts-discord.txt взят из Zapret Manager (Apache-2.0, см. выше),
-package/zapret/zapret-hosts-youtube.txt — перечень доменов YouTube из itdoginfo/allow-domains (Services/youtube.lst).
+package/zapret/zapret-hosts-youtube.txt — перечень доменов YouTube из itdoginfo/allow-domains (Services/youtube.lst, коммит 932e11c43a9e000a24ba08129c15d99287c6e9a9).

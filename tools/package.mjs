@@ -73,6 +73,7 @@ for (const s of readdirSync(join(ROOT, 'package', 'scripts'))) plain(join(ROOT, 
 plain(join(ROOT, 'package', 'defaults', 'config.json'), 'payload/defaults/config.json')
 copyFileSync(join(ROOT, 'package', 'install.sh'), join(PKG, 'install.sh'))
 copyFileSync(join(ROOT, 'NOTICE'), join(PKG, 'NOTICE'))
+plain(join(ROOT, 'NOTICE'), 'payload/NOTICE')
 
 // --- ключ и подпись ---
 const KEYF = args.includes('--key') ? args[args.indexOf('--key') + 1] : join(ROOT, '.tools', 'keys', 'release-ed25519.pem')

@@ -170,6 +170,7 @@ T1="$(now)"; snapz boot-guard; cp_status boot; cp "$RR/tmp/mi-trusttunnel/log/mi
 printf '{"boot_seconds":%s}\n' "$("${PY[@]}" -c "print(round($T1-$T0,1))")" >"$OUT/boot-time.json"
 probe B-tv-no-wan tv; probe B-phone-no-wan phone
 boot auth status >"$OUT/auth-status.json" 2>&1
+ls "$RR/tmp/mi-trusttunnel/bin" >"$OUT/engines.ls" 2>&1
 # панель: https через штатный nginx стока → uhttpd стока → CGI ARM64; вход паролем и TOTP из сети LAN
 sleep 2
 CJ="$W/cookies"; cu() { nsx tv curl -sk -m 20 -c "$CJ" -b "$CJ" "$@"; }

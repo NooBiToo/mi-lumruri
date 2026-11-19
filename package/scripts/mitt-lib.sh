@@ -54,7 +54,8 @@ unpack_payload() { # unpack_payload <каталог релиза> <куда>
     [ -f "$f" ] || continue
     unxz -c "$f" >"$to/$(basename "$f" .xz)" || return 1; chmod 700 "$to/$(basename "$f" .xz)"
   done
-  for f in "$rel"/payload/engines/*.lua.gz; do [ -f "$f" ] && cp "$f" "$to/"; done
+  # Lua, блобы и списки хостов zapret2 — обычные файлы рядом с nfqws2 (--chdir)
+  for f in "$rel"/payload/engines/*.lua.gz "$rel"/payload/engines/*.bin "$rel"/payload/engines/*.txt; do [ -f "$f" ] && { cp "$f" "$to/" || return 1; }; done
   for f in "$rel"/payload/www/*.xz; do
     [ -f "$f" ] || continue
     case "$(basename "$f" .xz)" in assets__*) unxz -c "$f" >"$to/www/assets/$(basename "$f" .xz | sed 's/^assets__//')" || return 1;; *) unxz -c "$f" >"$to/www/$(basename "$f" .xz)" || return 1;; esac
