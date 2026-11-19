@@ -54,7 +54,7 @@ function remove(d: string) {
       </Button>
     </form>
     <span id="hosts-note" :class="error ? 'field__error' : 'field__hint'" aria-live="polite">
-      {{ error ?? 'Работает для всех устройств, которые получают DNS от роутера.' }}
+      {{ error ?? 'Работает для всех устройств, которые получают DNS от роутера' }}
     </span>
 
     <ul v-if="model.length" class="dlist__items" aria-labelledby="hosts-title">

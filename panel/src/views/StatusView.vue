@@ -2,31 +2,22 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
-import ToggleSwitch from 'primevue/toggleswitch'
-import { ArrowRight, ListChecks, MonitorSmartphone, RefreshCw, Route, Server, ShieldAlert, ShieldCheck, ShieldOff, Waypoints } from 'lucide-vue-next'
+import { ArrowRight, MonitorSmartphone, RefreshCw, Router } from 'lucide-vue-next'
 import { api, type ZapretTestState } from '../api'
 import { catalog, config, leases, lists, loadLeases, loadLists, loadStatus, notify, profile, serverReady, simple, simpleState, tunnel } from '../store'
 import { AUTO, plural, when, zapretIdle } from '../status'
-import { toggleVpn, vpnBusy } from '../vpn'
 import ServiceLogo from '../components/ServiceLogo.vue'
 
 const emit = defineEmits<{ navigate: [tab: 'server' | 'sites' | 'devices' | 'more'] }>()
 
-const heroIcon = computed(() => (tunnel.value.tone === 'ok' ? ShieldCheck : tunnel.value.tone === 'idle' ? ShieldOff : ShieldAlert))
 const host = computed(() => profile.value?.endpoint ? (profile.value.endpoint.sni || profile.value.endpoint.server) : null)
 const nothingSelected = computed(() => !!simple.value && simple.value.mode === 'selected' && !simple.value.services.length && !simple.value.customDomains.length)
-const services = computed(() => (simple.value?.services ?? []).map((id) => ({ id, name: catalog.value?.services.find((x) => x.id === id)?.name ?? id })))
+const named = (ids: string[]) => ids.map((id) => ({ id, name: catalog.value?.services.find((x) => x.id === id)?.name ?? id }))
+const services = computed(() => named(simple.value?.services ?? []))
+const zapretServices = computed(() => named(simple.value?.zapretServices ?? []))
+const MAX_DOMAINS = 6
 
-// ---- карточки-показатели ----
-const vpnKpi = computed(() => {
-  const s = simple.value
-  if (!s) return { value: '—', note: '' }
-  if (s.mode === 'all') return { value: 'Все сайты', note: s.exceptions.length ? `кроме ${plural(s.exceptions.length, 'исключения', 'исключений', 'исключений')}` : 'без исключений' }
-  return {
-    value: s.services.length ? plural(s.services.length, 'сервис', 'сервиса', 'сервисов') : 'Ничего',
-    note: s.customDomains.length ? `+ ${plural(s.customDomains.length, 'свой сайт', 'своих сайта', 'своих сайтов')}` : s.services.length ? 'своих сайтов нет' : 'сайты не выбраны',
-  }
-})
+// ---- схема маршрутов: устройства → роутер → ветки ----
 const devKpi = computed(() => {
   const s = simple.value
   const online = leases.value.length
@@ -35,12 +26,9 @@ const devKpi = computed(() => {
   return { value: s.devices === 'all' ? 'Все' : plural(s.devices.length, 'выбранное', 'выбранных', 'выбранных'), note }
 })
 const test = ref<ZapretTestState | null>(null)
-const zapretKpi = computed(() => {
-  const s = simple.value
-  if (!s || s.rest !== 'zapret') return { value: 'Выключен', note: 'остальные сайты напрямую', tone: 'idle' }
-  if (zapretIdle(s)) return { value: 'Не используется', note: s.enabled ? 'всё идёт через VPN' : 'VPN выключен', tone: 'idle' }
-  return { value: zapretAuto.value ? 'Автоматически' : 'Подобран', note: zapretAuto.value ? 'способ выбирается сам' : test.value?.finished ? `подбор ${when(test.value.finished)}` : 'под ваш интернет', tone: 'ok' }
-})
+/** Способ Zapret коротко: подпись веток, которые идут с обходом блокировок. */
+const zapretWay = computed(() => (zapretAuto.value ? 'способ автоматический' : test.value?.finished ? `способ подобран ${when(test.value.finished)}` : 'способ выбран вручную'))
+const zapretUsed = computed(() => !!simple.value && !zapretIdle(simple.value))
 const zapretAuto = computed(() => (config.value?.zapret?.strategy ?? AUTO) === AUTO && (config.value?.zapret?.youtube ?? AUTO) === AUTO)
 
 // ---- списки сайтов ----
@@ -80,86 +68,114 @@ onBeforeUnmount(() => clearTimeout(listsTimer))
   <section class="sect" aria-label="Обзор">
     <!-- первый запуск: без сервера ничего не заработает -->
     <div v-if="!serverReady" class="card onboard">
-      <span class="onboard__icon" aria-hidden="true"><Waypoints :size="28" :stroke-width="1.75" /></span>
       <div class="onboard__body">
         <h2 class="onboard__title">Подключите сервер</h2>
         <p class="muted">Роутер будет открывать выбранные сайты через ваш VPN-сервер TrustTunnel. Начните с ссылки на сервер — остальное займёт минуту.</p>
         <ol class="steps">
           <li class="steps__item steps__item--now"><span class="steps__n">1</span>Вставьте ссылку на сервер</li>
           <li class="steps__item"><span class="steps__n">2</span>Отметьте сайты для VPN</li>
-          <li class="steps__item"><span class="steps__n">3</span>Готово — роутер применит настройки</li>
+          <li class="steps__item"><span class="steps__n">3</span>Роутер применит настройки сам</li>
         </ol>
       </div>
       <Button label="Настроить сервер" class="onboard__btn" @click="emit('navigate', 'server')">
-        <template #icon><ArrowRight :size="18" class="p-button-icon-right" aria-hidden="true" /></template>
+        <template #icon><ArrowRight :size="16" class="p-button-icon-right" aria-hidden="true" /></template>
       </Button>
     </div>
 
-    <!-- туннель -->
-    <div v-else :class="['card', 'hero', `hero--${tunnel.tone}`]">
-      <span class="hero__icon" aria-hidden="true"><component :is="heroIcon" :size="28" :stroke-width="1.75" /></span>
-      <div class="hero__text">
-        <p class="hero__kicker">Туннель</p>
-        <p class="hero__title">{{ tunnel.title }}</p>
-        <p v-if="tunnel.detail" class="hero__detail">{{ tunnel.detail }}</p>
-        <p v-if="host" class="hero__host"><Server :size="14" aria-hidden="true" /><span class="num">{{ host }}</span></p>
+    <!-- туннель: индикатор, как на корпусе роутера -->
+    <div v-else :class="['card', 'state', `state--${tunnel.tone}`]">
+      <span :class="['led', 'led--lg', `led--${tunnel.tone}`]" aria-hidden="true" />
+      <div class="state__text">
+        <h2 class="state__title">{{ tunnel.title }}</h2>
+        <p v-if="tunnel.detail" class="state__detail">{{ tunnel.detail }}</p>
       </div>
-      <div class="hero__act">
-        <Button v-if="simple && nothingSelected && simple.enabled" label="Выбрать сайты" @click="emit('navigate', 'sites')" />
-        <label v-if="simple" class="hero__switch">
-          <ToggleSwitch :model-value="simple.enabled" input-id="vpn-hero" :disabled="vpnBusy" @update:model-value="toggleVpn()" />
-          <span>{{ simple.enabled ? 'VPN включён' : 'VPN выключен' }}</span>
-        </label>
-      </div>
+      <span v-if="host" class="state__host meta" title="Сервер TrustTunnel">{{ host }}</span>
+      <Button v-if="simple && nothingSelected && simple.enabled" label="Выбрать сайты" class="state__act" @click="emit('navigate', 'sites')" />
     </div>
 
     <Message v-if="simpleState && !simpleState.canonical" severity="warn" :closable="false">
       Настройки изменены вручную, поэтому здесь их не показать. Подробнее — на экране «Сайты».
     </Message>
 
-    <div v-if="simple" class="kpis">
-      <button type="button" class="card kpi" @click="emit('navigate', 'sites')">
-        <span class="kpi__head"><span class="kpi__icon kpi__icon--accent" aria-hidden="true"><Route :size="18" /></span>Через VPN</span>
-        <span class="kpi__value">{{ vpnKpi.value }}</span>
-        <span class="kpi__note">{{ vpnKpi.note }}</span>
-      </button>
-      <button type="button" class="card kpi" @click="emit('navigate', 'devices')">
-        <span class="kpi__head"><span class="kpi__icon kpi__icon--accent" aria-hidden="true"><MonitorSmartphone :size="18" /></span>Устройства</span>
-        <span class="kpi__value">{{ devKpi.value }}</span>
-        <span class="kpi__note">{{ devKpi.note }}</span>
-      </button>
-      <button type="button" class="card kpi" @click="emit('navigate', 'sites')">
-        <span class="kpi__head"><span :class="['kpi__icon', zapretKpi.tone === 'ok' ? 'kpi__icon--ok' : 'kpi__icon--idle']" aria-hidden="true"><ShieldCheck :size="18" /></span>Обход блокировок</span>
-        <span class="kpi__value">{{ zapretKpi.value }}</span>
-        <span class="kpi__note">{{ zapretKpi.note }}</span>
-      </button>
-      <div class="card kpi kpi--static">
-        <span class="kpi__head"><span class="kpi__icon kpi__icon--accent" aria-hidden="true"><ListChecks :size="18" /></span>Списки сайтов</span>
-        <span class="kpi__value">{{ listsStatus?.updated ? when(listsStatus.updated) : snapshot ? `от ${snapshot}` : '—' }}</span>
-        <span class="kpi__foot">
-          <span :class="['kpi__note', { 'warn-text': listsStatus && !listsStatus.ok }]">{{ listsStatus && !listsStatus.ok ? 'проверка не удалась' : listsStatus?.updated ? 'обновлены' : 'из установки' }}</span>
-          <button type="button" class="link-btn" :disabled="updating || lists?.requested" @click="updateLists">
-            <RefreshCw :size="14" :class="{ spin: updating || lists?.requested }" aria-hidden="true" />Обновить
-          </button>
-        </span>
-      </div>
-    </div>
-
-    <div v-if="simple" class="card">
+    <div v-if="simple" class="card routes">
       <div class="card__head">
-        <h2 class="card__title">Сейчас через VPN</h2>
-        <button type="button" class="link-btn" @click="emit('navigate', 'sites')">Изменить<ArrowRight :size="14" aria-hidden="true" /></button>
+        <h2 id="routes-title" class="card__title">Маршруты</h2>
+        <button type="button" class="link-btn" @click="emit('navigate', 'sites')">Изменить</button>
       </div>
-      <p v-if="simple.mode === 'all'" class="muted">Весь интернет идёт через VPN{{ simple.exceptions.length ? `, кроме ${plural(simple.exceptions.length, 'сайта', 'сайтов', 'сайтов')} из исключений` : '' }}.</p>
-      <template v-else>
-        <ul v-if="services.length || simple.customDomains.length" class="now">
-          <li v-for="s in services" :key="s.id" class="now__chip"><ServiceLogo :id="s.id" size="sm" />{{ s.name }}</li>
-          <li v-for="d in simple.customDomains.slice(0, 6)" :key="d" class="now__chip now__chip--domain">{{ d }}</li>
-          <li v-if="simple.customDomains.length > 6" class="now__chip now__chip--more">ещё {{ simple.customDomains.length - 6 }}</li>
+
+      <div class="routes__map">
+        <div class="routes__src">
+          <button type="button" class="node" @click="emit('navigate', 'devices')">
+            <MonitorSmartphone :size="16" class="node__icon" aria-hidden="true" />
+            <span class="node__name">Устройства</span>
+            <span class="meta node__meta">{{ devKpi.value.toLowerCase() }} · {{ devKpi.note }}</span>
+          </button>
+          <span class="routes__wire" aria-hidden="true" />
+          <span class="node node--router">
+            <Router :size="16" class="node__icon" aria-hidden="true" />
+            <span class="node__name">Роутер</span>
+          </span>
+          <span class="routes__wire routes__wire--tail" aria-hidden="true" />
+        </div>
+
+        <ul class="routes__branches" aria-labelledby="routes-title">
+          <!-- через VPN -->
+          <li :class="['branch', 'branch--vpn', { 'branch--off': !simple.enabled }]">
+            <div class="branch__head">
+              <span class="branch__title"><span :class="['led', simple.enabled ? `led--${tunnel.tone === 'ok' ? 'vpn' : tunnel.tone}` : 'led--idle']" aria-hidden="true" />
+                <span class="branch__name">{{ simple.mode === 'all' ? 'Весь интернет через VPN' : 'Через VPN' }}</span></span>
+              <span class="meta">{{ simple.enabled ? (host ?? 'сервер не настроен') : 'VPN выключен' }}</span>
+            </div>
+            <p v-if="simple.mode === 'all'" class="branch__note">{{ simple.exceptions.length ? `Кроме ${plural(simple.exceptions.length, 'исключения', 'исключений', 'исключений')}` : 'Без исключений' }}</p>
+            <ul v-else-if="services.length || simple.customDomains.length" class="branch__items">
+              <li v-for="x in services" :key="x.id" class="branch__item"><ServiceLogo :id="x.id" size="sm" />{{ x.name }}</li>
+              <li v-for="d in simple.customDomains.slice(0, MAX_DOMAINS)" :key="d" class="branch__item meta">{{ d }}</li>
+              <li v-if="simple.customDomains.length > MAX_DOMAINS" class="branch__item meta">ещё {{ simple.customDomains.length - MAX_DOMAINS }}</li>
+            </ul>
+            <p v-else class="branch__note">Сайты не выбраны</p>
+          </li>
+
+          <!-- напрямую с обходом блокировок -->
+          <li v-if="zapretServices.length || simple.zapretDomains.length" class="branch branch--zapret">
+            <div class="branch__head">
+              <span class="branch__title"><span class="led led--zapret" aria-hidden="true" />
+                <span class="branch__name">Напрямую с обходом блокировок</span></span>
+              <span class="meta">{{ zapretWay }}</span>
+            </div>
+            <ul class="branch__items">
+              <li v-for="x in zapretServices" :key="x.id" class="branch__item"><ServiceLogo :id="x.id" size="sm" />{{ x.name }}</li>
+              <li v-for="d in simple.zapretDomains.slice(0, MAX_DOMAINS)" :key="d" class="branch__item meta">{{ d }}</li>
+              <li v-if="simple.zapretDomains.length > MAX_DOMAINS" class="branch__item meta">ещё {{ simple.zapretDomains.length - MAX_DOMAINS }}</li>
+            </ul>
+          </li>
+
+          <!-- остальное -->
+          <li v-if="simple.mode === 'selected'" :class="['branch', simple.rest === 'zapret' && zapretUsed ? 'branch--zapret' : 'branch--direct']">
+            <div class="branch__head">
+              <span class="branch__title"><span :class="['led', simple.rest === 'zapret' && zapretUsed ? 'led--zapret' : 'led--idle']" aria-hidden="true" />
+                <span class="branch__name">Остальные сайты</span></span>
+              <span class="meta">{{ simple.rest === 'zapret' ? `напрямую с обходом блокировок, ${zapretWay}` : 'напрямую' }}</span>
+            </div>
+          </li>
+          <li v-else-if="simple.exceptions.length" class="branch branch--direct">
+            <div class="branch__head">
+              <span class="branch__title"><span class="led led--idle" aria-hidden="true" />
+                <span class="branch__name">Исключения</span></span>
+              <span class="meta">напрямую · {{ plural(simple.exceptions.length, 'сайт', 'сайта', 'сайтов') }}</span>
+            </div>
+          </li>
         </ul>
-        <p v-else class="muted">Пока ничего не выбрано. Отметьте сервисы или добавьте свои сайты.</p>
-      </template>
-      <p v-if="!simple.enabled" class="hint">VPN выключен: выбор сохранён и заработает, когда вы включите VPN.</p>
+      </div>
+
+      <div class="routes__foot">
+        <span :class="['meta', { 'warn-text': listsStatus && !listsStatus.ok }]">
+          Списки сайтов {{ listsStatus?.updated ? `обновлены ${when(listsStatus.updated)}` : snapshot ? `от ${snapshot}, из установки` : '' }}{{ listsStatus && !listsStatus.ok ? ' · проверка не удалась' : '' }}
+        </span>
+        <button type="button" class="link-btn" :disabled="updating || lists?.requested" @click="updateLists">
+          <RefreshCw :size="14" :class="{ spin: updating || lists?.requested }" aria-hidden="true" />Обновить
+        </button>
+      </div>
+      <p v-if="!simple.enabled" class="hint">VPN выключен: выбор сохранён и заработает, когда вы включите VPN</p>
     </div>
   </section>
 </template>

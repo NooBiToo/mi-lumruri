@@ -150,13 +150,13 @@ onBeforeUnmount(() => { removeEventListener('hashchange', onHash); clearInterval
     <a href="#main" class="skip">К содержимому</a>
     <aside class="side" aria-label="Разделы">
       <div class="side__brand">
-        <span class="side__mark" aria-hidden="true"><Waypoints :size="18" :stroke-width="2.25" /></span>
+        <span class="side__mark" aria-hidden="true"><Waypoints :size="20" :stroke-width="1.75" /></span>
         <span class="side__name">mi-trusttunnel</span>
       </div>
       <nav class="side__nav">
         <a v-for="t in TABS" :key="t.value" :href="`#${t.value}`" :class="['nav', { 'nav--on': tab === t.value }]" :title="t.label"
           :aria-current="tab === t.value ? 'page' : undefined" @click.prevent="go(t.value)">
-          <component :is="t.icon" class="nav__icon" :size="20" :stroke-width="1.9" aria-hidden="true" />
+          <component :is="t.icon" class="nav__icon" :size="18" :stroke-width="1.5" aria-hidden="true" />
           <span class="nav__label">{{ t.label }}</span>
         </a>
       </nav>
@@ -165,7 +165,7 @@ onBeforeUnmount(() => { removeEventListener('hashchange', onHash); clearInterval
     <div class="main">
       <header class="top">
         <h1 class="top__title">{{ title }}</h1>
-        <div :class="['pill', `pill--${tunnel.tone}`]" role="status" aria-live="polite">
+        <div v-show="tab !== 'status'" :class="['pill', `pill--${tunnel.tone}`]" role="status" aria-live="polite">
           <span class="pill__dot" aria-hidden="true" />
           <span class="pill__text">{{ tunnel.title }}</span>
         </div>
@@ -190,9 +190,8 @@ onBeforeUnmount(() => { removeEventListener('hashchange', onHash); clearInterval
       <main id="main" class="page" tabindex="-1">
         <div v-if="loading || (!config && !loadError)" class="loading" aria-busy="true">
           <span class="sr-only">Читаю настройки</span>
-          <Skeleton height="9rem" border-radius="14px" />
-          <div class="kpis"><Skeleton v-for="i in 4" :key="i" height="6.5rem" border-radius="14px" /></div>
-          <Skeleton height="8rem" border-radius="14px" />
+          <Skeleton height="5rem" border-radius="14px" />
+          <Skeleton height="16rem" border-radius="14px" />
         </div>
         <!-- настройки не разобрать (например, от другой версии): заменить простыми -->
         <section v-else-if="broken" class="sect">
@@ -213,7 +212,7 @@ onBeforeUnmount(() => { removeEventListener('hashchange', onHash); clearInterval
     <nav class="tabbar" aria-label="Разделы">
       <a v-for="t in TABS" :key="t.value" :href="`#${t.value}`" :class="['tabbar__item', { 'tabbar__item--on': tab === t.value }]"
         :aria-current="tab === t.value ? 'page' : undefined" :aria-label="t.label" @click.prevent="go(t.value)">
-        <component :is="t.icon" :size="22" :stroke-width="1.9" aria-hidden="true" />
+        <component :is="t.icon" :size="20" :stroke-width="1.5" aria-hidden="true" />
         <span>{{ t.short }}</span>
       </a>
     </nav>

@@ -3,7 +3,7 @@
 
 import type { Component } from 'vue'
 import { siAdguard, siCloudflare, siDigitalocean, siDiscord, siGooglegemini, siGooglemeet, siGoogle, siGoogleplay, siHetzner, siNextdns, siInstagram, siOvh, siQuad9, siRoblox, siTelegram, siTiktok, siX, siYoutube } from 'simple-icons'
-import { Ban, Cloud, Earth, Film, Globe, Landmark, Layers, Newspaper, Server, Sparkles } from 'lucide-vue-next'
+import { Ban, Cloud, Earth, Film, Globe, Landmark, Layers, Newspaper, Server, Tv } from 'lucide-vue-next'
 
 export type ServiceIcon = { kind: 'brand'; path: string; hex: string } | { kind: 'lucide'; icon: Component }
 
@@ -22,7 +22,7 @@ const ICONS: Record<string, ServiceIcon> = {
   google_meet: brand(siGooglemeet),
   roblox: brand(siRoblox),
   hdrezka: lucide(Film),
-  anime: lucide(Sparkles),
+  anime: lucide(Tv),
   news: lucide(Newspaper),
   block: lucide(Ban),
   geoblock: lucide(Earth),

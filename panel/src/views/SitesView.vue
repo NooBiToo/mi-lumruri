@@ -247,13 +247,13 @@ onBeforeUnmount(() => { unmounted = true; clearInterval(poll); poll = undefined 
         sub="Открываются напрямую, без VPN, с обходом блокировок (Zapret). Работают и при выключенном VPN."
         empty="Пока пусто. Подходит для сайтов, которые без VPN тормозят или не открываются." />
       <DomainList id="except" v-model="draft.except" title="Не пускать через VPN" placeholder="gosuslugi.ru"
-        sub="Эти сайты всегда открываются напрямую — например, банки и госуслуги." empty="Пока пусто. Добавьте, например, сайт банка." />
+        sub="Эти сайты всегда открываются напрямую — например, банки и госуслуги" empty="Пока пусто. Добавьте, например, сайт банка." />
 
       <div id="zapret" class="card">
         <div class="card__head">
           <div>
             <h2 class="card__title">{{ draft.mode === 'selected' ? 'Остальные сайты' : 'Сайты, которые не идут через VPN' }}</h2>
-            <p class="card__sub">Обход блокировок помогает, когда YouTube или Discord без VPN тормозят или не открываются.</p>
+            <p class="card__sub">Обход блокировок помогает, когда YouTube или Discord без VPN тормозят или не открываются</p>
           </div>
           <Segmented v-model="draft.rest" :options="RESTS" label="Как открывать остальные сайты" name="rest" />
         </div>

@@ -29,7 +29,7 @@ watch(config, () => {
 /** «Свой адрес» выбран явно: пока адрес не дописан, он может совпасть с готовым или быть пустым. */
 const custom = ref(dnsPresetOf(draft.value.dns.resolver) === CUSTOM_DNS)
 const dnsChoice = computed(() => (custom.value ? CUSTOM_DNS : dnsPresetOf(draft.value.dns.resolver)))
-const DNS_OPTIONS = [...DNS_PRESETS, { id: CUSTOM_DNS, name: 'Свой адрес', ip: '', desc: 'Любой публичный DNS-сервер (IPv4).' }]
+const DNS_OPTIONS = [...DNS_PRESETS, { id: CUSTOM_DNS, name: 'Свой адрес', ip: '', desc: 'Любой публичный DNS-сервер (IPv4)' }]
 const dnsNote = computed(() => DNS_PRESETS.find((p) => p.id === dnsChoice.value)?.note ?? null)
 function chooseDns(id: string) {
   const ip = dnsPresetIp(id)
@@ -90,7 +90,7 @@ useAutosave({
       <label class="setrow">
         <span class="setrow__text">
           <span class="setrow__title">Блокировка рекламы</span>
-          <span class="setrow__desc">Для всех устройств дома: рекламные сайты не открываются.</span>
+          <span class="setrow__desc">Для всех устройств дома: рекламные сайты не открываются</span>
         </span>
         <ToggleSwitch v-model="draft.dns.adblock" input-id="adblock" />
       </label>

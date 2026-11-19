@@ -72,7 +72,7 @@ function clear() {
       </Button>
     </form>
     <span :id="`${id}-note`" :class="note?.bad ? 'field__error' : 'field__hint'" aria-live="polite">
-      {{ note ? note.text : 'Можно вставить сразу несколько адресов: по одному в строке или через запятую.' }}
+      {{ note ? note.text : 'Можно вставить сразу несколько адресов: по одному в строке или через запятую' }}
     </span>
 
     <ul v-if="model.length" ref="list" class="dlist__items" :aria-labelledby="`${id}-title`">

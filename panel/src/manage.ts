@@ -81,11 +81,11 @@ export interface DnsPreset { id: string; name: string; ip: string; desc: string;
 
 export const DNS_PRESETS: DnsPreset[] = [
   { id: 'cloudflare', name: 'Cloudflare', ip: '1.1.1.1', desc: 'Быстрый, без фильтров. Выбран по умолчанию.' },
-  { id: 'quad9', name: 'Quad9', ip: '9.9.9.9', desc: 'Не открывает опасные и мошеннические сайты.' },
-  { id: 'google', name: 'Google', ip: '8.8.8.8', desc: 'Надёжный, без фильтров.' },
-  { id: 'adguard', name: 'AdGuard DNS', ip: '94.140.14.14', desc: 'Блокирует рекламу и трекеры.' },
+  { id: 'quad9', name: 'Quad9', ip: '9.9.9.9', desc: 'Не открывает опасные и мошеннические сайты' },
+  { id: 'google', name: 'Google', ip: '8.8.8.8', desc: 'Надёжный, без фильтров' },
+  { id: 'adguard', name: 'AdGuard DNS', ip: '94.140.14.14', desc: 'Блокирует рекламу и трекеры' },
   {
-    id: 'nextdns', name: 'NextDNS', ip: '45.90.28.0', desc: 'Свои фильтры в личном кабинете.',
+    id: 'nextdns', name: 'NextDNS', ip: '45.90.28.0', desc: 'Свои фильтры в личном кабинете',
     note: 'Привяжите IP вашего VPN-сервера в кабинете NextDNS (Linked IP), иначе фильтры не применятся.',
   },
 ]

@@ -122,7 +122,7 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
         <div class="card">
           <div>
             <h2 class="card__title">{{ firstTime ? 'Быстрая настройка' : 'Сменить сервер' }}</h2>
-            <p class="card__sub">Вставьте ссылку <span class="num">tt://</span> или файл конфигурации клиента — поля заполнятся сами.</p>
+            <p class="card__sub">Вставьте ссылку <span class="num">tt://</span> или файл конфигурации клиента — поля заполнятся сами</p>
           </div>
           <div class="field">
             <label for="paste" class="sr-only">Ссылка или конфигурация сервера</label>
@@ -179,7 +179,7 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
             <label for="srv-pass" class="field__label">Пароль</label>
             <Password v-model="form.password" input-id="srv-pass" :feedback="false" toggle-mask fluid autocomplete="new-password"
               :placeholder="hasPassword ? 'Сохранён. Оставьте пустым' : ''" />
-            <span class="field__hint">{{ hasPassword ? 'Пароль сохранён на роутере и сюда не возвращается. Введите новый, чтобы сменить.' : 'Хранится только на роутере.' }}</span>
+            <span class="field__hint">{{ hasPassword ? 'Пароль сохранён на роутере и сюда не возвращается. Введите новый, чтобы сменить.' : 'Хранится только на роутере' }}</span>
           </div>
         </div>
 
@@ -195,7 +195,7 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
         </button>
         <div v-show="advanced" id="srv-adv" class="adv">
           <label class="setrow">
-            <span class="setrow__text"><span class="setrow__title">HTTP/3</span><span class="setrow__desc">Включайте, только если так сказано в настройках сервера.</span></span>
+            <span class="setrow__text"><span class="setrow__title">HTTP/3</span><span class="setrow__desc">Включайте, только если так сказано в настройках сервера</span></span>
             <ToggleSwitch v-model="form.quic" input-id="srv-quic" />
           </label>
           <label class="setrow">

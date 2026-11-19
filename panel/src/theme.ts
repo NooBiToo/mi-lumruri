@@ -1,4 +1,4 @@
-// Тема PrimeVue: Aura с палитрой панели. Основной цвет — кобальт туннеля, поверхности — «бумага» и «чернила».
+// Тема PrimeVue: Aura с палитрой панели. Основной цвет — небесно-синий маршрута через VPN, поверхности — графит.
 // Значения совпадают с переменными в style.css; меняйте их вместе.
 
 import { definePreset } from '@primeuix/themes'
@@ -26,20 +26,20 @@ const AuraLite = {
   },
 } as unknown as typeof Aura
 
-const cobalt = {
-  50: '#eef0fd', 100: '#dfe3fb', 200: '#c4cbf7', 300: '#a3adf2', 400: '#8b97f2', 500: '#5463df',
-  600: '#3d4ed8', 700: '#3241b8', 800: '#2b3795', 900: '#283277', 950: '#1a1f48',
+const sky = {
+  50: '#eaf3fc', 100: '#d3e6f9', 200: '#a9cff4', 300: '#7cbbf7', 400: '#5aa9f5', 500: '#2b8ae6',
+  600: '#0b6bcb', 700: '#0959a9', 800: '#0a4f96', 900: '#0b3f74', 950: '#08294b',
 }
 
 // светлая шкала: 0 — поверхность, 50 — фон страницы, 200 — линии, 500 — приглушённый текст, 900 — основной текст
 const paperLight = {
-  0: '#ffffff', 50: '#f4f6fa', 100: '#eceff5', 200: '#e1e5ed', 300: '#c9d0dc', 400: '#8d97a8',
-  500: '#5b6577', 600: '#475062', 700: '#343c4c', 800: '#253043', 900: '#172033', 950: '#0e1422',
+  0: '#ffffff', 50: '#fafafa', 100: '#f4f4f5', 200: '#e7e7e9', 300: '#d4d4d8', 400: '#737373',
+  500: '#525252', 600: '#404040', 700: '#333333', 800: '#262626', 900: '#171717', 950: '#0a0a0a',
 }
 // тёмная шкала: 50 — основной текст, 300 — приглушённый, 700 — линии, 800 — поверхность, 900 — фон страницы
 const paperDark = {
-  0: '#ffffff', 50: '#e6eaf2', 100: '#cdd3df', 200: '#aab3c3', 300: '#9aa4b6', 400: '#6f798d',
-  500: '#4f596c', 600: '#38435a', 700: '#283246', 800: '#161d2c', 900: '#0e131e', 950: '#0a0e17',
+  0: '#ffffff', 50: '#ededed', 100: '#d4d4d8', 200: '#b4b4b9', 300: '#a1a1a6', 400: '#85858b',
+  500: '#5c5c62', 600: '#3a3a3e', 700: '#29292c', 800: '#19191b', 900: '#141415', 950: '#0f0f10',
 }
 
 const ring = { width: '2px', style: 'solid', color: '{primary.color}', offset: '2px', shadow: 'none' }
@@ -50,13 +50,13 @@ export const MittPreset = definePreset(AuraLite, {
     borderRadius: { none: '0', xs: '2px', sm: '4px', md: '8px', lg: '10px', xl: '14px' },
   },
   semantic: {
-    primary: cobalt,
+    primary: sky,
     focusRing: ring,
     formField: { focusRing: { ...ring, offset: '1px' } },
     overlay: {
-      select: { shadow: '0 6px 16px -6px rgba(16, 24, 40, 0.18)' },
-      popover: { shadow: '0 6px 16px -6px rgba(16, 24, 40, 0.18)' },
-      modal: { borderRadius: '{border.radius.xl}', shadow: '0 18px 40px -12px rgba(16, 24, 40, 0.28)' },
+      select: { shadow: '0 6px 16px -6px rgba(0, 0, 0, 0.18)' },
+      popover: { shadow: '0 6px 16px -6px rgba(0, 0, 0, 0.18)' },
+      modal: { borderRadius: '{border.radius.xl}', shadow: '0 18px 40px -12px rgba(0, 0, 0, 0.28)' },
     },
     colorScheme: {
       light: {
@@ -68,7 +68,7 @@ export const MittPreset = definePreset(AuraLite, {
       },
       dark: {
         surface: paperDark,
-        primary: { color: '{primary.400}', contrastColor: '#0c1018', hoverColor: '{primary.300}', activeColor: '{primary.200}' },
+        primary: { color: '{primary.400}', contrastColor: '#0f0f10', hoverColor: '{primary.300}', activeColor: '{primary.200}' },
         text: { color: '{surface.50}', hoverColor: '{surface.0}', mutedColor: '{surface.300}', hoverMutedColor: '{surface.200}' },
         content: { background: '{surface.800}', hoverBackground: '{surface.700}', borderColor: '{surface.700}' },
         formField: {
