@@ -124,8 +124,27 @@ fn blob_refs(arg: &str) -> impl Iterator<Item = &str> {
 
 /// Аргументы nfqws2: очередь, метка своих пакетов, Lua-библиотеки, используемые блобы, затем профили через `--new`.
 pub fn nfqws2_args(cfg: &ZapretConfig, qnum: u16) -> Vec<String> {
+    render_args(&selected(cfg), qnum)
+}
+
+/// Стратегии каталога одного вида, кроме кругового режима, — кандидаты подбора, по порядку каталога.
+pub fn candidates(kind: Kind) -> Vec<&'static str> {
+    catalog().strategies.iter().filter(|s| s.kind == kind && s.id != AUTO).map(|s| s.id.as_str()).collect()
+}
+
+/// Аргументы nfqws2 для проверки одной стратегии (подбор на роутере): только её собственные профили, без постоянных
+/// (Discord, QUIC) и без стратегии другого вида — проверочная очередь получает лишь TCP к портам 80 и 443.
+/// Круговой режим (`auto`) не проверяется: он переключается по неудачам и за один проход не измеряется.
+pub fn test_args(id: &str, qnum: u16) -> Result<Vec<String>, String> {
+    match catalog().strategies.iter().find(|s| s.id == id) {
+        Some(s) if s.id != AUTO => Ok(render_args(&s.profiles.iter().collect::<Vec<_>>(), qnum)),
+        Some(_) => Err("круговой режим (auto) подбором не проверяется".into()),
+        None => Err(format!("стратегии «{id}» нет в каталоге")),
+    }
+}
+
+fn render_args(profiles: &[&ZProfile], qnum: u16) -> Vec<String> {
     let c = catalog();
-    let profiles = selected(cfg);
     let used: BTreeSet<&str> = profiles.iter().flat_map(|p| p.args.iter().flat_map(|a| blob_refs(a))).collect();
     let mut a: Vec<String> = vec![format!("--qnum={qnum}"), format!("--fwmark=0x{ZAPRET_DESYNC_MARK:x}"), "--chdir".into()];
     a.extend(["zapret-lib", "zapret-antidpi", "zapret-auto"].map(|l| format!("--lua-init=@{l}.lua.gz")));

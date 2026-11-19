@@ -1,7 +1,7 @@
 //! mi-tt-ctl — контроллер mi-trusttunnel, срез «чтение, проверка и предпросмотр правила».
 //! Ничего не применяет к сети и не записывает настройки.
 
-use mi_tt::{api, auth, gate, model, render, store};
+use mi_tt::{api, auth, gate, model, render, store, zapret};
 
 use std::io::{self, Read, Write};
 use std::process::ExitCode;
@@ -17,6 +17,9 @@ const USAGE: &str = "mi-tt-ctl — чтение, проверка и предп�
   mi-tt-ctl render <config.json> <secrets.json> <out-dir>   # client.toml TrustTunnel, policy.json, dnsmasq, nfqws2.args
   mi-tt-ctl adblock-update <config.json> <list>      # проверить и атомарно заменить adblock.list рядом с настройками
   mi-tt-ctl category-update <config.json> <id> <list> # проверить и атомарно заменить categories/<id>.list
+  mi-tt-ctl zapret-list <general|youtube>            # кандидаты подбора стратегии Zapret (без auto), по строке
+  mi-tt-ctl zapret-args <strategy-id>                # аргументы nfqws2 для проверки одной стратегии на очереди 201
+  mi-tt-ctl zapret-set <config.json> <general|youtube> <id>   # атомарно сменить выбор стратегии Zapret
   mi-tt-ctl cgi            # CGI для uhttpd (HTTPS): вход паролем и TOTP, затем /config, /preview, /rules
                            # MI_TT_CONFIG, MI_TT_ALLOWED_ORIGINS, MI_TT_AUTH_DIR, MI_TT_SESSION_DIR
   mi-tt-ctl --version
@@ -43,11 +46,72 @@ fn main() -> ExitCode {
         ["render", cfg, secrets, out] => cli(render_cmd(cfg, secrets, out)),
         ["adblock-update", cfg, list] => cli(adblock_update(cfg, list)),
         ["category-update", cfg, id, list] => cli(category_update(cfg, id, list)),
+        ["zapret-list", kind] => match zapret_kind(kind) {
+            Some(k) => lines(zapret::candidates(k).into_iter().map(str::to_string)),
+            None => usage(),
+        },
+        ["zapret-args", id] => match zapret::test_args(id, mi_tt::plan::ZAPRET_TEST_QNUM) {
+            Ok(a) => lines(a),
+            Err(m) => {
+                eprintln!("mi-tt-ctl: {m}");
+                ExitCode::from(1)
+            }
+        },
+        ["zapret-set", cfg, kind, id] => match zapret_kind(kind) {
+            Some(k) => cli(zapret_set(cfg, k, id)),
+            None => usage(),
+        },
         ["cgi"] => cgi(),
-        _ => {
-            eprintln!("{USAGE}");
-            ExitCode::from(2)
-        }
+        _ => usage(),
+    }
+}
+
+fn usage() -> ExitCode {
+    eprintln!("{USAGE}");
+    ExitCode::from(2)
+}
+
+/// Аргументы по одному в строке (как nfqws2.args): их читает сценарий подбора на роутере.
+fn lines(v: impl IntoIterator<Item = String>) -> ExitCode {
+    let mut out = io::stdout().lock();
+    for l in v {
+        let _ = writeln!(out, "{l}");
+    }
+    ExitCode::SUCCESS
+}
+
+fn zapret_kind(k: &str) -> Option<zapret::Kind> {
+    match k {
+        "general" => Some(zapret::Kind::General),
+        "youtube" => Some(zapret::Kind::Youtube),
+        _ => None,
+    }
+}
+
+/// Смена выбора стратегии Zapret сценарием подбора: через `store::update_config` (блокировка, проверка всей
+/// конфигурации, копия .prev, атомарная запись) по текущей ревизии. Ответ — прежний id для отката.
+fn zapret_set(cfg: &str, kind: zapret::Kind, id: &str) -> Response {
+    use serde_json::json;
+    let p = std::path::Path::new(cfg);
+    let rev = match read_limited(cfg, MAX_CONFIG_BYTES) {
+        Ok(b) => store::revision(&b),
+        Err(m) => return Response::error(500, "unreadable", m),
+    };
+    let field = if kind == zapret::Kind::General { "general" } else { "youtube" };
+    let mut previous = String::new();
+    let r = store::update_config(p, &rev, MAX_CONFIG_BYTES, |c| {
+        let z = c.zapret.get_or_insert_with(Default::default);
+        let slot = if kind == zapret::Kind::General { &mut z.strategy } else { &mut z.youtube };
+        previous = std::mem::replace(slot, id.to_string());
+        Ok("set")
+    });
+    match r {
+        Ok(s) => Response { status: 200, body: json!({ "ok": true, "field": field, "previous": previous, "id": id, "revision": s.revision, "issues": [] }) },
+        Err(store::SaveError::RuleInvalid(i)) => Response { status: 422, body: json!({ "ok": false, "error": { "code": "invalid", "message": "стратегия не принята; настройки не изменены" }, "issues": i }) },
+        Err(store::SaveError::ConfigInvalid(i)) => Response { status: 409, body: json!({ "ok": false, "error": { "code": "config_invalid", "message": "сохранённые настройки не проходят проверку" }, "issues": i }) },
+        Err(store::SaveError::Conflict { .. }) => Response::error(409, "revision_conflict", "настройки изменились во время записи; повторите"),
+        Err(store::SaveError::Busy(m)) => Response::error(503, "busy", m),
+        Err(store::SaveError::Io(m)) => Response::error(500, "write_failed", m),
     }
 }
 

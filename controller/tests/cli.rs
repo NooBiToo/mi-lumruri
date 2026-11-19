@@ -253,3 +253,58 @@ fn cgi_paths() {
     let broken = fixture("invalid/config.broken.json");
     assert_eq!(cgi("POST", "/preview", Some("application/json"), Some(&body), None, &broken).0, 409);
 }
+
+#[test]
+fn zapret_set_cli() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("zset-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let cfg = dir.join("config.json");
+    std::fs::copy(fixture("lab/config.json"), &cfg).unwrap();
+    let c = cfg.to_str().unwrap();
+    let z = || serde_json::from_slice::<Value>(&std::fs::read(&cfg).unwrap()).unwrap()["zapret"].clone();
+    // без раздела zapret: прежний выбор — auto; меняется только выбранное поле
+    let (code, v) = run(&["zapret-set", c, "general", "v3"]);
+    assert_eq!(code, 0, "{v}");
+    assert_eq!((v["previous"].as_str(), v["id"].as_str(), v["field"].as_str()), (Some("auto"), Some("v3"), Some("general")));
+    assert_eq!(z(), serde_json::json!({ "strategy": "v3", "youtube": "auto" }));
+    let (code, v) = run(&["zapret-set", c, "youtube", "yv2"]);
+    assert_eq!((code, v["previous"].as_str()), (0, Some("auto")), "{v}");
+    assert_eq!(z(), serde_json::json!({ "strategy": "v3", "youtube": "yv2" }));
+    let (code, v) = run(&["zapret-set", c, "general", "auto"]);
+    assert_eq!((code, v["previous"].as_str()), (0, Some("v3")), "{v}");
+    assert_eq!(z(), serde_json::json!({ "strategy": "auto", "youtube": "yv2" }));
+    assert!(dir.join("config.json.prev").exists(), "запись через store::update_config");
+    // неизвестный id, стратегия другого вида и неизвестное поле — отказ, настройки не меняются
+    let before = std::fs::read(&cfg).unwrap();
+    let (code, v) = run(&["zapret-set", c, "general", "nope"]);
+    assert_eq!(code, 1, "{v}");
+    assert_eq!(v["issues"][0]["code"], "unknown_strategy", "{v}");
+    assert_eq!(run(&["zapret-set", c, "youtube", "v1"]).1["issues"][0]["code"], "wrong_kind");
+    assert_eq!(run(&["zapret-set", c, "video", "v1"]).0, 2);
+    assert_eq!(std::fs::read(&cfg).unwrap(), before);
+}
+
+#[test]
+fn zapret_list_and_test_args() {
+    let lines = |args: &[&str]| {
+        let o = Command::new(bin()).args(args).output().unwrap();
+        (o.status.code().unwrap(), String::from_utf8(o.stdout).unwrap().lines().map(str::to_string).collect::<Vec<_>>())
+    };
+    let (code, general) = lines(&["zapret-list", "general"]);
+    assert_eq!(code, 0);
+    assert_eq!(general.first().map(String::as_str), Some("v1"));
+    assert!(general.len() >= 8 && !general.iter().any(|x| x == "auto"), "{general:?}");
+    let (_, yt) = lines(&["zapret-list", "youtube"]);
+    assert!(yt.iter().all(|x| x.starts_with("yv")) && !yt.is_empty(), "{yt:?}");
+    // аргументы проверки одной стратегии: очередь 201, только профили самой стратегии (без постоянных профилей Discord)
+    let (code, a) = lines(&["zapret-args", "v3"]);
+    assert_eq!(code, 0, "{a:?}");
+    assert_eq!(&a[..3], ["--qnum=201", "--fwmark=0x40000000", "--chdir"]);
+    assert!(a.iter().any(|x| x == "--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-600000:tcp_md5:repeats=4"), "{a:?}");
+    assert!(!a.iter().any(|x| x.contains("discord") || x.contains("circular")), "{a:?}");
+    let (code, a) = lines(&["zapret-args", "yv2"]);
+    assert_eq!(code, 0);
+    assert!(a.iter().any(|x| x == "--hostlist=zapret-hosts-youtube.txt"), "{a:?}");
+    assert_eq!(lines(&["zapret-args", "auto"]).0, 1, "круговой режим проверкой не подбирается");
+    assert_eq!(lines(&["zapret-args", "nope"]).0, 1);
+}

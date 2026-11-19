@@ -1,0 +1,24 @@
+# Цели подбора стратегии Zapret (mitt-zapret-test.sh): «required|optional <адрес>», только http(s) на портах 80 и 443 —
+# проверочная очередь получает лишь такой трафик. Победитель — больше открытых required, при равенстве — optional.
+# Цели YouTube узнаются по имени (youtube, googlevideo): по ним решается, нужен ли проход по YouTube-стратегиям.
+# Хостинги и CDN — адреса проверки «TCP 16–20 КБ» проекта dpi-detector (Runnin4ik, MIT, tcp16.json и domains.txt);
+# Cloudflare, CDN77 и Fastly без имени сервера (SNI) не отвечают, для них — сайты на этих CDN.
+required https://www.youtube.com/
+required https://youtubei.googleapis.com/
+required https://redirector.googlevideo.com/report_mapping
+required https://discord.com/
+required https://gateway.discord.gg/
+required https://updates.discord.com/
+optional https://91.98.156.82/
+optional https://5.161.249.234/
+optional https://cdnjs.cloudflare.com/
+optional https://www.cdn77.com/
+optional https://195.181.167.155/
+optional https://23.222.76.4/
+optional https://23.1.64.4/
+optional https://3.165.188.250/
+optional https://54.196.100.238/
+optional https://www.jetblue.com/
+optional https://185.199.108.133/
+optional https://5.196.63.68/
+optional https://188.165.20.24/

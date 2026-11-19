@@ -1,6 +1,6 @@
 #!/bin/sh
 # mi-trusttunnel: служба (цикл). Запускает и перезапускает клиент TrustTunnel и nfqws2, применяет полную политику после их
-# готовности, выполняет заявки панели (apply.request). Работает без WAN: туннель подключится сам, когда появится связь;
+# готовности, выполняет заявки панели (apply.request, zapret-test.request). Работает без WAN: туннель подключится сам, когда появится связь;
 # до этого трафик «через TrustTunnel» блокируется (unreachable) или идёт напрямую, если так выбрано в профиле.
 D="$(cd "$(dirname "$0")" && pwd)"
 . "$D/mitt-lib.sh"
@@ -51,6 +51,11 @@ while [ -f "$STATE/service.wanted" ]; do
   sleep "$INTERVAL"
   if [ -f "$STATE/apply.request" ]; then
     rm -f "$STATE/apply.request"; full_cycle panel-request; continue
+  fi
+  # подбор стратегии Zapret — в фоне, один одновременно (заявку повторного нажатия панель не ставит, пока идёт подбор)
+  if [ -f "$STATE/zapret-test.request" ]; then
+    rm -f "$STATE/zapret-test.request"
+    pid_alive zapret-test || { start_bg zapret-test sh "$SCR/mitt-zapret-test.sh"; mlog "подбор стратегии Zapret запущен"; }
   fi
   for e in trusttunnel nfqws2; do
     if [ -f "$STATE/$e.wanted" ] && ! pid_alive "$e"; then

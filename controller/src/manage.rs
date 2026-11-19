@@ -21,7 +21,7 @@ pub const MAX_LIST_BODY: usize = 8 * 1024 * 1024;
 
 pub const PATHS: &[&str] = &["/rules/delete", "/rules/move", "/profiles", "/profiles/delete", "/groups", "/groups/delete", "/categories",
     "/categories/delete", "/networks", "/networks/delete", "/devices", "/devices/delete", "/leases", "/dns", "/zapret", "/adblock/list",
-    "/categories/list", "/secrets", "/apply-request", "/status"];
+    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test"];
 
 pub fn is_manage_path(path: &str) -> bool {
     PATHS.contains(&path.trim_end_matches('/'))
@@ -79,6 +79,21 @@ struct ListUpload {
     id: Option<String>,
     list: String,
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ZapretTest {
+    mode: ZapretTestMode,
+}
+
+#[derive(Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ZapretTestMode {
+    Quick,
+}
+
+/// Подбор, оставшийся в состоянии `running` дольше этого (сценарий убит без завершения), не мешает новой заявке.
+const ZAPRET_TEST_STALE: u64 = 3600;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -370,6 +385,29 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
                 Err(m) => Response::error(500, "write_failed", m),
             }
         }
+        ("GET", "/zapret/test") => {
+            // файл состояния пишет сценарий подбора (mitt-zapret-test.sh); до первого подбора — idle
+            let st = std::fs::read(run_dir().join("zapret-test.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).unwrap_or(json!({ "state": "idle" }));
+            Response { status: 200, body: json!({ "ok": true, "test": st, "requested": run_dir().join("zapret-test.request").exists(), "issues": [] }) }
+        }
+        ("POST", "/zapret/test") => match parse_json::<ZapretTest>(b, "") {
+            Ok(q) => {
+                // CGI без привилегий: только заявка; подбор запускает служба (root), один одновременно
+                let d = run_dir();
+                let st = std::fs::read(d.join("zapret-test.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
+                let now = crate::auth::now();
+                let running = st.as_ref().is_some_and(|s| s["state"] == "running" && s["started"].as_u64().is_some_and(|t| t + ZAPRET_TEST_STALE > now));
+                if running || d.join("zapret-test.request").exists() {
+                    return Some(Response::error(409, "zapret_test_running", "подбор стратегии уже идёт"));
+                }
+                let req = json!({ "requested_unix": now, "mode": q.mode });
+                match std::fs::create_dir_all(&d).map_err(|e| e.to_string()).and_then(|_| store::write_atomic(&d.join("zapret-test.request"), req.to_string().as_bytes())) {
+                    Ok(()) => Response { status: 202, body: json!({ "ok": true, "queued": true, "issues": [] }) },
+                    Err(m) => Response::error(500, "write_failed", m),
+                }
+            }
+            Err(i) => bad(i),
+        },
         ("GET", "/status") => {
             let st = std::fs::read(run_dir().join("status.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
             let pending = run_dir().join("apply.request").exists();

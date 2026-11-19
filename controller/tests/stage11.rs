@@ -196,3 +196,43 @@ fn categories_lists_dns_adblock_zapret_and_apply_request() {
     let o = p.a.cgi("GET", "/status", None, p.t + 3, &[("HTTP_COOKIE", &p.s.cookie), ("MI_TT_RUN_DIR", p.dir.join("run").to_str().unwrap())]);
     assert_eq!(o.body["apply_pending"], true);
 }
+
+#[test]
+fn zapret_test_api() {
+    let p = Panel::new("mgmt-ztest");
+    let run = p.dir.join("run");
+    let rd = run.to_str().unwrap().to_string();
+    let call = |m: &str, body: Option<&[u8]>| {
+        let mut env = vec![("HTTP_COOKIE", p.s.cookie.as_str()), ("MI_TT_RUN_DIR", rd.as_str())];
+        if m == "POST" {
+            env.extend([("HTTP_ORIGIN", ORIGIN), ("HTTP_X_MITT_CSRF", p.s.csrf.as_str())]);
+        }
+        p.a.cgi(m, "/zapret/test", body, p.t + 1, &env)
+    };
+    // без подбора — idle
+    let o = call("GET", None);
+    assert_eq!((o.status, o.body["test"]["state"].as_str()), (200, Some("idle")), "{}", o.body);
+    assert_eq!(p.a.cgi("GET", "/zapret/test", None, p.t, &[]).code(), "auth_required");
+    // заявка
+    let o = call("POST", Some(br#"{"mode":"quick"}"#));
+    assert_eq!((o.status, o.body["queued"].as_bool()), (202, Some(true)), "{}", o.body);
+    let req: Value = serde_json::from_slice(&std::fs::read(run.join("zapret-test.request")).unwrap()).unwrap();
+    assert_eq!(req["mode"], "quick");
+    assert_eq!(call("POST", Some(br#"{"mode":"quick"}"#)).status, 409, "заявка уже ждёт службу");
+    assert_eq!(call("POST", Some(br#"{"mode":"full"}"#)).status, 400);
+    // идёт подбор — 409; GET отдаёт файл состояния
+    std::fs::remove_file(run.join("zapret-test.request")).unwrap();
+    let st = json!({ "state": "running", "started": T0 + 50, "finished": null, "progress": { "done": 3, "total": 11, "current": "v3" },
+        "control": { "opened": 2, "total": 10 }, "best": null, "applied": false, "message": "Проверка стратегии v3" });
+    std::fs::write(run.join("zapret-test.json"), st.to_string()).unwrap();
+    let o = call("POST", Some(br#"{"mode":"quick"}"#));
+    assert_eq!((o.status, o.code()), (409, "zapret_test_running"), "{}", o.body);
+    assert!(!run.join("zapret-test.request").exists());
+    let o = call("GET", None);
+    assert_eq!(o.body["test"], st, "{}", o.body);
+    // завершённый подбор — можно снова
+    let mut done = st.clone();
+    done["state"] = json!("done");
+    std::fs::write(run.join("zapret-test.json"), done.to_string()).unwrap();
+    assert_eq!(call("POST", Some(br#"{"mode":"quick"}"#)).status, 202);
+}
