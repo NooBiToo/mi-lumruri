@@ -14,3 +14,4 @@ pub mod release;
 pub mod render;
 pub mod store;
 pub mod validate;
+pub mod zapret;

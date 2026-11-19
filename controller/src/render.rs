@@ -13,9 +13,10 @@ use sha2::{Digest, Sha256};
 
 use crate::dns::DnsPlan;
 use crate::model::*;
-use crate::plan::{Act, Entry, PolicyRule, PolicySpec, SET_PREFIX, SetKind, SetSpec, SrcMatch, ZAPRET_DESYNC_MARK, ZAPRET_QNUM, build_plan};
+use crate::plan::{Act, Entry, PolicyRule, PolicySpec, SET_PREFIX, SetKind, SetSpec, SrcMatch, ZAPRET_QNUM, build_plan};
 use crate::preview::{Dest, evaluation_order, expand, normalize_destination};
 use crate::validate::{Index, Issue, normalize_domain, normalize_mac, parse_cidr, plain_text, validate_config};
+use crate::zapret;
 
 pub const TUN_DEVICE: &str = "mitt0";
 pub const TUN_MTU: u16 = 1350;
@@ -131,23 +132,8 @@ pub fn load_lists(cfg: &Config, config_path: &Path) -> Result<Lists, String> {
     Ok(out)
 }
 
-/// Аргументы nfqws2 для проверенной стратегии. Lua-библиотеки zapret2 лежат рядом с nfqws2 (`--chdir` без пути = каталог программы).
-pub fn nfqws2_args_for(z: &ZapretConfig) -> Vec<String> {
-    let ports = z.tcp_ports.iter().map(u16::to_string).collect::<Vec<_>>().join(",");
-    let f = match z.strategy {
-        ZapretStrategy::Multisplit => "multisplit",
-        ZapretStrategy::Multidisorder => "multidisorder",
-    };
-    vec![
-        format!("--qnum={ZAPRET_QNUM}"),
-        format!("--fwmark=0x{ZAPRET_DESYNC_MARK:x}"),
-        "--chdir".into(),
-        "--lua-init=@zapret-lib.lua.gz".into(),
-        "--lua-init=@zapret-antidpi.lua.gz".into(),
-        format!("--filter-tcp={ports}"),
-        "--payload=tls_client_hello,http_req".into(),
-        format!("--lua-desync={f}:pos={}", z.pos),
-    ]
+fn tcp_ports(z: &ZapretConfig) -> Vec<u16> {
+    zapret::queue(z).into_iter().filter(|(p, _)| *p == zapret::Proto::Tcp).flat_map(|(_, v)| v.split(',').filter_map(|x| x.parse().ok()).collect::<Vec<u16>>()).collect()
 }
 
 fn toml_str(v: &str) -> String {
@@ -405,7 +391,8 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
         lan_subnets: cfg.networks.iter().filter_map(net_subnet).collect::<BTreeSet<_>>().into_iter().collect(),
         tun: TUN_DEVICE.into(),
         fail_open: tunnel_profile.is_some_and(|p| p.on_failure == FailurePolicy::Direct),
-        zapret_ports: if uses_zapret { zcfg.tcp_ports.clone() } else { Vec::new() },
+        // до очереди UDP в плане — только TCP-порты профилей (в каталоге они одиночные)
+        zapret_ports: if uses_zapret { tcp_ports(&zcfg) } else { Vec::new() },
         dns_resolver: (client.is_some() && !dns.tunnel_domains.is_empty()).then(|| dns.resolver.clone()),
         v6_block: v6_block.into_iter().collect(),
     };
@@ -420,7 +407,7 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
     let cmds = |e: &Entry, op: &str| e.cmds(op).into_iter().map(|(prog, args)| std::iter::once(prog.to_string()).chain(args).collect::<Vec<String>>()).collect::<Vec<_>>();
     let routes = Routes { apply: plan.iter().flat_map(|e| cmds(e, "add")).collect(), revert: plan.iter().rev().flat_map(|e| cmds(e, "del")).collect() };
     Ok(Rendered {
-        nfqws2_args: if uses_zapret { nfqws2_args_for(&zcfg) } else { Vec::new() },
+        nfqws2_args: if uses_zapret { zapret::nfqws2_args(&zcfg, ZAPRET_QNUM) } else { Vec::new() },
         policy,
         plan,
         routes,

@@ -59,39 +59,26 @@ pub struct AdblockConfig {
     pub exceptions: Vec<String>,
 }
 
-/// Проверенный набор стратегий nfqws2 (zapret2): произвольные аргументы не принимаются.
+/// Выбор стратегий Zapret из встроенного каталога (`zapret::catalog`): произвольные аргументы nfqws2 не принимаются.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ZapretConfig {
-    pub strategy: ZapretStrategy,
-    /// Позиция разреза в первом пакете данных (байт).
-    #[serde(default = "default_zapret_pos")]
-    pub pos: u16,
-    /// TCP-порты назначения, к которым применяется обработка.
-    #[serde(default = "default_zapret_ports")]
-    pub tcp_ports: Vec<u16>,
+    /// Стратегия для всех сайтов: `auto` (круговой режим) или id стратегии каталога.
+    #[serde(default = "auto")]
+    pub strategy: String,
+    /// Стратегия для YouTube: `auto` или id YouTube-стратегии каталога.
+    #[serde(default = "auto")]
+    pub youtube: String,
 }
 
-fn default_zapret_pos() -> u16 {
-    2
-}
-fn default_zapret_ports() -> Vec<u16> {
-    vec![80, 443]
+fn auto() -> String {
+    "auto".into()
 }
 
 impl Default for ZapretConfig {
     fn default() -> Self {
-        ZapretConfig { strategy: ZapretStrategy::Multisplit, pos: default_zapret_pos(), tcp_ports: default_zapret_ports() }
+        ZapretConfig { strategy: auto(), youtube: auto() }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ZapretStrategy {
-    /// Разрезать первый пакет (TLS ClientHello, HTTP-запрос) на сегменты.
-    Multisplit,
-    /// Разрезать и отправить сегменты в обратном порядке.
-    Multidisorder,
 }
 
 /// Профиль TrustTunnel: сервер, к которому подключается официальный клиент `trusttunnel_client`.

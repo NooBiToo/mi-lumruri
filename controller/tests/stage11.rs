@@ -156,7 +156,8 @@ fn categories_lists_dns_adblock_zapret_and_apply_request() {
 0.0.0.0 tracker.example
 " })).body["domains"], 2);
     assert_eq!(p.post("/adblock/list", json!({ "list": "" })).code(), "adblock_empty");
-    assert_eq!(p.post("/zapret", json!({ "base_revision": p.rev(), "zapret": { "strategy": "multidisorder", "pos": 3 } })).status, 200);
+    assert_eq!(p.post("/zapret", json!({ "base_revision": p.rev(), "zapret": { "strategy": "v3" } })).status, 200);
+    assert_eq!(p.post("/zapret", json!({ "base_revision": p.rev(), "zapret": { "strategy": "nope" } })).code(), "invalid", "неизвестная стратегия не сохраняется");
     // рендер (как служба): наборы ipset категорий, домены категорий — в dnsmasq, IP-префиксы — в статический набор
     let pw = format!("s-{}", rand_hex(16));
     std::fs::write(p.dir.join("secrets.json"), json!({ "version": 1, "profiles": { "tt-lab": { "password": pw } } }).to_string()).unwrap();

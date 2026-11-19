@@ -6,6 +6,7 @@ use std::net::IpAddr;
 use serde::Serialize;
 
 use crate::model::*;
+use crate::zapret::Kind;
 
 pub const MAX_RULES: usize = 512;
 pub const MAX_ITEMS: usize = 256;
@@ -354,11 +355,10 @@ pub fn validate_config(c: &Config) -> Vec<Issue> {
         check_dns(&mut issues, d);
     }
     if let Some(z) = &c.zapret {
-        if !(1..=64).contains(&z.pos) {
-            issues.push(Issue::new("zapret.pos", "bad_pos", "позиция разреза — от 1 до 64 байт"));
-        }
-        if z.tcp_ports.is_empty() || z.tcp_ports.len() > 8 || z.tcp_ports.contains(&0) {
-            issues.push(Issue::new("zapret.tcp_ports", "bad_ports", "от 1 до 8 TCP-портов, каждый от 1 до 65535"));
+        for (path, kind, id) in [("zapret.strategy", Kind::General, &z.strategy), ("zapret.youtube", Kind::Youtube, &z.youtube)] {
+            if let Some((code, m)) = crate::zapret::check(kind, id) {
+                issues.push(Issue::new(path, code, m));
+            }
         }
     }
     issues

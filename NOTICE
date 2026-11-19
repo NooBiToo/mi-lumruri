@@ -1,0 +1,11 @@
+mi-trusttunnel
+
+Стратегии Zapret в controller/data/zapret-strategies.json взяты из проекта
+Zapret Manager (files/Zapret2/zapret2, коммит 18c008bc98329727d3b3676c24907e2b17463c6c)
+и переведены в формат каталога: группы кругового режима разделены на отдельные стратегии.
+
+  Zapret Manager
+  Copyright 2026 StressOzz
+  https://github.com/StressOzz/Zapret-Manager
+  Licensed under the Apache License, Version 2.0
+  https://www.apache.org/licenses/LICENSE-2.0
