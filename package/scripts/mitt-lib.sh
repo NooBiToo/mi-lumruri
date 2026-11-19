@@ -93,6 +93,8 @@ lab_override() {
 }
 
 render_now() {
+  # готовые списки сайтов (svc-*.list) — до рендера: настройки панели ссылаются на эти категории
+  [ ! -f "$SCR/mitt-lists.sh" ] || sh "$SCR/mitt-lists.sh" sync >>"$LOG/lists.log" 2>&1 || mlog "списки: синхронизация не прошла, действуют прежние"
   # client.toml содержит пароль TrustTunnel: каталог рендера доступен только root
   rm -rf "$RENDER.new"; mkdir -p "$RENDER.new"; chmod 700 "$RENDER.new"
   if ctl render "$ETC/config.json" "$ETC/secrets.json" "$RENDER.new" >"$STATE/render.json" 2>&1; then
@@ -135,6 +137,7 @@ start_panel() {
 #!/bin/sh
 export MI_TT_CONFIG='$ETC/config.json' MI_TT_AUTH_DIR='$ETC/auth' MI_TT_SESSION_DIR='$RUN/sessions' MI_TT_RUN_DIR='$STATE'
 export MI_TT_SECRETS='$ETC/secrets.json' MI_TT_LEASES='$LEASES' MI_TT_ALLOWED_ORIGINS='$(panel_origins)' MI_TT_TRUST_PROXY=1
+export MI_TT_LISTS_DIR='$REL/payload/lists'
 exec '$BIN/mi-tt-ctl' cgi
 EOF
   # uhttpd исполняет CGI только при бите x для прочих (S_IXOTH); секретов в обёртке нет
@@ -153,6 +156,16 @@ status_write() {
   done
   printf '{"at":%s,"release":"%s","protection":"%s","engines":{%s},"last_apply":%s}\n' "$(date +%s)" "$(basename "$(cat "$RUN/.release" 2>/dev/null)")" \
     "$(cat "$STATE/protection" 2>/dev/null || echo none)" "${e%,}" "$(cat "$STATE/last-apply.json" 2>/dev/null || echo null)" >"$STATE/status.json.t" && mv -f "$STATE/status.json.t" "$STATE/status.json"
+}
+
+# --- готовые списки сайтов (mitt-lists.sh) ---
+LISTS_PERIOD="${MITT_LISTS_PERIOD:-86400}"   # проверка обновлений раз в сутки
+LISTS_RETRY="${MITT_LISTS_RETRY:-3600}"      # без связи — повтор через час
+# пора проверять обновления: метки нет, прошли сутки или часы роутера ушли назад (метка из будущего)
+lists_due() {
+  local c now; c="$(cat "$DATA/lists/.checked" 2>/dev/null)"; now="$(date +%s)"
+  case "$c" in ''|*[!0-9]*) return 0;; esac
+  [ "$c" -gt "$now" ] || [ $((now - c)) -ge "$LISTS_PERIOD" ]
 }
 
 # --- подбор стратегии Zapret (mitt-zapret-test.sh) ---

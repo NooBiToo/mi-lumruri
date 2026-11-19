@@ -57,6 +57,17 @@ check("API панели через nginx → штатный uhttpd → CGI ARM64
 check("вход по паролю и TOTP через nginx: 200 и 200; cookie __Host-mitt_sess выставлен",
       text("panel-login.code").strip() == "200" and text("panel-second.code").strip() == "200" and text("panel-cookie.count").strip() == "1",
       [text("panel-login.code").strip(), text("panel-second.code").strip(), text("panel-cookie.count").strip()])
+cl = text("categories.ls").split()
+pl = text("panel-lists.out").splitlines()
+try:
+    lj = json.loads("\n".join(pl[:-1]))
+except ValueError:
+    lj = {}
+ls_ = js("lists.json")
+check("готовые списки: svc-*.list из снимка релиза разложены до рендера; /lists отдаёт каталог; проверка обновлений без сети — ok=false, «нет связи» (состояние пережило «перезагрузку»)",
+      "svc-youtube.list" in cl and "svc-meta-ip.list" in cl and pl[-1:] == ["200"] and len(lj.get("catalog", {}).get("services", [])) >= 20
+      and ls_.get("ok") is False and "нет связи" in " ".join(ls_.get("errors", [])),
+      [cl[:4], pl[-1:], len(lj.get("catalog", {}).get("services", [])), ls_])
 check("после входа /config — 200", text("panel-config-auth.code").strip() == "200", text("panel-config-auth.code"))
 h = text("panel-headers.txt")
 check("заголовки защиты от nginx: HSTS, X-Frame-Options DENY, CSP frame-ancestors 'none'", "Strict-Transport-Security" in h and "X-Frame-Options: DENY" in h and "frame-ancestors 'none'" in h, h[:200])

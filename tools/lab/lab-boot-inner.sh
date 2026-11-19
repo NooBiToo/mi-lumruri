@@ -184,6 +184,9 @@ tail -1 "$W/second.out" >"$OUT/panel-second.code"
 CSRF="$(head -1 "$W/second.out" | "${PY[@]}" -c 'import json,sys;print(json.load(sys.stdin).get("csrf",""))')"
 cu -w '\n%{http_code}' https://10.10.1.1:8443/cgi-bin/api/config | tail -1 >"$OUT/panel-config-auth.code"
 grep -c "__Host-mitt_sess" "$CJ" >"$OUT/panel-cookie.count"
+# готовые списки: категории svc-* разложены из снимка релиза до первого рендера; каталог — через API панели
+cu -w '\n%{http_code}' https://10.10.1.1:8443/cgi-bin/api/lists >"$OUT/panel-lists.out"
+ls "$E/categories" >"$OUT/categories.ls" 2>&1
 nsx tv curl -sk -m 10 -D - -o /dev/null https://10.10.1.1:8443/ | tr -d '\r' >"$OUT/panel-headers.txt"
 
 # 2) WAN появился: служба сама подключает туннель
@@ -249,6 +252,7 @@ boot >"$OUT/boot2.out" 2>&1; echo "exit=$?" >>"$OUT/boot2.out"
 snapz boot2; probe R-tv-no-wan tv
 wan_on; wait_tunnel; probe R-tv-wan tv; cp_status reboot
 phase end
+cp "$RN/lists.json" "$OUT/lists.json" 2>/dev/null
 boot stop >>"$OUT/stop.out" 2>&1
 pkill -f "$TTCLIENT" 2>/dev/null; pkill -f "usr/sbin/nginx" 2>/dev/null; pkill -f "usr/sbin/uhttpd" 2>/dev/null
 [ -f "$W/dnsmasq.pid" ] && kill "$(cat "$W/dnsmasq.pid")" 2>/dev/null

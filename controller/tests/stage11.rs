@@ -257,3 +257,48 @@ fn zapret_test_api() {
     std::fs::write(run.join("zapret-test.json"), done.to_string()).unwrap();
     assert_eq!(call("POST", Some(br#"{"mode":"quick"}"#)).status, 202);
 }
+
+#[test]
+fn lists_api() {
+    let p = Panel::new("mgmt-lists");
+    let run = p.dir.join("run");
+    let rd = run.to_str().unwrap().to_string();
+    let ld = p.dir.join("lists");
+    std::fs::create_dir_all(&ld).unwrap();
+    let cat = json!({ "source": "itdoginfo/allow-domains", "commit": "0".repeat(40), "date": "2026-11-09",
+        "services": [{ "id": "youtube", "name": "YouTube", "group": "Сервисы", "domains": "Services/youtube.lst", "ipv4": null }] });
+    std::fs::write(ld.join("catalog.json"), cat.to_string()).unwrap();
+    let ls = ld.to_str().unwrap().to_string();
+    let call = |m: &str, path: &str, lists: &str| {
+        let mut env = vec![("HTTP_COOKIE", p.s.cookie.as_str()), ("MI_TT_RUN_DIR", rd.as_str()), ("MI_TT_LISTS_DIR", lists)];
+        if m == "POST" {
+            env.extend([("HTTP_ORIGIN", ORIGIN), ("HTTP_X_MITT_CSRF", p.s.csrf.as_str())]);
+        }
+        p.a.cgi(m, path, if m == "POST" { Some(b"{}") } else { None }, p.t + 1, &env)
+    };
+    assert_eq!(p.a.cgi("GET", "/lists", None, p.t, &[("MI_TT_LISTS_DIR", ls.as_str())]).code(), "auth_required");
+    // до первой проверки обновлений — status null
+    let o = call("GET", "/lists", &ls);
+    assert_eq!((o.status, &o.body["catalog"], &o.body["status"], o.body["requested"].as_bool()), (200, &cat, &Value::Null, Some(false)), "{}", o.body);
+    // состояние обновления — из lists.json службы
+    std::fs::create_dir_all(&run).unwrap();
+    let st = json!({ "snapshot": "2026-11-09", "updated": null, "checked": T0, "ok": false, "errors": ["Services/youtube.lst: пустой ответ"] });
+    std::fs::write(run.join("lists.json"), st.to_string()).unwrap();
+    assert_eq!(call("GET", "/lists", &ls).body["status"], st);
+    // нет каталога (релиз недоступен) — 503
+    let o = call("GET", "/lists", p.dir.join("nope").to_str().unwrap());
+    assert_eq!((o.status, o.code()), (503, "lists_unavailable"), "{}", o.body);
+    // заявка на обновление — только файл для службы
+    let o = call("POST", "/lists/update", &ls);
+    assert_eq!((o.status, o.body["queued"].as_bool()), (202, Some(true)), "{}", o.body);
+    let req: Value = serde_json::from_slice(&std::fs::read(run.join("lists-update.request")).unwrap()).unwrap();
+    assert!(req["requested_unix"].as_u64().is_some(), "{req}");
+    assert_eq!(call("GET", "/lists", &ls).body["requested"], true);
+    assert_eq!(call("POST", "/lists/update", &ls).status, 202, "повторная заявка");
+    // без CSRF заявка не принимается
+    std::fs::remove_file(run.join("lists-update.request")).unwrap();
+    let o = p.a.cgi("POST", "/lists/update", Some(b"{}"), p.t + 1, &[("HTTP_COOKIE", p.s.cookie.as_str()), ("HTTP_ORIGIN", ORIGIN), ("MI_TT_RUN_DIR", rd.as_str())]);
+    assert_eq!(o.code(), "csrf_failed", "{}", o.body);
+    assert!(!run.join("lists-update.request").exists());
+    assert_eq!(call("DELETE", "/lists", &ls).status, 405);
+}

@@ -21,7 +21,7 @@ pub const MAX_LIST_BODY: usize = 8 * 1024 * 1024;
 
 pub const PATHS: &[&str] = &["/rules/delete", "/rules/move", "/profiles", "/profiles/delete", "/groups", "/groups/delete", "/categories",
     "/categories/delete", "/networks", "/networks/delete", "/devices", "/devices/delete", "/leases", "/dns", "/zapret", "/adblock/list",
-    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test"];
+    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update"];
 
 pub fn is_manage_path(path: &str) -> bool {
     PATHS.contains(&path.trim_end_matches('/'))
@@ -176,6 +176,11 @@ pub fn leases_view(text: &str, cfg: &Config) -> Vec<Value> {
         out.push(json!({ "mac": mac, "ip": ip.to_string(), "hostname": host, "device": known.get(&mac) }));
     }
     out
+}
+
+/// Каталог готовых списков текущего релиза (catalog.json); путь передаёт CGI-обёртка службы.
+pub fn lists_dir() -> Option<PathBuf> {
+    std::env::var("MI_TT_LISTS_DIR").ok().filter(|s| !s.is_empty()).map(PathBuf::from)
 }
 
 /// Каталог состояния службы (запрос применения, статус). По умолчанию — RAM.
@@ -423,6 +428,23 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
             }
             Err(i) => bad(i),
         },
+        ("GET", "/lists") => {
+            // каталог — из релиза (снимок itdoginfo), состояние обновления пишет mitt-lists.sh update; до первой проверки — null
+            let Some(cat) = lists_dir().and_then(|d| read_limited(&d.join("catalog.json").to_string_lossy(), 1024 * 1024).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok()) else {
+                return Some(Response::error(503, "lists_unavailable", "каталог списков недоступен (релиз не найден)"));
+            };
+            let st = std::fs::read(run_dir().join("lists.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
+            Response { status: 200, body: json!({ "ok": true, "catalog": cat, "status": st, "requested": run_dir().join("lists-update.request").exists(), "issues": [] }) }
+        }
+        ("POST", "/lists/update") => {
+            // CGI без привилегий: только заявка; загрузку запускает служба в фоне (повторная заявка ничего не меняет)
+            let d = run_dir();
+            let req = json!({ "requested_unix": crate::auth::now() });
+            match std::fs::create_dir_all(&d).map_err(|e| e.to_string()).and_then(|_| store::write_atomic(&d.join("lists-update.request"), req.to_string().as_bytes())) {
+                Ok(()) => Response { status: 202, body: json!({ "ok": true, "queued": true, "issues": [] }) },
+                Err(m) => Response::error(500, "write_failed", m),
+            }
+        }
         ("GET", "/status") => {
             let st = std::fs::read(run_dir().join("status.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
             let pending = run_dir().join("apply.request").exists();
