@@ -54,9 +54,9 @@ describe('DNS', () => {
     expect(dnsToForm({ adblock: { enabled: false } })).toEqual(dnsDefault())
   })
   it('свои DNS-записи, туда и обратно', () => {
-    const h = formToDns({ ...dnsDefault(), hosts: [{ domain: 'erlh.ru', address: '192.168.31.10' }] })
-    expect(h).toEqual({ hosts: [{ domain: 'erlh.ru', address: '192.168.31.10' }] })
-    expect(dnsToForm(h ?? undefined).hosts).toEqual([{ domain: 'erlh.ru', address: '192.168.31.10' }])
+    const h = formToDns({ ...dnsDefault(), hosts: [{ domain: 'home.example.com', address: '192.168.31.10' }] })
+    expect(h).toEqual({ hosts: [{ domain: 'home.example.com', address: '192.168.31.10' }] })
+    expect(dnsToForm(h ?? undefined).hosts).toEqual([{ domain: 'home.example.com', address: '192.168.31.10' }])
   })
   it('готовые серверы ↔ адрес: по умолчанию Cloudflare, незнакомый адрес — «Свой адрес»', () => {
     expect(DNS_PRESETS.map((p) => [p.id, p.ip])).toEqual([

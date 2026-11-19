@@ -548,10 +548,10 @@ mod tests {
             check_dns(&mut i, &DnsConfig { tunnel_resolver: None, adblock: None, hosts: h });
             i.into_iter().map(|x| format!("{}:{}", x.path, x.code)).collect::<Vec<_>>()
         };
-        assert!(check(vec![rec("erlh.ru", "192.168.31.10"), rec("nas", "fd00::5")]).is_empty());
-        assert_eq!(check(vec![rec("erlh.ru", "192.168.31.10"), rec("ERLH.ru.", "192.168.31.11")]), ["dns.hosts[1].domain:duplicate"]);
-        assert_eq!(check(vec![rec("*.erlh.ru", "0.0.0.0")]), ["dns.hosts[0].domain:bad_domain", "dns.hosts[0].address:bad_address"]);
-        assert_eq!(check(vec![rec("erlh.ru", "192.168.31.10/24")]), ["dns.hosts[0].address:bad_address"]);
+        assert!(check(vec![rec("home.example.com", "192.168.31.10"), rec("nas", "fd00::5")]).is_empty());
+        assert_eq!(check(vec![rec("home.example.com", "192.168.31.10"), rec("Home.Example.com.", "192.168.31.11")]), ["dns.hosts[1].domain:duplicate"]);
+        assert_eq!(check(vec![rec("*.home.example.com", "0.0.0.0")]), ["dns.hosts[0].domain:bad_domain", "dns.hosts[0].address:bad_address"]);
+        assert_eq!(check(vec![rec("home.example.com", "192.168.31.10/24")]), ["dns.hosts[0].address:bad_address"]);
     }
 
     #[test]

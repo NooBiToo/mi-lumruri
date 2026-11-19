@@ -124,8 +124,8 @@ mod tests {
 
     #[test]
     fn own_host_records() {
-        let h = [HostRecord { domain: "ERLH.ru".into(), address: "192.168.31.10".into() }, HostRecord { domain: "nas".into(), address: "fd00::0:5".into() }];
+        let h = [HostRecord { domain: "Home.Example.com".into(), address: "192.168.31.10".into() }, HostRecord { domain: "nas".into(), address: "fd00::0:5".into() }];
         let c = dnsmasq_conf(&DnsPlan::default(), None, &[], &h);
-        assert!(c.contains("address=/erlh.ru/192.168.31.10\n") && c.contains("address=/nas/fd00::5\n"), "{c}");
+        assert!(c.contains("address=/home.example.com/192.168.31.10\n") && c.contains("address=/nas/fd00::5\n"), "{c}");
     }
 }
