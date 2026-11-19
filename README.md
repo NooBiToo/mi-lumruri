@@ -10,7 +10,7 @@
 
 ## Установка
 
-Скачайте и распакуйте ZIP из [последней успешной сборки](https://github.com/NooBiToo/mi-trusttunnel/actions/workflows/build.yml). В каталоге с `install.py` выполните:
+Скачайте из [последнего релиза](https://github.com/NooBiToo/mi-trusttunnel/releases/latest) три файла — `mi-trusttunnel-*.tar`, `SHA256SUMS` и `install.py` — в одну папку и выполните в ней:
 
 ```sh
 python install.py 192.168.31.1
