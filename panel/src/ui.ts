@@ -47,3 +47,19 @@ export function initials(name: string): string {
   const s = words.length > 1 ? first(words[0]!) + first(words[1]!) : [...words[0]!.replace(/[^\p{L}\p{N}]/gu, '')].slice(0, 2).join('')
   return s.toUpperCase()
 }
+
+/** Свой адрес для домена: IPv4 строго, IPv6 — грубо (точнее проверит контроллер). */
+export function isLikelyIp(raw: string): boolean {
+  const v = raw.trim()
+  if (/^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/.test(v)) return v !== '0.0.0.0'
+  return v.includes(':') && /^[0-9a-f:.]+$/i.test(v)
+}
+
+/** Новая своя DNS-запись из полей «домен» и «адрес»: запись или текст ошибки. */
+export function parseHostRecord(domain: string, address: string, have: { domain: string }[]): { domain: string; address: string } | string {
+  const d = normalizeDomain(domain)
+  if (!d || !isLikelyDomain(d)) return 'Не похоже на домен. Пример: home.example.com'
+  if (have.some((h) => h.domain === d)) return `Для ${d} запись уже есть: уберите её, чтобы задать другой адрес.`
+  if (!isLikelyIp(address)) return 'Нужен IP-адрес, например 192.168.31.10.'
+  return { domain: d, address: address.trim().toLowerCase() }
+}

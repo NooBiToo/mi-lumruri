@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::model::AdblockConfig;
+use crate::model::{AdblockConfig, HostRecord};
 use crate::validate::{Issue, normalize_domain};
 
 pub const ADBLOCK_MAX_ENTRIES: usize = 200_000;
@@ -61,8 +61,16 @@ pub struct DnsPlan {
 }
 
 /// Файл для каталога conf-dir dnsmasq. Пустая строка — файл не нужен.
-pub fn dnsmasq_conf(plan: &DnsPlan, adblock: Option<&AdblockConfig>, blocked: &[String]) -> String {
+pub fn dnsmasq_conf(plan: &DnsPlan, adblock: Option<&AdblockConfig>, blocked: &[String], hosts: &[HostRecord]) -> String {
     let mut s = String::new();
+    if !hosts.is_empty() {
+        s.push_str("# свои записи: домен вместе с поддоменами отвечает этим адресом, вопрос наружу не уходит\n");
+        for h in hosts {
+            let d = normalize_domain(&h.domain, 1).unwrap_or_else(|_| h.domain.clone());
+            let a: std::net::IpAddr = h.address.parse().expect("проверено");
+            s.push_str(&format!("address=/{d}/{a}\n"));
+        }
+    }
     if !plan.sets.is_empty() {
         s.push_str(&format!("# mi-trusttunnel: адреса доменов правил → ipset ({} доменов)\n", plan.sets.len()));
         for (d, sets) in &plan.sets {
@@ -106,11 +114,18 @@ mod tests {
         p.sets.insert("youtube.com".into(), ["mitt1d".to_string(), "mitt2d".to_string()].into());
         p.tunnel_domains.insert("youtube.com".into());
         let a = AdblockConfig { enabled: true, exceptions: vec!["ok.ads.example".into()] };
-        let c = dnsmasq_conf(&p, Some(&a), &["ads.example".into()]);
+        let c = dnsmasq_conf(&p, Some(&a), &["ads.example".into()], &[]);
         assert!(c.contains("ipset=/youtube.com/mitt1d,mitt2d\n"), "{c}");
         assert!(c.contains("server=/youtube.com/1.1.1.1\n"), "{c}");
         assert!(c.contains("address=/ads.example/\n") && c.contains("server=/ok.ads.example/#\n"), "{c}");
         assert!(!c.contains("no-resolv"), "провайдерский DNS остаётся для остальных доменов");
-        assert_eq!(dnsmasq_conf(&DnsPlan::default(), None, &[]), "");
+        assert_eq!(dnsmasq_conf(&DnsPlan::default(), None, &[], &[]), "");
+    }
+
+    #[test]
+    fn own_host_records() {
+        let h = [HostRecord { domain: "ERLH.ru".into(), address: "192.168.31.10".into() }, HostRecord { domain: "nas".into(), address: "fd00::0:5".into() }];
+        let c = dnsmasq_conf(&DnsPlan::default(), None, &[], &h);
+        assert!(c.contains("address=/erlh.ru/192.168.31.10\n") && c.contains("address=/nas/fd00::5\n"), "{c}");
     }
 }

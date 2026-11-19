@@ -11,6 +11,7 @@ import { config, save, saveZapret, scrollTarget, simple } from '../store'
 import { saveNow, useAutosave, type Blocker } from '../autosave'
 import { dnsIcon } from '../brand'
 import ServiceLogo from '../components/ServiceLogo.vue'
+import HostList from '../components/HostList.vue'
 
 defineProps<{ totp: boolean }>()
 const emit = defineEmits<{ navigate: [tab: 'sites'] }>()
@@ -147,5 +148,7 @@ useAutosave({
         <span :class="['badge', totp ? 'badge--ok' : 'badge--idle']">{{ totp ? 'Пароль и код' : 'Только пароль' }}</span>
       </div>
     </div>
+
+    <HostList v-model="draft.dns.hosts" />
   </section>
 </template>

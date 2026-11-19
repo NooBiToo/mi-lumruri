@@ -438,6 +438,8 @@ button.kpi:hover { border-color: var(--line-strong); box-shadow: 0 2px 8px -2px 
 .dlist__add { display: flex; gap: 0.5rem; max-width: 42rem; }
 .dlist__add .p-inputtext { flex: 1; min-width: 0; }
 .dlist__add .p-button { flex: none; }
+.hosts__add { display: grid; grid-template-columns: minmax(0, 1fr) 11rem auto; gap: 0.5rem; align-items: end; max-width: 42rem; }
+.hosts__arrow { color: var(--muted); margin: 0 0.25rem; }
 .dlist__items {
   list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 10px; max-width: 42rem; max-height: calc(12 * 2.375rem + 2px);
   overflow-y: auto; overscroll-behavior: contain;
@@ -581,6 +583,7 @@ svg.lucide.logo__svg { fill: none; }
   .setrow { padding: 1rem 1.125rem; flex-wrap: wrap; }
   .setblock { padding: 1rem 1.125rem; }
   .dlist__add { max-width: none; }
+  .hosts__add { grid-template-columns: minmax(0, 1fr); max-width: none; }
   .dlist__items { max-height: calc(10 * 2.375rem + 2px); }
   .setrow__input { width: 100%; }
   .setrow__actions { justify-content: flex-start; flex-basis: 100%; }

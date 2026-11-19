@@ -1,6 +1,6 @@
 // Формы без DOM: профиль TrustTunnel ↔ Profile (экран «Сервер»), DNS (экран «Дополнительно»).
 
-import type { DnsConfig, Endpoint, Profile, ProfileSecret } from './api'
+import type { DnsConfig, Endpoint, HostRecord, Profile, ProfileSecret } from './api'
 
 export interface ProfileForm {
   id: string
@@ -53,15 +53,16 @@ export function formToSecret(f: ProfileForm): ProfileSecret | null {
 /** Резолвер туннеля по умолчанию (controller/src/model.rs: DEFAULT_TUNNEL_RESOLVER). */
 export const DEFAULT_TUNNEL_RESOLVER = '1.1.1.1'
 
-export interface DnsForm { resolver: string; adblock: boolean; exceptions: string }
+export interface DnsForm { resolver: string; adblock: boolean; exceptions: string; hosts: HostRecord[] }
 
 export function dnsDefault(): DnsForm {
-  return { resolver: DEFAULT_TUNNEL_RESOLVER, adblock: false, exceptions: '' }
+  return { resolver: DEFAULT_TUNNEL_RESOLVER, adblock: false, exceptions: '', hosts: [] }
 }
 
 export function dnsToForm(d: DnsConfig | undefined): DnsForm {
   if (!d) return dnsDefault()
-  return { resolver: d.tunnel_resolver ?? DEFAULT_TUNNEL_RESOLVER, adblock: !!d.adblock?.enabled, exceptions: (d.adblock?.exceptions ?? []).join('\n') }
+  return { resolver: d.tunnel_resolver ?? DEFAULT_TUNNEL_RESOLVER, adblock: !!d.adblock?.enabled, exceptions: (d.adblock?.exceptions ?? []).join('\n'),
+    hosts: (d.hosts ?? []).map((h) => ({ domain: h.domain, address: h.address })) }
 }
 
 /** Настройки DNS из формы; всё по умолчанию — null (контроллер возьмёт 1.1.1.1 и не блокирует рекламу). Адрес и домены проверяет контроллер. */
@@ -71,6 +72,7 @@ export function formToDns(f: DnsForm): DnsConfig | null {
   const d: DnsConfig = {}
   if (resolver && resolver !== DEFAULT_TUNNEL_RESOLVER) d.tunnel_resolver = resolver
   if (f.adblock || exceptions.length) d.adblock = { enabled: f.adblock, ...(exceptions.length ? { exceptions } : {}) }
+  if (f.hosts.length) d.hosts = f.hosts.map((h) => ({ domain: h.domain, address: h.address }))
   return Object.keys(d).length ? d : null
 }
 

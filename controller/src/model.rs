@@ -40,6 +40,17 @@ pub struct DnsConfig {
     pub tunnel_resolver: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adblock: Option<AdblockConfig>,
+    /// Свои записи: домен вместе с поддоменами отвечает заданным адресом (например, домашний сервер за Traefik).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hosts: Vec<HostRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostRecord {
+    pub domain: String,
+    /// IPv4 или IPv6.
+    pub address: String,
 }
 
 pub const DEFAULT_TUNNEL_RESOLVER: &str = "1.1.1.1";

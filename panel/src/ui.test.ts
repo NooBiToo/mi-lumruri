@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { avatarHue, initials, isLikelyDomain, parseDomainInput } from './ui'
+import { avatarHue, initials, isLikelyDomain, isLikelyIp, parseDomainInput, parseHostRecord } from './ui'
 
 describe('ui', () => {
   it('isLikelyDomain: обычные, кириллические и с поддоменом — да; без точки и с мусором — нет', () => {
@@ -26,5 +26,13 @@ describe('ui', () => {
     expect(initials('iPhone')).toBe('IP')
     expect(initials('living-room-tv')).toBe('LR')
     expect(initials('')).toBe('')
+  })
+  it('parseHostRecord: домен и адрес своей DNS-записи', () => {
+    expect(parseHostRecord(' ERLH.ru ', ' 192.168.31.10 ', [])).toEqual({ domain: 'erlh.ru', address: '192.168.31.10' })
+    expect(parseHostRecord('erlh.ru', '192.168.31.11', [{ domain: 'erlh.ru' }])).toMatch(/уже есть/)
+    expect(parseHostRecord('erlh', '192.168.31.10', [])).toMatch(/домен/)
+    expect(parseHostRecord('erlh.ru', '192.168.31', [])).toMatch(/IP-адрес/)
+    expect(isLikelyIp('fd00::5')).toBe(true)
+    expect(isLikelyIp('0.0.0.0')).toBe(false)
   })
 })

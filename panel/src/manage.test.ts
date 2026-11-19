@@ -41,17 +41,22 @@ describe('профиль TrustTunnel', () => {
 
 describe('DNS', () => {
   it('по умолчанию — резолвер 1.1.1.1 без блокировки рекламы; сохраняется как null', () => {
-    expect(dnsDefault()).toEqual({ resolver: '1.1.1.1', adblock: false, exceptions: '' })
+    expect(dnsDefault()).toEqual({ resolver: '1.1.1.1', adblock: false, exceptions: '', hosts: [] })
     expect(dnsToForm(undefined)).toEqual(dnsDefault())
     expect(formToDns(dnsDefault())).toBeNull()
     expect(formToDns({ ...dnsDefault(), resolver: '  ' })).toBeNull()
   })
   it('свой резолвер и блокировка рекламы с исключениями, туда и обратно', () => {
-    const d = formToDns({ resolver: ' 9.9.9.9 ', adblock: true, exceptions: 'ads.example.com\n\n  cdn.example.org ' })
+    const d = formToDns({ resolver: ' 9.9.9.9 ', adblock: true, exceptions: 'ads.example.com\n\n  cdn.example.org ', hosts: [] })
     expect(d).toEqual({ tunnel_resolver: '9.9.9.9', adblock: { enabled: true, exceptions: ['ads.example.com', 'cdn.example.org'] } })
-    expect(dnsToForm(d ?? undefined)).toEqual({ resolver: '9.9.9.9', adblock: true, exceptions: 'ads.example.com\ncdn.example.org' })
+    expect(dnsToForm(d ?? undefined)).toEqual({ resolver: '9.9.9.9', adblock: true, exceptions: 'ads.example.com\ncdn.example.org', hosts: [] })
     expect(formToDns({ ...dnsDefault(), adblock: true })).toEqual({ adblock: { enabled: true } })
     expect(dnsToForm({ adblock: { enabled: false } })).toEqual(dnsDefault())
+  })
+  it('свои DNS-записи, туда и обратно', () => {
+    const h = formToDns({ ...dnsDefault(), hosts: [{ domain: 'erlh.ru', address: '192.168.31.10' }] })
+    expect(h).toEqual({ hosts: [{ domain: 'erlh.ru', address: '192.168.31.10' }] })
+    expect(dnsToForm(h ?? undefined).hosts).toEqual([{ domain: 'erlh.ru', address: '192.168.31.10' }])
   })
   it('готовые серверы ↔ адрес: по умолчанию Cloudflare, незнакомый адрес — «Свой адрес»', () => {
     expect(DNS_PRESETS.map((p) => [p.id, p.ip])).toEqual([

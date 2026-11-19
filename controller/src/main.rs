@@ -225,7 +225,8 @@ fn write_dns_file(config: &model::Config, plan: &mi_tt::dns::DnsPlan, cfg: &std:
                 .map_err(|i| format!("adblock.list не прошёл проверку: {}", i.iter().map(|x| format!("{} {}", x.path, x.message)).collect::<Vec<_>>().join("; ")))?;
         }
     }
-    let text = dns::dnsmasq_conf(plan, adblock, &blocked);
+    let hosts = config.dns.as_ref().map(|d| d.hosts.as_slice()).unwrap_or_default();
+    let text = dns::dnsmasq_conf(plan, adblock, &blocked, hosts);
     if text.is_empty() {
         let _ = std::fs::remove_file(&conf);
         return Ok(());

@@ -29,10 +29,14 @@ export type Destination =
   | { type: 'category'; id: string }
 
 export interface Category { id: string; name: string; kind: 'domain' | 'ip'; source?: string }
+export interface HostRecord { domain: string; address: string }
+
 export interface DnsConfig {
   /** Публичный IPv4 DNS-сервера для доменов, идущих через TrustTunnel; запросы к нему идут через туннель. По умолчанию 1.1.1.1. */
   tunnel_resolver?: string
   adblock?: { enabled: boolean; exceptions?: string[] }
+  /** Свои записи: домен вместе с поддоменами отвечает адресом (IPv4 или IPv6). */
+  hosts?: HostRecord[]
 }
 /** Выбор стратегий Zapret (controller/src/model.rs): `auto` — круговой режим, иначе id стратегии каталога. */
 export interface ZapretConfig { strategy: string; youtube: string }

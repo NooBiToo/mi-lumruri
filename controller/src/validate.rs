@@ -415,6 +415,21 @@ fn check_dns(issues: &mut Vec<Issue>, d: &DnsConfig) {
             _ => issues.push(Issue::new("dns.tunnel_resolver", "bad_resolver", "резолвер туннеля — публичный IPv4-адрес DNS-сервера, например 1.1.1.1")),
         }
     }
+    if d.hosts.len() > 256 {
+        issues.push(Issue::new("dns.hosts", "too_many", "не больше 256 своих записей"));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for (i, h) in d.hosts.iter().enumerate() {
+        match normalize_domain(&h.domain, 1) {
+            Ok(n) if !seen.insert(n.clone()) => issues.push(Issue::new(format!("dns.hosts[{i}].domain"), "duplicate", format!("{n}: запись для этого домена уже есть"))),
+            Ok(_) => {}
+            Err(m) => issues.push(Issue::new(format!("dns.hosts[{i}].domain"), "bad_domain", m)),
+        }
+        match h.address.parse::<IpAddr>() {
+            Ok(a) if !a.is_unspecified() && !a.is_multicast() => {}
+            _ => issues.push(Issue::new(format!("dns.hosts[{i}].address"), "bad_address", "адрес — IPv4 или IPv6, например 192.168.31.10")),
+        }
+    }
     if let Some(a) = &d.adblock {
         if a.exceptions.len() > 256 {
             issues.push(Issue::new("dns.adblock.exceptions", "too_many", "не больше 256 исключений"));
@@ -523,6 +538,20 @@ mod tests {
             check_endpoint(&mut i, "e", &ep(bad));
             assert!(i.iter().any(|x| x.code == "bad_server"), "{bad}");
         }
+    }
+
+    #[test]
+    fn own_host_records() {
+        let rec = |d: &str, a: &str| HostRecord { domain: d.into(), address: a.into() };
+        let check = |h: Vec<HostRecord>| {
+            let mut i = Vec::new();
+            check_dns(&mut i, &DnsConfig { tunnel_resolver: None, adblock: None, hosts: h });
+            i.into_iter().map(|x| format!("{}:{}", x.path, x.code)).collect::<Vec<_>>()
+        };
+        assert!(check(vec![rec("erlh.ru", "192.168.31.10"), rec("nas", "fd00::5")]).is_empty());
+        assert_eq!(check(vec![rec("erlh.ru", "192.168.31.10"), rec("ERLH.ru.", "192.168.31.11")]), ["dns.hosts[1].domain:duplicate"]);
+        assert_eq!(check(vec![rec("*.erlh.ru", "0.0.0.0")]), ["dns.hosts[0].domain:bad_domain", "dns.hosts[0].address:bad_address"]);
+        assert_eq!(check(vec![rec("erlh.ru", "192.168.31.10/24")]), ["dns.hosts[0].address:bad_address"]);
     }
 
     #[test]
