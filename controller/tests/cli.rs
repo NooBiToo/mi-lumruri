@@ -274,6 +274,10 @@ fn zapret_set_cli() {
     assert_eq!((code, v["previous"].as_str()), (0, Some("v3")), "{v}");
     assert_eq!(z(), serde_json::json!({ "strategy": "auto", "youtube": "yv2" }));
     assert!(dir.join("config.json.prev").exists(), "запись через store::update_config");
+    let o = Command::new(bin()).args(["zapret-get", c]).output().unwrap();
+    assert_eq!(String::from_utf8(o.stdout).unwrap(), "general auto
+youtube yv2
+");
     // неизвестный id, стратегия другого вида и неизвестное поле — отказ, настройки не меняются
     let before = std::fs::read(&cfg).unwrap();
     let (code, v) = run(&["zapret-set", c, "general", "nope"]);

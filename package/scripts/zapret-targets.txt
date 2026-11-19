@@ -3,9 +3,9 @@
 # Цели YouTube узнаются по имени (youtube, googlevideo): по ним решается, нужен ли проход по YouTube-стратегиям.
 # Хостинги и CDN — адреса проверки «TCP 16–20 КБ» проекта dpi-detector (Runnin4ik, MIT, tcp16.json и domains.txt);
 # Cloudflare, CDN77 и Fastly без имени сервера (SNI) не отвечают, для них — сайты на этих CDN.
-required https://www.youtube.com/
-required https://youtubei.googleapis.com/
-required https://redirector.googlevideo.com/report_mapping
+required https://www.youtube.com/robots.txt
+required https://youtubei.googleapis.com/generate_204
+required https://redirector.googlevideo.com/generate_204
 required https://discord.com/
 required https://gateway.discord.gg/
 required https://updates.discord.com/

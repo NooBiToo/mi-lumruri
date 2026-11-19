@@ -92,8 +92,25 @@ enum ZapretTestMode {
     Quick,
 }
 
-/// Подбор, оставшийся в состоянии `running` дольше этого (сценарий убит без завершения), не мешает новой заявке.
-const ZAPRET_TEST_STALE: u64 = 3600;
+/// Сценарий подбора обновляет файл состояния не реже раза в минуту (после каждой четвёрки целей). Файл `running`,
+/// не менявшийся дольше этого, — от убитого сценария и новой заявке не мешает.
+const ZAPRET_TEST_STALE: u64 = 300;
+
+/// Подбор действительно идёт: состояние `running`, процесс сценария жив (где есть /proc) и файл недавно обновлялся.
+fn zapret_test_running(file: &Path) -> bool {
+    let Some(st) = std::fs::read(file).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()) else { return false };
+    if st["state"] != "running" {
+        return false;
+    }
+    let proc = Path::new("/proc");
+    if let Some(pid) = st["pid"].as_u64() {
+        if proc.is_dir() && !proc.join(pid.to_string()).exists() {
+            return false;
+        }
+    }
+    let age = std::fs::metadata(file).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).map(|d| d.as_secs());
+    age.is_none_or(|a| a < ZAPRET_TEST_STALE)
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -394,10 +411,8 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
             Ok(q) => {
                 // CGI без привилегий: только заявка; подбор запускает служба (root), один одновременно
                 let d = run_dir();
-                let st = std::fs::read(d.join("zapret-test.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
                 let now = crate::auth::now();
-                let running = st.as_ref().is_some_and(|s| s["state"] == "running" && s["started"].as_u64().is_some_and(|t| t + ZAPRET_TEST_STALE > now));
-                if running || d.join("zapret-test.request").exists() {
+                if zapret_test_running(&d.join("zapret-test.json")) || d.join("zapret-test.request").exists() {
                     return Some(Response::error(409, "zapret_test_running", "подбор стратегии уже идёт"));
                 }
                 let req = json!({ "requested_unix": now, "mode": q.mode });

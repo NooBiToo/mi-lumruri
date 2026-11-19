@@ -222,7 +222,7 @@ fn zapret_test_api() {
     assert_eq!(call("POST", Some(br#"{"mode":"full"}"#)).status, 400);
     // идёт подбор — 409; GET отдаёт файл состояния
     std::fs::remove_file(run.join("zapret-test.request")).unwrap();
-    let st = json!({ "state": "running", "started": T0 + 50, "finished": null, "progress": { "done": 3, "total": 11, "current": "v3" },
+    let st = json!({ "state": "running", "pid": std::process::id(), "started": T0 + 50, "finished": null, "progress": { "done": 3, "total": 11, "current": "v3" },
         "control": { "opened": 2, "total": 10 }, "best": null, "applied": false, "message": "Проверка стратегии v3" });
     std::fs::write(run.join("zapret-test.json"), st.to_string()).unwrap();
     let o = call("POST", Some(br#"{"mode":"quick"}"#));
@@ -230,6 +230,27 @@ fn zapret_test_api() {
     assert!(!run.join("zapret-test.request").exists());
     let o = call("GET", None);
     assert_eq!(o.body["test"], st, "{}", o.body);
+    // зависший running (файл давно не обновлялся — сценарий убит) не мешает
+    let f = std::fs::File::options().write(true).open(run.join("zapret-test.json")).unwrap();
+    f.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(600)).unwrap();
+    drop(f);
+    assert_eq!(call("POST", Some(br#"{"mode":"quick"}"#)).status, 202, "зависший running");
+    std::fs::remove_file(run.join("zapret-test.request")).unwrap();
+    // процесс сценария умер — сразу не running (только где есть /proc)
+    if std::path::Path::new("/proc/self").exists() {
+        let mut dead = st.clone();
+        dead["pid"] = json!(u32::MAX);
+        std::fs::write(run.join("zapret-test.json"), dead.to_string()).unwrap();
+        assert_eq!(call("POST", Some(br#"{"mode":"quick"}"#)).status, 202, "умерший сценарий");
+        std::fs::remove_file(run.join("zapret-test.request")).unwrap();
+    }
+    // без CSRF и с чужим Origin заявка не принимается
+    let o = p.a.cgi("POST", "/zapret/test", Some(br#"{"mode":"quick"}"#), p.t + 1, &[("HTTP_COOKIE", p.s.cookie.as_str()), ("HTTP_ORIGIN", ORIGIN), ("MI_TT_RUN_DIR", rd.as_str())]);
+    assert_eq!(o.code(), "csrf_failed", "{}", o.body);
+    let o = p.a.cgi("POST", "/zapret/test", Some(br#"{"mode":"quick"}"#), p.t + 1,
+        &[("HTTP_COOKIE", p.s.cookie.as_str()), ("HTTP_ORIGIN", "https://evil.example"), ("HTTP_X_MITT_CSRF", p.s.csrf.as_str()), ("MI_TT_RUN_DIR", rd.as_str())]);
+    assert_eq!(o.code(), "origin_forbidden", "{}", o.body);
+    assert!(!run.join("zapret-test.request").exists());
     // завершённый подбор — можно снова
     let mut done = st.clone();
     done["state"] = json!("done");

@@ -28,11 +28,19 @@ PATH=/usr/bin:/bin
 case "$1" in
   zapret-list) if [ "$2" = general ]; then printf 'v%s\n' 1 2 3 4 5 6 7 8 9 10; else printf 'yv%s\n' 1 2 3; fi;;
   zapret-args) printf -- '--qnum=201\n--fwmark=0x40000000\n--zt-id=%s\n' "$2";;
+  zapret-get)
+    printf 'general %s\nyoutube %s\n' "$(sed -n 's/.*"strategy": *"\([^"]*\)".*/\1/p' "$2")" "$(sed -n 's/.*"youtube": *"\([^"]*\)".*/\1/p' "$2")";;
   zapret-set)
+    # сбой записи по сценарию: set_hook <вид> <id> → busy | fail | пусто
+    . "$ZT/scenario"; h=""; command -v set_hook >/dev/null && h="$(set_hook "$3" "$4")"
+    echo "zapret-set $3 $4 ${h:-ok}" >>"$ZT/calls"
+    case "$h" in
+      busy) printf '{\n  "ok": false,\n  "error": {\n    "code": "busy"\n  }\n}\n'; exit 2;;
+      fail) printf '{\n  "ok": false,\n  "error": {\n    "code": "write_failed"\n  }\n}\n'; exit 2;;
+    esac
     k=strategy; [ "$3" = youtube ] && k=youtube
     prev="$(sed -n "s/.*\"$k\": *\"\([^\"]*\)\".*/\1/p" "$2")"
     sed -i "s/\"$k\": *\"[^\"]*\"/\"$k\": \"$4\"/" "$2"
-    echo "zapret-set $3 $4" >>"$ZT/calls"
     printf '{\n  "ok": true,\n  "field": "%s",\n  "previous": "%s",\n  "id": "%s"\n}\n' "$3" "$prev" "$4";;
   *) echo "неожиданный вызов mi-tt-ctl $*" >>"$ZT/errors"; exit 2;;
 esac
@@ -51,7 +59,7 @@ cat >"$ST/curl" <<'EOF'
 PATH=/usr/bin:/bin
 for a; do url="$a"; done
 cur="$(cat "$ZT/current" 2>/dev/null)"; [ -n "$cur" ] || cur=control
-case " $* " in *" --local-port 61000-61099 "*) ;; *) echo "curl без проверочных портов: $*" >>"$ZT/errors";; esac
+case " $* " in *" -r 0-65535 "*" --local-port 61000-61099 "*) ;; *) echo "curl без Range или проверочных портов: $*" >>"$ZT/errors";; esac
 echo "$cur $url" >>"$ZT/curl.log"
 . "$ZT/scenario"
 k="$(lim "$cur" "$url")"
@@ -86,11 +94,23 @@ run() {
   printf '{\n  "version": 1,\n  "zapret": {\n    "strategy": "auto",\n    "youtube": "auto"\n  }\n}\n' >"$RR/data/mi-trusttunnel/etc/config.json"
   cp "$RR/data/mi-trusttunnel/etc/config.json" "$d/config.before"
   local t0=$(date +%s)
-  timeout 300 env -i PATH="$SB" MITT_ROOT="$RR" MITT_QUIET=1 MITT_CURL="$ST/curl" MITT_NFQWS="$ST/nfqws2" MITT_ZAPRET_TARGETS="$d/targets.txt" \
-    MITT_ZT_SETTLE=0 ZT="$ZT" ZSTATE="$RR/tmp/mi-trusttunnel/run" \
-    "$Q" -L "$F" "$F/bin/busybox" ash "$RR/tmp/mi-trusttunnel/scripts/mitt-zapret-test.sh" >"$d/out" 2>&1
+  bb "$n" "$RR/tmp/mi-trusttunnel/scripts/mitt-zapret-test.sh" >"$d/out" 2>&1
   echo "$?" >"$d/rc"
   echo "[$n] код $(cat "$d/rc"), $(( $(date +%s) - t0 )) с"
+  [ -z "${NOCHECK:-}" ] || return 0
+  after "$n"
+}
+# bb <имя> <аргументы ash…>: BusyBox стока с окружением сценария <имя>
+bb() {
+  local d="$W/$1"; shift
+  timeout 300 env -i PATH="$SB" MITT_ROOT="$d/root" MITT_QUIET=1 MITT_CURL="$ST/curl" MITT_NFQWS="$ST/nfqws2" MITT_ZAPRET_TARGETS="$d/targets.txt" \
+    MITT_ZT_SETTLE=0 MITT_ZT_APPLY_WAIT=1 ZT="$d/zt" ZSTATE="$d/root/tmp/mi-trusttunnel/run" \
+    "$Q" -L "$F" "$F/bin/busybox" ash "$@"
+}
+# служба: разбор остатка прерванного подбора (zt_recover из mitt-lib.sh)
+recover() { bb "$1" -c '. "$MITT_ROOT/tmp/mi-trusttunnel/scripts/mitt-lib.sh"; zt_recover' >>"$W/$1/out" 2>&1; echo "[$1] разбор службой: код $?"; }
+after() { # общие проверки: заглушки без ошибок, проверочный nfqws2 остановлен
+  local n="$1" ZT="$W/$1/zt" RR="$W/$1/root"
   [ -s "$ZT/errors" ] && bad "$n: $(cat "$ZT/errors")"
   [ -f "$RR/tmp/mi-trusttunnel/run/zapret-nfqws.pid" ] && bad "$n: проверочный nfqws2 не остановлен"
   pgrep -f "$ST/nfqws2" >/dev/null && { bad "$n: процесс заглушки nfqws2 жив"; pkill -f "$ST/nfqws2"; }
@@ -154,6 +174,38 @@ echo "(е) Zapret не включён — подбор не начинается
 NOZAP=1 run f "$TEN" 'lim() { echo 9; }'
 check f "отказ с объяснением" 's["state"]=="failed" and "Zapret не включён" in s["message"] and not areq'
 [ -f "$W/f/zt/curl.log" ] && bad "f: проверочные запросы были" || ok "f: проверочных запросов не было"
+
+MARK=root/data/mi-trusttunnel/etc/zapret-test.rollback
+# lim для повторной проверки v3 (после 10 запросов первого прохода): <действие>; echo <K>
+recheck() { echo 'lim() { case "$1" in control) echo 2;; v3) if [ "$(grep -c "^v3 " "$ZT/curl.log")" -gt 10 ]; then '"$1"'; else echo 9; fi;; *) echo 4;; esac; }'; }
+SPID='"$(sed -n "s/.*\"pid\":\([0-9]*\).*/\1/p" "$ZSTATE/zapret-test.json")"'
+
+echo "(ж) TERM во время повторной проверки — откат сразу"
+run g "$TEN" "$(recheck "kill -TERM $SPID; sleep 1; echo 9")"
+check g "failed, прежняя стратегия, не применено" 's["state"]=="failed" and s["applied"] is False and c["zapret"]["strategy"]=="auto" and "остановлен" in s["message"]'
+[ -f "$W/g/$MARK" ] && bad "g: метка отката осталась" || ok "g: метки отката нет"
+
+echo "(з) KILL во время повторной проверки — откат при разборе службой"
+NOCHECK=1 run h "$TEN" "$(recheck "kill -KILL $SPID; sleep 1; echo 9")"
+check h "после KILL: running, действует v3" 's["state"]=="running" and c["zapret"]["strategy"]=="v3"'
+[ "$(cat "$W/h/$MARK" 2>/dev/null)" = "general auto" ] && ok "h: метка отката «general auto»" || bad "h: метки отката нет: $(cat "$W/h/$MARK" 2>/dev/null)"
+rm -f "$W/h/root/tmp/mi-trusttunnel/run/apply.request"
+recover h; after h
+check h "после разбора: failed, прежняя стратегия, заявка" 's["state"]=="failed" and s["applied"] is False and c["zapret"]["strategy"]=="auto" and "восстановлена" in s["message"] and areq'
+[ -f "$W/h/$MARK" ] && bad "h: метка отката осталась" || ok "h: метка снята"
+
+echo "(и) вернуть прежнюю не удалось — failed, applied=true, метка остаётся"
+run i "$TEN" "$(recheck "echo 1")
+set_hook() { [ \"\$2\" = auto ] && echo fail; }"
+check i "failed с именем стратегии" 's["state"]=="failed" and s["applied"] is True and "(auto)" in s["message"] and c["zapret"]["strategy"]=="v3"'
+[ -f "$W/i/$MARK" ] && ok "i: метка отката осталась для службы" || bad "i: метки нет"
+[ "$(grep -c 'zapret-set general auto' "$W/i/zt/calls")" = 1 ] && ok "i: сбой записи (не busy) — без повторов" || bad "i: $(cat "$W/i/zt/calls")"
+
+echo "(к) настройки заняты при откате — повтор и успех"
+run k "$TEN" "$(recheck "echo 1")
+set_hook() { if [ \"\$2\" = auto ] && [ \"\$(grep -c 'general auto' \"\$ZT/calls\")\" -lt 2 ]; then echo busy; fi; }"
+check k "откат после двух busy" 's["state"]=="done" and s["applied"] is False and c["zapret"]["strategy"]=="auto"'
+[ "$(grep -c 'zapret-set general auto' "$W/k/zt/calls")" = 3 ] && ok "k: три попытки" || bad "k: $(grep 'general auto' "$W/k/zt/calls")"
 
 [ $FAIL -eq 0 ] && echo "PASS" || echo "FAIL"
 exit $FAIL

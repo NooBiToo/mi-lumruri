@@ -20,6 +20,7 @@ const USAGE: &str = "mi-tt-ctl — чтение, проверка и предп�
   mi-tt-ctl zapret-list <general|youtube>            # кандидаты подбора стратегии Zapret (без auto), по строке
   mi-tt-ctl zapret-args <strategy-id>                # аргументы nfqws2 для проверки одной стратегии на очереди 201
   mi-tt-ctl zapret-set <config.json> <general|youtube> <id>   # атомарно сменить выбор стратегии Zapret
+  mi-tt-ctl zapret-get <config.json>                 # текущий выбор: строки «general <id>» и «youtube <id>»
   mi-tt-ctl cgi            # CGI для uhttpd (HTTPS): вход паролем и TOTP, затем /config, /preview, /rules
                            # MI_TT_CONFIG, MI_TT_ALLOWED_ORIGINS, MI_TT_AUTH_DIR, MI_TT_SESSION_DIR
   mi-tt-ctl --version
@@ -55,6 +56,16 @@ fn main() -> ExitCode {
             Err(m) => {
                 eprintln!("mi-tt-ctl: {m}");
                 ExitCode::from(1)
+            }
+        },
+        ["zapret-get", cfg] => match read_limited(cfg, MAX_CONFIG_BYTES).map_err(|m| m.to_string()).and_then(|b| api::parse_json::<model::Config>(&b, "config").map_err(|_| "настройки не разобраны".into())) {
+            Ok(c) => {
+                let z = c.zapret.unwrap_or_default();
+                lines([format!("general {}", z.strategy), format!("youtube {}", z.youtube)])
+            }
+            Err(m) => {
+                eprintln!("mi-tt-ctl: {m}");
+                ExitCode::from(2)
             }
         },
         ["zapret-set", cfg, kind, id] => match zapret_kind(kind) {

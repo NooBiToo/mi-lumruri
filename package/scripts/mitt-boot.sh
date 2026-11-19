@@ -21,7 +21,13 @@ trap 'lock_drop boot' EXIT
 case "${1:-auto}" in
   stop)
     # mihomo и dnscrypt — движки версий до 0.2: при обновлении их останавливает уже новый загрузчик
+    # подбор Zapret: сначала флаг stop — сценарий сам вернёт прежние стратегии (до 10 с), иначе — сигнал и разбор метки
+    if pid_alive zapret-test; then
+      touch "$STATE/zapret-test.stop"; i=0
+      while [ $i -lt 10 ] && pid_alive zapret-test; do sleep 1; i=$((i + 1)); done
+    fi
     for n in service trusttunnel nfqws2 mihomo dnscrypt nginx uhttpd zapret-test zapret-nfqws; do rm -f "$STATE/$n.wanted"; pid_stop "$n"; done
+    [ -x "$BIN/mi-tt-ctl" ] && zt_recover
     [ -x "$BIN/mi-tt-admin" ] && adm revert --state-dir "$RUN/admin" >"$STATE/revert.json" 2>&1
     # без своего файла dnsmasq перестаёт заносить адреса в снятые наборы и спрашивать резолвер туннеля
     if [ -f "$R/tmp/dnsmasq.d/mitt.conf" ]; then rm -f "$R/tmp/dnsmasq.d/mitt.conf"; ${MITT_DNSMASQ_RESTART:-/etc/init.d/dnsmasq restart} >/dev/null 2>&1; fi
