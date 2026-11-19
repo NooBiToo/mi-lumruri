@@ -168,6 +168,17 @@ export interface ListCatalog { source: string; commit: string; date: string; ser
 export interface ListsStatus { snapshot: string; updated: number | null; checked: number; ok: boolean; errors: string[] }
 export interface ListsResponse { ok: boolean; catalog?: ListCatalog; status?: ListsStatus | null; requested?: boolean; queued?: boolean; issues: Issue[]; error?: ApiError }
 
+/** Диагностика службы (mitt-diag.sh): ok — работает, warn — с оговоркой, bad — не работает, skip — не используется. */
+export type DiagStatus = 'ok' | 'warn' | 'bad' | 'skip'
+export interface DiagCheck { id: string; status: DiagStatus; detail: string }
+/** Пробный запрос к сайту: код 0 — нет ответа; время — секунды. */
+export interface DiagProbe { code: number; seconds: number | null }
+export interface DiagSite { domain: string; ip: string | null; route: 'tunnel' | 'direct' | 'zapret' | 'block' | null; direct: DiagProbe | null; tunnel: DiagProbe | null }
+export interface DiagResponse {
+  ok: boolean; running?: boolean; started?: number | null; finished?: number | null; checks?: DiagCheck[]; site?: DiagSite | null
+  logs?: { service: string[]; trusttunnel: string[]; nfqws2: string[] }; queued?: boolean; issues: Issue[]; error?: ApiError
+}
+
 /** Состояние подбора стратегии Zapret (mitt-zapret-test.sh); до первого подбора — только `state: 'idle'`. */
 export interface ZapretTestState {
   state: 'idle' | 'running' | 'done' | 'failed'
@@ -218,4 +229,7 @@ export const api = {
   startZapretTest: () => call<ZapretTestResponse>('/zapret/test', json({ mode: 'quick' })),
   /** Выбор способов обхода (раздел `zapret`) с проверкой ревизии. Заявку на применение контроллер здесь не ставит. */
   setZapret: (base_revision: string, zapret: ZapretConfig | null) => call<SaveResponse>('/zapret', json({ base_revision, zapret })),
+  diag: () => call<DiagResponse>('/diag'),
+  runDiag: (site?: string) => call<DiagResponse>('/diag', json(site ? { site } : {})),
+  restartService: () => call<DiagResponse>('/service/restart', json({})),
 }

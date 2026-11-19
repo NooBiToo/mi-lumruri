@@ -302,3 +302,53 @@ fn lists_api() {
     assert!(!run.join("lists-update.request").exists());
     assert_eq!(call("DELETE", "/lists", &ls).status, 405);
 }
+
+#[test]
+fn diag_api() {
+    let p = Panel::new("mgmt-diag");
+    let run = p.dir.join("tmp").join("run");
+    let rd = run.to_str().unwrap().to_string();
+    let call = |m: &str, path: &str, body: Option<&[u8]>| {
+        let mut env = vec![("HTTP_COOKIE", p.s.cookie.as_str()), ("MI_TT_RUN_DIR", rd.as_str())];
+        if m == "POST" {
+            env.extend([("HTTP_ORIGIN", ORIGIN), ("HTTP_X_MITT_CSRF", p.s.csrf.as_str())]);
+        }
+        p.a.cgi(m, path, body, p.t + 1, &env)
+    };
+    assert_eq!(p.a.cgi("GET", "/diag", None, p.t, &[("MI_TT_RUN_DIR", rd.as_str())]).code(), "auth_required");
+    // до первой проверки — пусто
+    let o = call("GET", "/diag", None);
+    assert_eq!((o.status, &o.body["checks"], &o.body["site"], o.body["running"].as_bool()), (200, &json!([]), &Value::Null, Some(false)), "{}", o.body);
+    // неверный сайт — отказ без заявки; верный — заявка для службы, повтор — 409
+    let o = call("POST", "/diag", Some(br#"{"site":"bad site"}"#));
+    assert_eq!((o.status, o.body["issues"][0]["code"].as_str()), (400, Some("bad_domain")), "{}", o.body);
+    assert!(!run.join("diag.request").exists());
+    assert_eq!(call("POST", "/diag", Some(br#"{"site":"YouTube.com"}"#)).status, 202);
+    let req: Value = serde_json::from_slice(&std::fs::read(run.join("diag.request")).unwrap()).unwrap();
+    assert_eq!(req["site"], "youtube.com", "{req}");
+    assert_eq!(call("POST", "/diag", Some(b"{}")).code(), "diag_running");
+    assert_eq!(call("GET", "/diag", None).body["running"], true);
+    std::fs::remove_file(run.join("diag.request")).unwrap();
+    // итог службы: проверки, сайт и маршрут по политике рендера, журналы
+    let dd = run.join("diag");
+    std::fs::create_dir_all(&dd).unwrap();
+    std::fs::write(dd.join("checks.tsv"), "service\tok\tработает\nclient\tbad\tнет связи с сервером\n").unwrap();
+    std::fs::write(dd.join("site.tsv"), "domain\tyoutube.com\nip\t142.250.1.1\nsets\tmitt01d mitt02n\ndirect\t000 10.0\ntunnel\t200 0.31\n").unwrap();
+    std::fs::write(dd.join("log-service.txt"), "строка 1\nстрока 2\n").unwrap();
+    std::fs::write(dd.join("started"), "100\n").unwrap();
+    std::fs::write(dd.join("finished"), "105\n").unwrap();
+    let rnd = p.dir.join("tmp").join("render");
+    std::fs::create_dir_all(&rnd).unwrap();
+    std::fs::write(rnd.join("policy.json"), json!({ "rules": [
+        { "from": "except", "src": { "type": "any" }, "set": "mitt00x", "act": "direct" },
+        { "from": "vpn", "src": { "type": "any" }, "set": "mitt02n", "act": "tunnel" },
+        { "from": "rest", "src": { "type": "any" }, "set": null, "act": "zapret" } ] }).to_string()).unwrap();
+    let o = call("GET", "/diag", None);
+    assert_eq!(o.body["checks"][1], json!({ "id": "client", "status": "bad", "detail": "нет связи с сервером" }), "{}", o.body);
+    assert_eq!(o.body["site"]["route"], "tunnel", "{}", o.body);
+    assert_eq!((&o.body["site"]["direct"]["code"], &o.body["site"]["tunnel"]["code"]), (&json!(0), &json!(200)), "{}", o.body);
+    assert_eq!((&o.body["logs"]["service"][1], &o.body["logs"]["nfqws2"], &o.body["finished"]), (&json!("строка 2"), &json!([]), &json!(105)), "{}", o.body);
+    // перезапуск службы — заявка
+    assert_eq!(call("POST", "/service/restart", Some(b"{}")).status, 202);
+    assert!(run.join("restart.request").exists());
+}

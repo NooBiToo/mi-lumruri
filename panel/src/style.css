@@ -535,6 +535,26 @@ svg.lucide.logo__svg { fill: none; }
 .formfoot__text { color: var(--muted); font-size: 0.875rem; }
 .formfoot .p-button { min-width: 9rem; }
 
+/* ---------- «Диагностика» ---------- */
+.diag__total { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; padding-bottom: 1rem; border-bottom: 1px solid var(--line); }
+.diag__total-text { font-size: 1.125rem; font-weight: 500; }
+.diag__total .meta { margin-left: auto; }
+.diag__list { list-style: none; margin: 0; padding: 0; display: grid; }
+.diag__row { display: grid; grid-template-columns: auto minmax(10rem, 16rem) minmax(0, 1fr); align-items: baseline; gap: 0.25rem 0.75rem; padding: 0.5rem 0; }
+.diag__list .diag__row + .diag__row { border-top: 1px solid var(--line); }
+.diag__row > .led { align-self: center; }
+.diag__name { font-weight: 500; }
+.diag__detail { color: var(--muted); font-size: 0.875rem; overflow-wrap: anywhere; }
+.diag__detail--bad { color: var(--bad-ink); }
+.diag__site { grid-template-columns: auto minmax(0, 1fr); padding: 0.75rem 1rem; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); max-width: 42rem; }
+.diag__site .diag__detail { grid-column: 2; }
+.diag__acts { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.diag__log {
+  margin: 0; max-height: 24rem; overflow: auto; padding: 0.75rem 1rem; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2);
+  font-family: var(--mono); font-size: 0.75rem; line-height: 1.25rem; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.led--skip { background: var(--line-strong); }
+
 /* «настройки изменены вручную» */
 .manual { display: grid; gap: 0.75rem; padding: 1.5rem; border-radius: var(--r-card); border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--line)); background: var(--warn-soft); }
 .manual__title { font-size: 1.125rem; }
@@ -603,10 +623,14 @@ svg.lucide.logo__svg { fill: none; }
   .dlist__items { max-height: calc(10 * 2.375rem + 2px); }
   .setrow__input { width: 100%; }
   .setrow__actions { justify-content: flex-start; flex-basis: 100%; }
+  .diag__row { grid-template-columns: auto minmax(0, 1fr); }
+  .diag__form { flex-wrap: wrap; }
+  .diag__form .p-button, .diag__restart .p-button { flex: 1 1 100%; }
+  .diag__row .diag__detail { grid-column: 2; }
   .formfoot .p-button { width: 100%; }
 
   .tabbar {
-    display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); position: fixed; inset: auto 0 0 0; z-index: 10;
+    display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); position: fixed; inset: auto 0 0 0; z-index: 10;
     background: var(--surface); border-top: 1px solid var(--line); padding: 0.25rem 0.25rem calc(0.25rem + env(safe-area-inset-bottom));
   }
   .tabbar__item {

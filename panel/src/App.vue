@@ -6,7 +6,7 @@ import Message from 'primevue/message'
 import Skeleton from 'primevue/skeleton'
 import ToggleSwitch from 'primevue/toggleswitch'
 import Toast from 'primevue/toast'
-import { Check, CircleAlert, Globe, LayoutDashboard, LoaderCircle, LogOut, MonitorSmartphone, Server, SlidersHorizontal, Waypoints } from 'lucide-vue-next'
+import { Activity, Check, CircleAlert, Globe, LayoutDashboard, LoaderCircle, LogOut, MonitorSmartphone, Server, SlidersHorizontal, Waypoints } from 'lucide-vue-next'
 import { useToast } from 'primevue/usetoast'
 import { api, onAuthLost, setCsrf, type SessionResponse } from './api'
 import type { LoginStage } from './auth'
@@ -19,6 +19,7 @@ import SitesView from './views/SitesView.vue'
 import DevicesView from './views/DevicesView.vue'
 import ServerView from './views/ServerView.vue'
 import MoreView from './views/MoreView.vue'
+import DiagView from './views/DiagView.vue'
 import ManualBanner from './views/ManualBanner.vue'
 
 const toast = useToast()
@@ -33,12 +34,13 @@ const totpOn = ref(true)
 const lost = ref(false)
 const loading = ref(false)
 
-type Tab = 'status' | 'sites' | 'devices' | 'server' | 'more'
+type Tab = 'status' | 'sites' | 'devices' | 'server' | 'diag' | 'more'
 const TABS: { value: Tab; label: string; short: string; icon: Component }[] = [
   { value: 'status', label: 'Обзор', short: 'Обзор', icon: LayoutDashboard },
   { value: 'sites', label: 'Сайты', short: 'Сайты', icon: Globe },
   { value: 'devices', label: 'Устройства', short: 'Устройства', icon: MonitorSmartphone },
   { value: 'server', label: 'Сервер', short: 'Сервер', icon: Server },
+  { value: 'diag', label: 'Диагностика', short: 'Проверка', icon: Activity },
   { value: 'more', label: 'Дополнительно', short: 'Ещё', icon: SlidersHorizontal },
 ]
 const fromHash = (): Tab | null => TABS.find((t) => `#${t.value}` === location.hash)?.value ?? null
@@ -205,6 +207,7 @@ onBeforeUnmount(() => { removeEventListener('hashchange', onHash); clearInterval
         <SitesView v-else-if="tab === 'sites'" @navigate="go" />
         <DevicesView v-else-if="tab === 'devices'" @navigate="go" />
         <ServerView v-else-if="tab === 'server'" @navigate="go" />
+        <DiagView v-else-if="tab === 'diag'" />
         <MoreView v-else :totp="totpOn" @navigate="go" />
       </main>
     </div>

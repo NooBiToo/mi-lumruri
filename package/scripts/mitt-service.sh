@@ -1,6 +1,6 @@
 #!/bin/sh
 # mi-trusttunnel: служба (цикл). Запускает и перезапускает клиент TrustTunnel и nfqws2, применяет полную политику после их
-# готовности, выполняет заявки панели (apply.request, zapret-test.request, lists-update.request), раз в сутки проверяет
+# готовности, выполняет заявки панели (apply.request, restart.request, diag.request, zapret-test.request, lists-update.request), раз в сутки проверяет
 # обновления готовых списков сайтов. Работает без WAN: туннель подключится сам, когда появится связь;
 # до этого трафик «через TrustTunnel» блокируется (unreachable) или идёт напрямую, если так выбрано в профиле.
 D="$(cd "$(dirname "$0")" && pwd)"
@@ -55,6 +55,13 @@ while [ -f "$STATE/service.wanted" ]; do
   sleep "$INTERVAL"
   if [ -f "$STATE/apply.request" ]; then
     rm -f "$STATE/apply.request"; full_cycle panel-request; continue
+  fi
+  if [ -f "$STATE/restart.request" ]; then
+    rm -f "$STATE/restart.request"; mlog "перезапуск по заявке панели"; full_cycle panel-restart; continue
+  fi
+  # диагностика — в фоне, одна одновременно: только чтение и пробные запросы, итог в $STATE/diag
+  if [ -f "$STATE/diag.request" ] && ! pid_alive diag; then
+    mv -f "$STATE/diag.request" "$STATE/diag.request.run"; start_bg diag sh "$SCR/mitt-diag.sh"
   fi
   # подбор стратегии Zapret — в фоне, один одновременно (заявку повторного нажатия панель не ставит, пока идёт подбор);
   # сценарий умер без итога (KILL, сбой) — вернуть прежние стратегии и пометить подбор failed

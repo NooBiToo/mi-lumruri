@@ -21,7 +21,7 @@ pub const MAX_LIST_BODY: usize = 8 * 1024 * 1024;
 
 pub const PATHS: &[&str] = &["/rules/delete", "/rules/move", "/profiles", "/profiles/delete", "/groups", "/groups/delete", "/categories",
     "/categories/delete", "/networks", "/networks/delete", "/devices", "/devices/delete", "/leases", "/dns", "/zapret", "/adblock/list",
-    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update", "/router"];
+    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update", "/router", "/diag", "/service/restart"];
 
 pub fn is_manage_path(path: &str) -> bool {
     PATHS.contains(&path.trim_end_matches('/'))
@@ -78,6 +78,14 @@ struct ListUpload {
     #[serde(default)]
     id: Option<String>,
     list: String,
+}
+
+/// Заявка диагностики: по желанию — сайт, который проверить (домен, без схемы и пути).
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DiagRequest {
+    #[serde(default)]
+    site: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -186,6 +194,71 @@ pub fn lists_dir() -> Option<PathBuf> {
 /// Каталог состояния службы (запрос применения, статус). По умолчанию — RAM.
 pub fn run_dir() -> PathBuf {
     std::env::var("MI_TT_RUN_DIR").ok().filter(|s| !s.is_empty()).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp/mi-trusttunnel/run"))
+}
+
+/// Итог диагностики службы (каталог `diag` рядом с состоянием, пишет mitt-diag.sh) и маршрут проверенного сайта
+/// по политике последнего рендера. До первой проверки — пустые списки.
+fn diag_report() -> Response {
+    let d = run_dir();
+    let dd = d.join("diag");
+    let text = |name: &str, max: u64| read_limited(&dd.join(name).to_string_lossy(), max).ok().map(|b| String::from_utf8_lossy(&b).into_owned());
+    let stamp = |name: &str| text(name, 64).and_then(|s| s.trim().parse::<u64>().ok());
+    let checks: Vec<Value> = text("checks.tsv", 64 * 1024)
+        .map(|t| {
+            t.lines()
+                .filter_map(|l| {
+                    let mut p = l.splitn(3, '\t');
+                    let (id, status) = (p.next()?, p.next()?);
+                    Some(json!({ "id": id, "status": status, "detail": p.next().unwrap_or("") }))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let site = text("site.tsv", 4096).map(|t| {
+        let kv: BTreeMap<&str, &str> = t.lines().filter_map(|l| l.split_once('\t')).collect();
+        let sets: Vec<&str> = kv.get("sets").map(|s| s.split_whitespace().collect()).unwrap_or_default();
+        let ip = kv.get("ip").copied().filter(|s| !s.is_empty());
+        json!({
+            "domain": kv.get("domain").copied().unwrap_or(""),
+            "ip": ip,
+            "route": ip.and_then(|_| site_route(&sets, &d)),
+            "direct": http_probe(kv.get("direct").copied()),
+            "tunnel": http_probe(kv.get("tunnel").copied()),
+        })
+    });
+    let mut logs = serde_json::Map::new();
+    for (k, f) in [("service", "log-service.txt"), ("trusttunnel", "log-trusttunnel.txt"), ("nfqws2", "log-nfqws2.txt")] {
+        let lines: Vec<String> = text(f, 128 * 1024).map(|t| t.lines().map(|l| l.chars().take(400).collect()).collect()).unwrap_or_default();
+        logs.insert(k.into(), json!(lines));
+    }
+    let running = d.join("diag.request").exists() || d.join("diag.request.run").exists();
+    Response { status: 200, body: json!({ "ok": true, "running": running, "started": stamp("started"), "finished": stamp("finished"), "checks": checks, "site": site, "logs": logs, "issues": [] }) }
+}
+
+/// Пробный запрос mitt-diag.sh: «код время» от curl; пусто — не проверялось, код 0 — нет ответа.
+fn http_probe(v: Option<&str>) -> Value {
+    let Some(v) = v.map(str::trim).filter(|s| !s.is_empty()) else { return Value::Null };
+    let mut p = v.split_whitespace();
+    let code = p.next().and_then(|c| c.parse::<u16>().ok()).unwrap_or(0);
+    let seconds = p.next().and_then(|t| t.parse::<f64>().ok());
+    json!({ "code": code, "seconds": seconds })
+}
+
+/// Действие первого правила политики, чей набор содержит адрес сайта (или правила без набора — «всё остальное»).
+/// Устройство не учитывается: правила «для выбранных устройств» показываются как для всех.
+fn site_route(sets: &[&str], run: &Path) -> Option<String> {
+    let policy = run.parent()?.join("render").join("policy.json");
+    let v: Value = serde_json::from_slice(&std::fs::read(policy).ok()?).ok()?;
+    for r in v.get("rules")?.as_array()? {
+        let hit = match r.get("set").and_then(Value::as_str) {
+            Some(s) => sets.contains(&s),
+            None => true,
+        };
+        if hit {
+            return r.get("act").and_then(Value::as_str).map(String::from);
+        }
+    }
+    Some("direct".into())
 }
 
 fn read_config(config_path: &str) -> Result<Config, Response> {
@@ -548,6 +621,37 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
             }
         }
         ("GET", "/router") => router_lan(),
+        ("GET", "/diag") => diag_report(),
+        ("POST", "/diag") => match parse_json::<DiagRequest>(b, "") {
+            Ok(q) => {
+                // CGI без привилегий: только заявка; проверки (ip, iptables, пробные запросы) выполняет служба
+                let site = match q.site.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                    None => None,
+                    Some(s) => match crate::validate::normalize_domain(s, 2) {
+                        Ok(d) => Some(d),
+                        Err(m) => return Some(bad(vec![Issue::new("site", "bad_domain", m)])),
+                    },
+                };
+                let d = run_dir();
+                if d.join("diag.request").exists() || d.join("diag.request.run").exists() {
+                    return Some(Response::error(409, "diag_running", "проверка уже идёт"));
+                }
+                let req = json!({ "requested_unix": crate::auth::now(), "site": site });
+                match std::fs::create_dir_all(&d).map_err(|e| e.to_string()).and_then(|_| store::write_atomic(&d.join("diag.request"), req.to_string().as_bytes())) {
+                    Ok(()) => Response { status: 202, body: json!({ "ok": true, "queued": true, "issues": [] }) },
+                    Err(m) => Response::error(500, "write_failed", m),
+                }
+            }
+            Err(i) => bad(i),
+        },
+        ("POST", "/service/restart") => {
+            let d = run_dir();
+            let req = json!({ "requested_unix": crate::auth::now() });
+            match std::fs::create_dir_all(&d).map_err(|e| e.to_string()).and_then(|_| store::write_atomic(&d.join("restart.request"), req.to_string().as_bytes())) {
+                Ok(()) => Response { status: 202, body: json!({ "ok": true, "queued": true, "issues": [] }) },
+                Err(m) => Response::error(500, "write_failed", m),
+            }
+        }
         ("GET", "/status") => {
             let st = std::fs::read(run_dir().join("status.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
             let pending = run_dir().join("apply.request").exists();
