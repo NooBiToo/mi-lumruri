@@ -165,10 +165,17 @@ LISTS_CAT="$REL/payload/lists/catalog.json"
 lists_commit() { sed -n 's/^ *"commit": *"\([0-9a-f]*\)".*/\1/p' "$LISTS_CAT" 2>/dev/null | head -n 1; }
 # пора проверять обновления. Метка .checked: «<unix> <коммит каталога>». Каталога нет — нет (повтор только по заявке);
 # метки нет, сменился релиз (другой коммит снимка), прошли сутки или часы роутера ушли назад — да.
+# Сначала — отсрочка в RAM $STATE/lists-next «<не раньше unix> <коммит>»: её пишет каждый прогон update (успех — сутки,
+# сбой — час). Она действует, даже если /data не записывается (нет .checked): иначе проверка шла бы каждые 5 с.
+# Отсрочка другого снимка или дальше суток вперёд (часы ушли назад) не в счёт.
 lists_due() {
   local c cm now
   [ -f "$LISTS_CAT" ] || return 1
-  { read -r c cm <"$DATA/lists/.checked"; } 2>/dev/null; now="$(date +%s)"
+  now="$(date +%s)"
+  { read -r c cm <"$STATE/lists-next"; } 2>/dev/null
+  case "$c" in ''|*[!0-9]*) ;; *) [ "$cm" != "$(lists_commit)" ] || [ "$c" -le "$now" ] || [ $((c - now)) -gt "$LISTS_PERIOD" ] || return 1;; esac
+  c=""; cm=""
+  { read -r c cm <"$DATA/lists/.checked"; } 2>/dev/null
   case "$c" in ''|*[!0-9]*) return 0;; esac
   [ "$cm" = "$(lists_commit)" ] || return 0
   [ "$c" -gt "$now" ] || [ $((now - c)) -ge "$LISTS_PERIOD" ]

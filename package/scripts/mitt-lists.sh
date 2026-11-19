@@ -5,8 +5,9 @@
 #                          Служба вызывает перед каждым render.
 #   mitt-lists.sh update — загрузка свежих файлов (curl стока, обычный маршрут роутера), проверка mi-tt-ctl category-check,
 #                          атомарная замена в $DATA/lists; файл с ошибкой не применяется, прежний остаётся. Итог —
-#                          $STATE/lists.json; если что-то изменилось — sync и заявка на применение. Служба запускает в фоне
-#                          раз в сутки (метка $DATA/lists/.checked) и по заявке панели (lists-update.request).
+#                          $STATE/lists.json (копия — $DATA/lists/.status); если что-то изменилось — sync и заявка на
+#                          применение. Служба запускает в фоне раз в сутки (метка $DATA/lists/.checked, отсрочка в RAM
+#                          $STATE/lists-next — см. lists_due) и по заявке панели (lists-update.request).
 # Обновления в /data привязаны к коммиту снимка, на котором они сделаны ($DATA/lists/.base): после установки релиза
 # с другим снимком они не используются, пока следующая проверка (она нужна сразу, см. lists_due) не загрузит свежие.
 D="$(cd "$(dirname "$0")" && pwd)"
@@ -70,13 +71,14 @@ lists_update() {
   now="$(date +%s)"; mkdir -p "$UPD" "$STATE"
   if [ ! -f "$CAT" ]; then
     echo "$((now - LISTS_PERIOD + LISTS_RETRY)) -" >"$UPD/.checked.t" && mv -f "$UPD/.checked.t" "$UPD/.checked"
+    echo "$((now + LISTS_RETRY)) -" >"$STATE/lists-next"
     nocat; return 0
   fi
   lock_take lists-update 1 || { mlog "списки: обновление уже идёт"; return 0; }
   base="$(lists_commit)"
   if [ -z "$USE_UPD" ]; then
     # релиз с другим снимком: прежние обновления не используются — убрать и начать от снимка этого релиза
-    for x in "$UPD"/*; do [ -e "$x" ] && rm -rf "$x"; done
+    for x in "$UPD"/* "$UPD/.updated" "$UPD/.status"; do [ -e "$x" ] && rm -rf "$x"; done
     echo "$base" >"$UPD/.base.t" && mv -f "$UPD/.base.t" "$UPD/.base" && USE_UPD=1
   fi
   t="$RUN/lists-dl"; rm -rf "$t"; mkdir -p "$t"; f="$t/file"
@@ -107,9 +109,16 @@ $(rows | awk '{ print "domain", $2; if ($3 != "-") print "ip", $3 }')
 EOF
   [ -z "$changed" ] || echo "$now" >"$UPD/.updated"
   k="$(cat "$UPD/.updated" 2>/dev/null)"; case "$k" in ''|*[!0-9]*) ;; *) upd="$k";; esac
+  # метка — после загрузок; ни одного файла не получено (нет связи) — следующая попытка через час, а не через сутки
+  k="$now"; [ "$ok_n" -gt 0 ] || k=$((now - LISTS_PERIOD + LISTS_RETRY))
+  { echo "$k $base" >"$UPD/.checked.t" && mv -f "$UPD/.checked.t" "$UPD/.checked"; } 2>/dev/null || { rm -f "$UPD/.checked.t"; err "/data" "метка проверки не записана (нет места или раздел только для чтения)"; k=$((now - LISTS_PERIOD + LISTS_RETRY)); }
+  # отсрочка в RAM — всегда: при незаписываемом /data без неё служба запускала бы проверку каждые 5 с
+  echo "$((k + LISTS_PERIOD)) $base" >"$STATE/lists-next"
   [ -z "$errs" ] || ok=false
-  printf '{"snapshot":"%s","updated":%s,"checked":%s,"ok":%s,"errors":[%s]}\n' "$(snapshot)" "$upd" "$now" "$ok" "${errs#,}" >"$UPD/.status.t" \
-    && cp "$UPD/.status.t" "$STATE/lists.json.t" && mv -f "$STATE/lists.json.t" "$STATE/lists.json" && mv -f "$UPD/.status.t" "$UPD/.status"
+  # состояние для панели — прямо в RAM, копия в /data (переживает перезагрузку) — если получится
+  printf '{"snapshot":"%s","updated":%s,"checked":%s,"ok":%s,"errors":[%s]}\n' "$(snapshot)" "$upd" "$now" "$ok" "${errs#,}" >"$STATE/lists.json.t" \
+    && mv -f "$STATE/lists.json.t" "$STATE/lists.json" && { cp "$STATE/lists.json" "$UPD/.status.t" && mv -f "$UPD/.status.t" "$UPD/.status"; } 2>/dev/null
+  rm -f "$UPD/.status.t" 2>/dev/null
   rm -rf "$t"
   if [ -n "$changed" ]; then
     lists_sync
@@ -117,9 +126,6 @@ EOF
     mlog "списки: загружены новые версии:$changed"
   fi
   [ "$ok" = true ] && mlog "списки: проверка обновлений — без ошибок" || mlog "списки: проверка обновлений — ошибки: ${errs#,}"
-  # метка — после завершения; ни одного файла не получено (нет связи) — следующая попытка через час, а не через сутки
-  k="$now"; [ "$ok_n" -gt 0 ] || k=$((now - LISTS_PERIOD + LISTS_RETRY))
-  echo "$k $base" >"$UPD/.checked.t" && mv -f "$UPD/.checked.t" "$UPD/.checked"
   lock_drop lists-update
 }
 

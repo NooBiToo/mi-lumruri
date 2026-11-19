@@ -3,7 +3,8 @@
 # через mi-tt-ctl category-check и записью catalog.json.
 #   tools/fetch-lists.sh <sha коммита | main>
 # Нужны: curl, node и собранный `bash tools/cargo.sh build --release --locked` (controller/target/release/mi-tt-ctl).
-# Файл, не прошедший проверку (HTML вместо списка, неразбираемые строки), в каталог не попадает; список таких — в конце.
+# Файл, не прошедший проверку (HTML вместо списка, неразбираемые строки), в каталог не попадает; список таких — в конце,
+# и тогда код возврата 1.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO=itdoginfo/allow-domains
@@ -61,4 +62,5 @@ fs.writeFileSync(out+"/catalog.json",JSON.stringify({source:"itdoginfo/allow-dom
 ' "$SHA" "$DATE" "$OUT"
 rm -f "$OUT/.rows"
 echo "коммит $SHA ($DATE), размер: $(du -sk "$OUT" | cut -f1) КБ"
-[ ${#BAD[@]} -eq 0 ] || echo "НЕ ПРОШЛИ ПРОВЕРКУ: ${BAD[*]}"
+# каталог записан без них, но снимок неполный: код возврата 1, чтобы его не приняли молча
+[ ${#BAD[@]} -eq 0 ] || { echo "НЕ ПРОШЛИ ПРОВЕРКУ: ${BAD[*]}" >&2; exit 1; }

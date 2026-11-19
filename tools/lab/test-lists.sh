@@ -122,9 +122,15 @@ t "g: после первой неудачи связи остальные фа�
 t "g: svc-youtube.list — из пакета" 'cmp -s "$B/data/mi-trusttunnel/etc/categories/svc-youtube.list" "$ROOT/package/lists/Services/youtube.lst"'
 t "g: в /data списков нет" '[ -z "$(find "$B/data/mi-trusttunnel/lists" -name "*.lst")" ]'
 t "g: повтор не раньше чем через час (метка сдвинута)" '! due g && [ "$(( $(date +%s) - $(cut -d " " -f 1 "$B/data/mi-trusttunnel/lists/.checked") ))" -ge 82700 ]'
+t "g: отсрочка в RAM (lists-next) — через час, снимок тот же" '[ "$(cut -d " " -f 2 "$B/tmp/mi-trusttunnel/run/lists-next")" = "$COMMIT" ] && [ "$(( $(cut -d " " -f 1 "$B/tmp/mi-trusttunnel/run/lists-next") - $(date +%s) ))" -ge 3500 ]'
+# дальше проверяется метка .checked: отсрочки в RAM нет (как после перезагрузки)
+rm -f "$B/tmp/mi-trusttunnel/run/lists-next"
 t "g: метка из будущего (часы ушли назад) — проверка нужна" 'echo "$(( $(date +%s) + 999 )) $COMMIT" >"$B/data/mi-trusttunnel/lists/.checked"; due g'
 t "g: прошли сутки — проверка нужна" 'echo "$(( $(date +%s) - 86401 )) $COMMIT" >"$B/data/mi-trusttunnel/lists/.checked"; due g'
 t "g: метка свежая, коммит снимка тот же — проверка не нужна" 'echo "$(date +%s) $COMMIT" >"$B/data/mi-trusttunnel/lists/.checked"; ! due g'
+t "g: отсрочка в RAM действует без метки .checked" 'rm -f "$B/data/mi-trusttunnel/lists/.checked"; echo "$(( $(date +%s) + 600 )) $COMMIT" >"$B/tmp/mi-trusttunnel/run/lists-next"; ! due g'
+t "g: отсрочка дальше суток (часы ушли назад) не в счёт" 'echo "$(( $(date +%s) + 90000 )) $COMMIT" >"$B/tmp/mi-trusttunnel/run/lists-next"; due g'
+t "g: истёкшая отсрочка — решает метка (её нет — проверка нужна)" 'echo "$(( $(date +%s) - 1 )) $COMMIT" >"$B/tmp/mi-trusttunnel/run/lists-next"; due g'
 
 echo "(д) после перезагрузки (RAM пуста) состояние проверки восстанавливается из /data"
 rm -f "$RUNS/lists.json"; lists a sync
@@ -158,7 +164,12 @@ printf '\nsnap-new.example.com\n' >>"$REL2/Services/youtube.lst"
 t "i: в /data старая копия YouTube (lab-new)" 'grep -qx lab-new.example.com "$UPD/Services/youtube.lst"'
 lists a sync
 t "i: svc-youtube.list — из нового снимка" 'cmp -s "$CATD/svc-youtube.list" "$REL2/Services/youtube.lst"'
-t "i: сменился коммит снимка — проверка нужна сразу (метка свежая)" 'due a'
+t "i: сменился коммит снимка — проверка нужна сразу (метка и отсрочка свежие)" '[ -s "$RUNS/lists-next" ] && due a'
+t "i: до проверки в /data — метки прежнего снимка (.updated, .status)" '[ -s "$UPD/.updated" ] && [ -s "$UPD/.status" ]'
+echo 'resp() { echo offline; }' >"$W/a/lt/scenario"; lists a update
+t "i: смена снимка убрала и скрытые .updated/.status: updated null" '[ ! -e "$UPD/.updated" ] && [ -z "$(ls "$UPD" | grep -v "^$")" ]'
+check a "updated null после смены снимка" 's["updated"] is None and not s["ok"]'
+rm -f "$RUNS/lists-next"
 echo 'resp() { echo ok; }' >"$W/a/lt/scenario"; lists a update
 t "i: после проверки .base — коммит нового снимка, YouTube снова из /data" '[ "$(cat "$UPD/.base")" = "$(printf "f%.0s" $(seq 40))" ] && grep -qx lab-new.example.com "$CATD/svc-youtube.list" && ! due a'
 
@@ -168,6 +179,22 @@ t "k: без каталога проверка не нужна" '! due k'
 lists k update; lists k update; lists k sync
 t "k: «нет каталога» в журнале один раз" '[ "$(grep -c "нет каталога" "$Z/tmp/mi-trusttunnel/log/mitt.log")" = 1 ]'
 t "k: метка повтора через час, curl не вызывался" '[ "$(( $(date +%s) - $(cut -d " " -f 1 "$Z/data/mi-trusttunnel/lists/.checked") ))" -ge 82700 ] && [ ! -e "$W/k/lt/curl.log" ]'
+
+echo "(л) /data только для чтения: проверка не повторяется каждые 5 с, состояние видно"
+if [ "$(id -u)" = 0 ]; then echo "  skip под root права каталога не действуют"
+else
+  L="$W/l/root"; root l; lists l sync
+  mkdir -p "$L/data/mi-trusttunnel/lists"; chmod 555 "$L/data/mi-trusttunnel/lists"
+  t "l: проверка нужна (метки нет)" 'due l'
+  # служба проверяет lists_due каждые 5 с: десять «тиков» — один прогон update
+  for i in 1 2 3 4 5 6 7 8 9 10; do due l && lists l update; done
+  t "l: за 10 тиков curl прошёл по списку один раз" '[ "$(wc -l <"$W/l/lt/curl.log")" = "$NFILES" ]'
+  check l "состояние в RAM: ok=false, ошибка про /data" 'not s["ok"] and any(e.startswith("/data: ") for e in s["errors"]) and s["checked"]>0'
+  t "l: отсрочка в RAM — через час" '[ "$(( $(cut -d " " -f 1 "$L/tmp/mi-trusttunnel/run/lists-next") - $(date +%s) ))" -ge 3500 ] && ! due l'
+  t "l: метки .checked нет, временных файлов нет" '[ ! -e "$L/data/mi-trusttunnel/lists/.checked" ] && [ -z "$(ls -A "$L/data/mi-trusttunnel/lists")" ]'
+  t "l: списки из снимка работают" 'cmp -s "$L/data/mi-trusttunnel/etc/categories/svc-youtube.list" "$ROOT/package/lists/Services/youtube.lst"'
+  chmod 755 "$L/data/mi-trusttunnel/lists"
+fi
 
 [ $FAIL -eq 0 ] && echo "PASS" || echo "FAIL"
 exit $FAIL
