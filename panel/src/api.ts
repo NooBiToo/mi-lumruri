@@ -173,8 +173,12 @@ export interface ZapretTestState {
   progress?: { done: number; total: number; current: string }
   /** Сколько целей открылось без Zapret. */
   control?: { opened: number; total: number }
+  /** Лучший результат прохода «все сайты» (даже если он не применён). */
   best?: { id: string; opened: number } | null
-  youtube?: { id: string; opened: number; total: number } | null
+  /** Применена ли стратегия для всех сайтов (нет в файлах до 0.3.0). */
+  general?: boolean
+  /** Применённая стратегия YouTube: сколько целей YouTube открылось, из скольких и сколько без обхода. */
+  youtube?: { id: string; opened: number; total: number; control?: number } | null
   applied?: boolean
   message?: string
 }

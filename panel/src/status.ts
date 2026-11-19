@@ -138,19 +138,37 @@ export function zapretProgress(t: ZapretTestState): string {
   return `${what}: ${Math.min(p.done + 1, p.total)} из ${p.total}`
 }
 
-/** Итог последнего подбора: «Открылось 47 из 54, без обхода — 12» и что сделано — без id стратегий. */
+/**
+ * Итог последнего подбора: «Открылось 47 из 54, без обхода — 12» и что сделано — без id стратегий. Если применён только
+ * способ для YouTube, цифры — прохода YouTube: результат для всех сайтов тогда не применялся.
+ */
 export function zapretResult(t: ZapretTestState): { summary: string | null; message: string } {
   const c = t.control
-  const summary = t.best && c ? `Открылось ${t.best.opened} из ${c.total}, без обхода — ${c.opened}` : null
+  const y = t.youtube
+  const ytOnly = t.state === 'done' && t.applied && t.general === false && !!y
+  let summary: string | null
+  if (ytOnly && y) summary = `YouTube: открылось ${y.opened} из ${y.total}` + (y.control !== undefined ? `, без обхода — ${y.control}` : '')
+  else summary = t.best && c ? `Открылось ${t.best.opened} из ${c.total}, без обхода — ${c.opened}` : null
   let message: string
-  if (t.state === 'done') message = t.applied ? 'Лучший способ применён.' : 'Способа лучше, чем без обхода, не нашлось — оставлен прежний.'
-  // сообщения сбоя сценария могут называть стратегии по id: заменяем их словом «способ»
-  else {
-    const m = (t.message ?? 'Подбор не удался.').replace(/стратеги\S* y?v\d+/gi, 'способ').replace(/\s*\((?:y?v\d+|auto)\)/g, '')
-      .replace(/\b(?:y?v\d+)\b/g, 'новый способ').replace(/\s+/g, ' ').trim()
-    message = m.charAt(0).toUpperCase() + m.slice(1)
-  }
+  if (t.state === 'done') {
+    message = ytOnly ? 'Для всех сайтов лучше не нашлось — оставлен прежний способ; для YouTube применён лучший.'
+      : t.applied ? 'Лучший способ применён.' : 'Способа лучше, чем без обхода, не нашлось — оставлен прежний.'
+  } else message = failureText(t.message)
   return { summary, message }
+}
+
+/**
+ * Сообщение сбоя сценария подбора — без id стратегий: файлы до 0.3.0 называли их («стратегия v4», «(v3)»,
+ * «general=v3 youtube=yv2»). «Способ» — мужского рода: «прежний способ», «вернуть прежний».
+ */
+export function failureText(raw: string | undefined): string {
+  const m = (raw ?? 'Подбор не удался.')
+    .replace(/:?(?:\s*\b(?:general|youtube)=\S+)+/g, '')
+    .replace(/восстановлена/g, 'восстановлен').replace(/она оставлена/g, 'он оставлен')
+    .replace(/прежн\S*\s+стратеги\S*/gi, 'прежний способ').replace(/прежнюю/g, 'прежний')
+    .replace(/стратеги\S* y?v\d+/gi, 'способ').replace(/\s*\((?:y?v\d+|auto)\)/g, '')
+    .replace(/\b(?:y?v\d+)\b/g, 'новый способ').replace(/стратеги\S*/gi, 'способ').replace(/\s+/g, ' ').trim()
+  return m.charAt(0).toUpperCase() + m.slice(1)
 }
 
 /** Дата и время по-русски: «18 ноября, 14:05». */

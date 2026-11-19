@@ -2,6 +2,8 @@
 # Подбор стратегии Zapret (package/scripts/mitt-zapret-test.sh) на штатном BusyBox ash 1.25.1 (ARM64 из образа RC06 1.1.38
 # под qemu-user) с заглушками curl, nfqws2 и mi-tt-ctl. Сеть и очереди не нужны: заглушка curl «открывает» первые K целей,
 # K зависит от стратегии, которую сейчас «запустила» заглушка nfqws2. Запуск — в WSL: bash tools/lab/test-zapret-test.sh
+# Сами аргументы nfqws2 здесь заглушка: что постоянные TCP-профили (Discord) стоят в проверке раньше кандидата, как в
+# работе, проверяет тест Rust zapret::tests::test_args_put_permanent_tcp_profiles_first; сценарий передаёт их как есть.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 "$ROOT/tools/fw/prepare.sh" >/dev/null
@@ -134,7 +136,8 @@ check() { # check <имя> <описание> <выражение>
 echo "(а) контроль 2/10, v3 9/10, остальные 4/10"
 run a "$TEN" 'lim() { case "$1" in control) echo 2;; v3) echo 9;; *) echo 4;; esac; }'
 check a "готово, победитель v3, применено" 's["state"]=="done" and s["best"]["id"]=="v3" and s["best"]["opened"]==9 and s["applied"] is True'
-check a "контроль 2 из 10" 's["control"]=={"opened":2,"total":10}'
+check a "контроль 2 из 10" 's["control"]=={"opened":2,"total":10}' 
+check a "стратегия для всех сайтов применена" 's["general"] is True'
 check a "в настройках strategy = v3, youtube прежний" 'c["zapret"]=={"strategy":"v3","youtube":"auto"}'
 check a "заявка на применение" 'areq'
 check a "прогресс: все стратегии пройдены" 's["progress"]["done"]==s["progress"]["total"]==11 and s["finished"]>=s["started"]'
@@ -168,7 +171,7 @@ required https://www.youtube.com/
 required https://redirector.googlevideo.com/report_mapping" \
   'lim() { case "$2" in *youtube*|*googlevideo*) [ "$1" = yv2 ] && echo 1 || echo 0;; *) echo 2;; esac; }'
 check e "готово, YouTube — yv2" 's["state"]=="done" and s["applied"] is True and c["zapret"]=={"strategy":"auto","youtube":"yv2"}'
-check e "результат YouTube" 's["youtube"]=={"id":"yv2","opened":2,"total":2}'
+check e "результат YouTube (с контролем), общая не применена" 's["youtube"]=={"id":"yv2","opened":2,"total":2,"control":0} and s["general"] is False'
 check e "прогресс включает yv*" 's["progress"]["total"]==14 and s["progress"]["done"]==14'
 grep -q '^yv1 https://t1.test/' "$W/e/zt/curl.log" && bad "e: в проходе YouTube проверялись другие цели" || ok "e: в проходе YouTube — только цели YouTube"
 
@@ -193,13 +196,13 @@ check h "после KILL: running, действует v3" 's["state"]=="running"
 [ "$(cat "$W/h/$MARK" 2>/dev/null)" = "general auto v3" ] && ok "h: метка отката «general auto v3»" || bad "h: метки отката нет: $(cat "$W/h/$MARK" 2>/dev/null)"
 rm -f "$W/h/root/tmp/mi-trusttunnel/run/apply.request"
 recover h; after h
-check h "после разбора: failed, прежняя стратегия, заявка" 's["state"]=="failed" and s["applied"] is False and c["zapret"]["strategy"]=="auto" and "восстановлена" in s["message"] and areq'
+check h "после разбора: failed, прежняя стратегия, заявка" 's["state"]=="failed" and s["applied"] is False and c["zapret"]["strategy"]=="auto" and "восстановлен" in s["message"] and areq'
 [ -f "$W/h/$MARK" ] && bad "h: метка отката осталась" || ok "h: метка снята"
 
 echo "(и) вернуть прежнюю не удалось — failed, applied=true, метка остаётся"
 run i "$TEN" "$(recheck "echo 1")
 set_hook() { [ \"\$2\" = auto ] && echo fail; }"
-check i "failed с именем стратегии" 's["state"]=="failed" and s["applied"] is True and "(auto)" in s["message"] and c["zapret"]["strategy"]=="v3"'
+check i "failed без id стратегий" 's["state"]=="failed" and s["applied"] is True and "прежний" in s["message"] and not __import__("re").search(r"\b(?:y?v\d+|auto)\b", s["message"]) and c["zapret"]["strategy"]=="v3"'
 [ -f "$W/i/$MARK" ] && ok "i: метка отката осталась для службы" || bad "i: метки нет"
 [ "$(grep -c 'zapret-set general auto' "$W/i/zt/calls")" = 1 ] && ok "i: сбой записи (не busy) — без повторов" || bad "i: $(cat "$W/i/zt/calls")"
 

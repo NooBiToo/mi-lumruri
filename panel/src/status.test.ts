@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Config, Lease, ListCatalog, ManageResponse } from './api'
 import { defaultSimple, toConfig } from './simple'
-import { deviceRows, knownDevices, lines, plural, readSimple, sitesSummary, strategyLabel, testedAt, tunnelState, when, zapretProgress, zapretResult } from './status'
+import { deviceRows, failureText, knownDevices, lines, plural, readSimple, sitesSummary, strategyLabel, testedAt, tunnelState, when, zapretProgress, zapretResult } from './status'
 
 const fresh: Config = { version: 1, profiles: [], networks: [], devices: [], groups: [], rules: [], default_action: { type: 'direct' } }
 const profile = { id: 'tt', name: 'Мой сервер', kind: 'trusttunnel' as const, on_failure: 'block' as const,
@@ -85,7 +85,34 @@ describe('status', () => {
     expect(zapretResult({ ...done, applied: false }).message).toBe('Способа лучше, чем без обхода, не нашлось — оставлен прежний.')
     const failed = zapretResult({ state: 'failed', message: 'Стратегия v4 при повторной проверке хуже, но вернуть прежнюю (v3) не удалось; действует v4' })
     expect(failed.message).not.toMatch(/[vV]\d/)
-    expect(failed.message).toBe('Способ при повторной проверке хуже, но вернуть прежнюю не удалось; действует новый способ')
+    expect(failed.message).toBe('Способ при повторной проверке хуже, но вернуть прежний не удалось; действует новый способ')
+  })
+
+  it('Zapret: сбой отката — без «general=…» и id, «прежний способ»', () => {
+    // формат до 0.3.0: ZT_LEFT в конце сообщения
+    expect(failureText('Подбор прервался; не удалось вернуть прежнюю стратегию: general=v3 youtube=yv2'))
+      .toBe('Подбор прервался; не удалось вернуть прежний способ')
+    expect(failureText('Подбор прерван; настройки не изменены; не удалось вернуть прежнюю стратегию: general=auto'))
+      .toBe('Подбор прерван; настройки не изменены; не удалось вернуть прежний способ')
+    // формат 0.3.0: слова вместо id
+    expect(failureText('Подбор прервался; не удалось вернуть прежний способ (для всех сайтов, для YouTube)'))
+      .toBe('Подбор прервался; не удалось вернуть прежний способ (для всех сайтов, для YouTube)')
+    expect(failureText('Подбор прервался; прежняя стратегия восстановлена')).toBe('Подбор прервался; прежний способ восстановлен')
+    expect(failureText('Подбор прервался; стратегию уже сменили вручную — она оставлена')).toBe('Подбор прервался; способ уже сменили вручную — он оставлен')
+    for (const m of ['Найденный способ при повторной проверке оказался хуже, но вернуть прежний не удалось; действует найденный', undefined]) {
+      expect(failureText(m)).not.toMatch(/\b(?:y?v\d+|general|youtube|auto)\b|прежнюю/)
+    }
+  })
+
+  it('Zapret: применён только способ для YouTube — цифры прохода YouTube', () => {
+    const t = { state: 'done' as const, control: { opened: 3, total: 54 }, best: { id: 'v2', opened: 3 }, general: false,
+      youtube: { id: 'yv2', opened: 2, total: 2, control: 0 }, applied: true, message: '' }
+    expect(zapretResult(t)).toEqual({ summary: 'YouTube: открылось 2 из 2, без обхода — 0',
+      message: 'Для всех сайтов лучше не нашлось — оставлен прежний способ; для YouTube применён лучший.' })
+    // применены оба — общий результат
+    expect(zapretResult({ ...t, general: true }).summary).toBe('Открылось 3 из 54, без обхода — 3')
+    // файл до 0.3.0 без поля general — как раньше
+    expect(zapretResult({ ...t, general: undefined }).message).toBe('Лучший способ применён.')
   })
 
 })

@@ -19,15 +19,16 @@ mkdir -p "$STATE" "$LOG"
 lock_take zapret-test 1 || { mlog "подбор Zapret уже идёт"; exit 0; }
 # остаток прерванного подбора (метка отката) — сначала вернуть прежние стратегии; не вышло — нового подбора нет
 zt_recover || { lock_drop zapret-test; exit 1; }
-STARTED="$(date +%s)"; DONE=0; TOTAL=0; CUR=""; CTRL_N=0; NT=0; BEST_ID=""; BEST_N=0; APPLIED=false; YT=null; FINAL=""
+STARTED="$(date +%s)"; DONE=0; TOTAL=0; CUR=""; CTRL_N=0; NT=0; BEST_ID=""; BEST_N=0; APPLIED=false; GEN_APPLIED=false; YT=null; FINAL=""
 rm -f "$STOP"; rm -rf "$W"; mkdir -p "$W"
 
-st() { # st <running|done|failed> <сообщение>; pid — по нему панель узнаёт, что сценарий ещё жив
+st() { # st <running|done|failed> <сообщение>; pid — по нему панель узнаёт, что сценарий ещё жив. general — применена ли
+# стратегия для всех сайтов (best — лучший результат прохода, даже если он не применён); youtube — применённая для YouTube.
   local fin=null best=null
   [ "$1" = running ] || fin="$(date +%s)"
   [ -n "$BEST_ID" ] && best="{\"id\":\"$BEST_ID\",\"opened\":$BEST_N}"
-  printf '{"state":"%s","pid":%s,"started":%s,"finished":%s,"progress":{"done":%s,"total":%s,"current":"%s"},"control":{"opened":%s,"total":%s},"best":%s,"youtube":%s,"applied":%s,"message":"%s"}\n' \
-    "$1" "$$" "$STARTED" "$fin" "$DONE" "$TOTAL" "$CUR" "$CTRL_N" "$NT" "$best" "$YT" "$APPLIED" "$2" >"$OUT.t" && mv -f "$OUT.t" "$OUT"
+  printf '{"state":"%s","pid":%s,"started":%s,"finished":%s,"progress":{"done":%s,"total":%s,"current":"%s"},"control":{"opened":%s,"total":%s},"best":%s,"general":%s,"youtube":%s,"applied":%s,"message":"%s"}\n' \
+    "$1" "$$" "$STARTED" "$fin" "$DONE" "$TOTAL" "$CUR" "$CTRL_N" "$NT" "$best" "$GEN_APPLIED" "$YT" "$APPLIED" "$2" >"$OUT.t" && mv -f "$OUT.t" "$OUT"
   [ "$1" = running ] || FINAL="$1"
 }
 nfq_stop() {
@@ -39,7 +40,7 @@ nfq_stop() {
 abort() { # abort <сообщение>
   nfq_stop
   if zt_undo; then APPLIED=false; st failed "$1"
-  else APPLIED=true; st failed "$1; не удалось вернуть прежнюю стратегию:$ZT_LEFT"; fi
+  else APPLIED=true; st failed "$1; не удалось вернуть прежний способ ($ZT_LEFT_TXT)"; fi
 }
 trap '[ -n "$FINAL" ] || abort "Подбор завершился с ошибкой; прежние настройки восстановлены"; nfq_stop; rm -rf "$W"; lock_drop zapret-test' EXIT
 trap '[ -n "$FINAL" ] || abort "Подбор остановлен; прежние настройки восстановлены"; exit 1' INT TERM
@@ -134,6 +135,7 @@ pass() {
 }
 
 # apply_best <general|youtube> <all|yt> <контроль score>: применить BEST_P, перепроверить, при ухудшении — вернуть прежнюю.
+# Сообщения в zapret-test.json — без id стратегий (их видит пользователь), id — в журнале.
 # Код 0 — применено и подтверждено. Прежнюю вернуть не удалось — подбор завершается failed (applied=true).
 apply_best() {
   local s prev_s prev
@@ -149,7 +151,8 @@ apply_best() {
   if [ "$s" -le "$3" ] || { [ -n "$prev_s" ] && [ "$s" -lt "$prev_s" ]; }; then
     mlog "подбор Zapret: $BEST_P при повторной проверке хуже — возврат к $prev"
     if ! zt_set "$1" "$prev" >/dev/null; then
-      st failed "Стратегия $BEST_P при повторной проверке хуже, но вернуть прежнюю ($prev) не удалось; действует $BEST_P"; exit 1
+      mlog "подбор Zapret: вернуть $1 = $prev не удалось; действует $BEST_P"
+      st failed "Найденный способ при повторной проверке оказался хуже, но вернуть прежний не удалось; действует найденный"; exit 1
     fi
     grep -v "^$1 " "$ZT_ROLLBACK" >"$ZT_ROLLBACK.t"; mv -f "$ZT_ROLLBACK.t" "$ZT_ROLLBACK"; [ -s "$ZT_ROLLBACK" ] || rm -f "$ZT_ROLLBACK"
     zt_apply_request; APPLIED=false; return 1
@@ -178,7 +181,7 @@ YT_CTRL_S="$(score $RES)"; YT_CTRL_N="$(opened $RES)"
 
 pass all
 BEST_ID="$BEST_P"; BEST_N="$BEST_PN"
-GEN=""; apply_best general all "$CTRL_S" && GEN="$BEST_P"
+GEN=""; apply_best general all "$CTRL_S" && { GEN="$BEST_P"; GEN_APPLIED=true; }
 
 YT_MSG=""
 if [ "$NY" -gt 0 ] && [ "$YT_CTRL_N" -lt "$NY" ]; then
@@ -186,7 +189,7 @@ if [ "$NY" -gt 0 ] && [ "$YT_CTRL_N" -lt "$NY" ]; then
   TOTAL=$((TOTAL + $(echo $IDS | wc -w)))
   pass yt
   if apply_best youtube yt "$YT_CTRL_S"; then
-    YT="{\"id\":\"$BEST_P\",\"opened\":$BEST_PN,\"total\":$NY}"; YT_MSG="; YouTube — стратегия $BEST_P: $BEST_PN из $NY"
+    YT="{\"id\":\"$BEST_P\",\"opened\":$BEST_PN,\"total\":$NY,\"control\":$YT_CTRL_N}"; YT_MSG="; YouTube — стратегия $BEST_P: $BEST_PN из $NY"
   fi
 fi
 CUR=""

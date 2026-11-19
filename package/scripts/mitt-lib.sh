@@ -191,13 +191,13 @@ zt_set() { # zt_set <general|youtube> <id>: вывод mi-tt-ctl zapret-set; з�
     sleep 1
   done
 }
-# Вернуть всё из метки отката. ZT_LEFT — что вернуть не удалось («вид=id …», тогда в метке остаются только эти строки),
-# ZT_RESTORED — что-то возвращено.
+# Вернуть всё из метки отката. ZT_LEFT — что вернуть не удалось («вид=id …», для журнала; тогда в метке остаются только
+# эти строки), ZT_LEFT_TXT — то же словами для панели, без id стратегий; ZT_RESTORED — что-то возвращено.
 zt_undo() {
   local k id new cur now left=""
-  ZT_LEFT=""; ZT_RESTORED=""
+  ZT_LEFT=""; ZT_LEFT_TXT=""; ZT_RESTORED=""
   [ -f "$ZT_ROLLBACK" ] || return 0
-  now="$(ctl zapret-get "$ETC/config.json" </dev/null)" || { ZT_LEFT=" (настройки не прочитаны)"; mlog "подбор Zapret: настройки не прочитаны, откат отложен"; return 1; }
+  now="$(ctl zapret-get "$ETC/config.json" </dev/null)" || { ZT_LEFT=" (настройки не прочитаны)"; ZT_LEFT_TXT="настройки не прочитаны"; mlog "подбор Zapret: настройки не прочитаны, откат отложен"; return 1; }
   while read -r k id new; do
     [ -n "$k" ] || continue
     cur="$(echo "$now" | sed -n "s/^$k //p")"
@@ -206,8 +206,12 @@ zt_undo() {
       continue
     fi
     if zt_set "$k" "$id" >/dev/null; then mlog "подбор Zapret: возвращена стратегия $k = $id"; ZT_RESTORED=1
-    else ZT_LEFT="$ZT_LEFT $k=$id"; left="$left$k $id $new
-"; fi
+    else
+      ZT_LEFT="$ZT_LEFT $k=$id"; left="$left$k $id $new
+"
+      case "$k" in general) k="для всех сайтов";; *) k="для YouTube";; esac
+      ZT_LEFT_TXT="${ZT_LEFT_TXT:+$ZT_LEFT_TXT, }$k"
+    fi
   done <"$ZT_ROLLBACK"
   [ -z "$ZT_RESTORED" ] || zt_apply_request
   if [ -n "$ZT_LEFT" ]; then
@@ -237,12 +241,12 @@ zt_recover() {
   [ -n "$had" ] || grep -q '"state":"running"' "$STATE/zapret-test.json" 2>/dev/null || return 0
   if zt_undo; then
     rm -f "$ZT_RETRY"
-    if [ -n "$ZT_RESTORED" ]; then zt_fail_state "Подбор прервался; прежняя стратегия восстановлена" false
-    elif [ -n "$had" ]; then zt_fail_state "Подбор прервался; стратегию уже сменили вручную — она оставлена" false
+    if [ -n "$ZT_RESTORED" ]; then zt_fail_state "Подбор прервался; прежний способ восстановлен" false
+    elif [ -n "$had" ]; then zt_fail_state "Подбор прервался; способ уже сменили вручную — он оставлен" false
     else zt_fail_state "Подбор прервался; настройки не изменены" false; fi
     mlog "подбор Zapret: незавершённый подбор разобран"
   else
-    zt_fail_state "Подбор прервался; не удалось вернуть прежнюю стратегию:$ZT_LEFT" true; return 1
+    zt_fail_state "Подбор прервался; не удалось вернуть прежний способ ($ZT_LEFT_TXT)" true; return 1
   fi
 }
 # Служба в цикле: не больше 3 попыток (сразу, через 1 мин, через 5 мин); затем метка и failed остаются до запуска
