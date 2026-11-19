@@ -10,6 +10,18 @@ export interface ServiceStatus {
   protection?: 'full' | 'guard' | 'none' | string
   engines?: Record<string, boolean>
   last_apply?: { tag?: string; exit?: number; at?: number } | null
+  /** Итог последнего рендера настроек: не прошёл — роутер работает по прежним. */
+  render?: { ok?: boolean; at?: number; error?: string } | null
+  /** Итог последнего полного применения (защитный вызов после сбоя его не перезаписывает). */
+  apply?: { tag?: string; exit?: number; at?: number; error?: string | null } | null
+}
+
+/** Почему последние настройки не применены (рендер или полное применение не прошли), иначе null. */
+export function applyFailure(svc: ServiceStatus | null): string | null {
+  const cut = (t: string) => (t.length > 200 ? `${t.slice(0, 200)}…` : t)
+  if (svc?.render?.ok === false) return cut(svc.render.error || 'настройки не удалось подготовить')
+  if (svc?.apply && typeof svc.apply.exit === 'number' && svc.apply.exit !== 0) return cut(svc.apply.error || `ошибка применения (код ${svc.apply.exit})`)
+  return null
 }
 
 /** Число и слово в нужной форме: 1 сайт, 2 сайта, 5 сайтов. */
@@ -38,9 +50,16 @@ export interface TunnelState { tone: Tone; title: string; detail: string | null 
 export function tunnelState(s: ManageResponse | null, c: Config | null, simple: Simple | null): TunnelState {
   const profile = c?.profiles[0]
   if (c && !profile?.endpoint) return { tone: 'idle', title: 'Сервер VPN не настроен', detail: 'Откройте «Сервер» и вставьте ссылку от своего сервера.' }
-  if (simple && !simple.enabled) return { tone: 'idle', title: 'VPN выключен', detail: 'Все сайты открываются напрямую.' }
+  const svc = s?.ok ? ((s.service ?? null) as ServiceStatus | null) : null
+  // сбой применения важнее всего остального (и выключенного VPN): роутер работает не так, как показано на экранах
+  const failed = svc && svc.engines?.service !== false && !s?.apply_pending ? applyFailure(svc) : null
+  if (failed) {
+    const guard = svc?.protection === 'guard'
+    return { tone: 'bad', title: 'Настройки не применены', detail: `${failed.charAt(0).toUpperCase()}${failed.slice(1)}. `
+      + (guard ? 'Действует защита: сайты из списка не откроются, пока настройки не применятся.' : 'Роутер работает по прежним настройкам.') }
+  }
+  if (simple && !simple.enabled) return { tone: 'idle', title: 'VPN выключен', detail: 'Все сайты открываются напрямую, обход блокировок (Zapret) тоже выключен.' }
   if (!s || !s.ok) return { tone: 'idle', title: 'Проверяю состояние…', detail: null }
-  const svc = (s.service ?? null) as ServiceStatus | null
   if (!svc || svc.engines?.service === false) {
     return { tone: 'bad', title: 'Служба роутера не запущена', detail: 'Настройки сохраняются, но не действуют. Перезагрузите роутер.' }
   }

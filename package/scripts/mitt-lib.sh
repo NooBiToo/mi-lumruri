@@ -92,21 +92,39 @@ lab_override() {
   for f in "$MITT_LAB_BIN"/*; do n="$(basename "$f")"; [ -f "$1/$n" ] && mv "$1/$n" "$1/$n.arm64"; cp "$f" "$1/$n"; chmod 700 "$1/$n"; done
 }
 
+# Короткая причина сбоя из JSON-вывода mi-tt-ctl или mi-tt-admin: первые два «message» через «; », кавычки \" — как ',
+# без «\» и табуляций (строка идёт в status.json как есть); сообщений нет — пусто.
+short_err() {
+  [ -f "$1" ] || return 0
+  awk '{ gsub(/\\"/, "\047"); n = split($0, a, /"message": *"/)
+    for (i = 2; i <= n && k < 2; i++) { m = a[i]; sub(/".*/, "", m); gsub(/[\\\t]/, "", m); printf "%s%s", (k++ ? "; " : ""), m } }' "$1"
+}
+
+# Итог последнего рендера для панели: $STATE/last-render.json {"ok":…,"at":…[,"error":"…"]}.
 render_now() {
   # готовые списки сайтов (svc-*.list) — до рендера: настройки панели ссылаются на эти категории
   [ ! -f "$SCR/mitt-lists.sh" ] || sh "$SCR/mitt-lists.sh" sync >>"$LOG/lists.log" 2>&1 || mlog "списки: синхронизация не прошла, действуют прежние"
   # client.toml содержит пароль TrustTunnel: каталог рендера доступен только root
   rm -rf "$RENDER.new"; mkdir -p "$RENDER.new"; chmod 700 "$RENDER.new"
   if ctl render "$ETC/config.json" "$ETC/secrets.json" "$RENDER.new" >"$STATE/render.json" 2>&1; then
-    rm -rf "$RENDER.prev"; [ -d "$RENDER" ] && mv "$RENDER" "$RENDER.prev"; mv "$RENDER.new" "$RENDER"; return 0
+    rm -rf "$RENDER.prev"; [ -d "$RENDER" ] && mv "$RENDER" "$RENDER.prev"; mv "$RENDER.new" "$RENDER"
+    printf '{"ok":true,"at":%s}\n' "$(date +%s)" >"$STATE/last-render.json"; return 0
   fi
+  local e; e="$(short_err "$STATE/render.json")"
+  printf '{"ok":false,"at":%s,"error":"%s"}\n' "$(date +%s)" "${e:-настройки не сформированы}" >"$STATE/last-render.json"
   rm -rf "$RENDER.new"; mlog "render не прошёл: $(head -c 300 "$STATE/render.json")"; return 1
 }
 
+# last-apply.json — последний вызов (и защитный); full-apply.json — последнее полное применение с причиной сбоя:
+# защитный вызов после сбоя полного не должен скрыть от панели, что настройки не применены.
 admin_apply() { # admin_apply <метка> [--guard-only]
-  local tag="$1"; shift
+  local tag="$1" e=""; shift
   adm apply --state-dir "$RUN/admin" --config "$ETC/config.json" --secrets "$ETC/secrets.json" "$@" >"$STATE/apply.$tag.json" 2>&1
   local rc=$?; printf '{"tag":"%s","exit":%s,"at":%s}\n' "$tag" "$rc" "$(date +%s)" >"$STATE/last-apply.json"
+  if [ "${1:-}" != --guard-only ]; then
+    [ "$rc" -eq 0 ] || { e="$(short_err "$STATE/apply.$tag.json")"; [ -n "$e" ] || e="код $rc"; }
+    printf '{"tag":"%s","exit":%s,"at":%s,"error":%s}\n' "$tag" "$rc" "$(date +%s)" "$([ -n "$e" ] && printf '"%s"' "$e" || echo null)" >"$STATE/full-apply.json"
+  fi
   mlog "apply $tag $*: код $rc"; return $rc
 }
 
@@ -154,8 +172,10 @@ status_write() {
   for n in trusttunnel nfqws2 nginx uhttpd service; do
     if pid_alive "$n"; then e="$e\"$n\":true,"; elif [ -f "$STATE/$n.wanted" ]; then e="$e\"$n\":false,"; fi
   done
-  printf '{"at":%s,"release":"%s","protection":"%s","engines":{%s},"last_apply":%s}\n' "$(date +%s)" "$(basename "$(cat "$RUN/.release" 2>/dev/null)")" \
-    "$(cat "$STATE/protection" 2>/dev/null || echo none)" "${e%,}" "$(cat "$STATE/last-apply.json" 2>/dev/null || echo null)" >"$STATE/status.json.t" && mv -f "$STATE/status.json.t" "$STATE/status.json"
+  # render — итог последнего рендера (ok, error), apply — последнего полного применения (exit, error)
+  printf '{"at":%s,"release":"%s","protection":"%s","engines":{%s},"last_apply":%s,"render":%s,"apply":%s}\n' "$(date +%s)" "$(basename "$(cat "$RUN/.release" 2>/dev/null)")" \
+    "$(cat "$STATE/protection" 2>/dev/null || echo none)" "${e%,}" "$(cat "$STATE/last-apply.json" 2>/dev/null || echo null)" \
+    "$(cat "$STATE/last-render.json" 2>/dev/null || echo null)" "$(cat "$STATE/full-apply.json" 2>/dev/null || echo null)" >"$STATE/status.json.t" && mv -f "$STATE/status.json.t" "$STATE/status.json"
 }
 
 # --- готовые списки сайтов (mitt-lists.sh) ---

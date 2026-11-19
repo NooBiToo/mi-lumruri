@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Config, Lease, ListCatalog, ManageResponse } from './api'
 import { defaultSimple, toConfig } from './simple'
-import { deviceRows, failureText, knownDevices, lines, plural, readSimple, sitesSummary, strategyLabel, testedAt, tunnelState, when, zapretProgress, zapretResult } from './status'
+import { applyFailure, deviceRows, failureText, knownDevices, lines, plural, readSimple, sitesSummary, strategyLabel, testedAt, tunnelState, when, zapretProgress, zapretResult } from './status'
 
 const fresh: Config = { version: 1, profiles: [], networks: [], devices: [], groups: [], rules: [], default_action: { type: 'direct' } }
 const profile = { id: 'tt', name: 'Мой сервер', kind: 'trusttunnel' as const, on_failure: 'block' as const,
@@ -43,6 +43,31 @@ describe('status', () => {
     const direct = { ...cfg, profiles: [{ ...profile, on_failure: 'direct' as const }] }
     expect(tunnelState(st({ engines: { service: true, trusttunnel: false } }), direct, on).tone).toBe('warn')
     expect(tunnelState(st({ engines: { service: true } }), cfg, defaultSimple()).title).toBe('VPN готов')
+  })
+
+  it('сбой применения: «Настройки не применены» с причиной, а не «Нет связи с сервером VPN»', () => {
+    const cfg = { ...fresh, profiles: [profile] }
+    const on = { ...defaultSimple(), services: ['youtube'] }
+    // полное применение не прошло, защитный вызов прошёл (guard): причина — сбой применения
+    const applyFail = { engines: { service: true, trusttunnel: false }, protection: 'guard', last_apply: { tag: 'panel-request-guard', exit: 0 },
+      render: { ok: true }, apply: { tag: 'panel-request', exit: 3, error: 'iptables-restore: строка 3 не принята' } }
+    expect(tunnelState(st(applyFail), cfg, on)).toEqual({ tone: 'bad', title: 'Настройки не применены',
+      detail: 'Iptables-restore: строка 3 не принята. Действует защита: сайты из списка не откроются, пока настройки не применятся.' })
+    // рендер не прошёл: роутер по прежним настройкам, даже если туннель работает и VPN выключен в панели
+    const renderFail = { engines: { service: true, trusttunnel: true }, protection: 'full', render: { ok: false, error: 'настройки не разобраны' }, apply: { exit: 0 } }
+    expect(tunnelState(st(renderFail), cfg, on)).toEqual({ tone: 'bad', title: 'Настройки не применены', detail: 'Настройки не разобраны. Роутер работает по прежним настройкам.' })
+    expect(tunnelState(st(renderFail), cfg, { ...on, enabled: false }).title).toBe('Настройки не применены')
+    // без текста причины — код; длинная причина обрезается
+    expect(applyFailure({ apply: { exit: 2 } })).toBe('ошибка применения (код 2)')
+    expect(applyFailure({ render: { ok: false, error: 'x'.repeat(300) } })?.length).toBe(201)
+    // новая попытка уже в очереди — «Применяю», а не прежний сбой; служба стоит — о службе
+    expect(tunnelState(st(applyFail, { apply_pending: true }), cfg, on).title).toBe('Применяю настройки…')
+    expect(tunnelState(st({ ...applyFail, engines: { service: false } }), cfg, on).title).toBe('Служба роутера не запущена')
+    // успешные рендер и применение — как раньше
+    expect(applyFailure({ render: { ok: true }, apply: { exit: 0, error: null } })).toBeNull()
+    expect(tunnelState(st({ engines: { service: true, trusttunnel: true }, render: { ok: true }, apply: { exit: 0 } }), cfg, on).title).toBe('VPN работает')
+    // VPN выключен — и Zapret выключен
+    expect(tunnelState(st({ engines: { service: true } }), cfg, { ...on, enabled: false }).detail).toMatch(/Zapret\) тоже выключен/)
   })
 
   it('имена устройств: аренда, поверх — настройки, поверх — переименование', () => {

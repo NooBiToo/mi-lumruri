@@ -196,5 +196,34 @@ else
   chmod 755 "$L/data/mi-trusttunnel/lists"
 fi
 
+echo "(м) служба: итог рендера и полного применения — в status.json (mitt-lib.sh, BusyBox awk)"
+M="$W/m/root"; root m; ME="$M/data/mi-trusttunnel/etc"; MS="$M/tmp/mi-trusttunnel/run"
+echo '{"version": 1, "profiles": []}' >"$ME/config.json"; echo '{"version": 1}' >"$ME/secrets.json"
+# заглушка mi-tt-admin: защитный вызов проходит, полный — сбой с сообщением (в нём кавычки и «\»)
+cat >"$M/tmp/mi-trusttunnel/bin/mi-tt-admin" <<'STUB'
+#!/bin/sh
+case " $* " in *" --guard-only "*) echo '{ "ok": true }'; exit 0;; esac
+echo '{'
+echo '  "ok": false,'
+echo '  "error": { "code": "apply_failed", "message": "iptables-restore: строка 3 \"x\" не принята" }'
+echo '}'
+exit 3
+STUB
+chmod +x "$M/tmp/mi-trusttunnel/bin/mi-tt-admin"
+svc() { bb m -c '. "$MITT_ROOT/tmp/mi-trusttunnel/scripts/mitt-lib.sh"; mkdir -p "$STATE" "$LOG"; '"$1" >>"$W/m/out" 2>&1; }
+sj() { python3 -I -c 'import json,sys
+s=json.load(open(sys.argv[1])); r=s["render"]; a=s["apply"]; print(eval(sys.argv[2]))' "$MS/status.json" "$1" 2>&1; }
+svc 'render_now; echo "render $?"; admin_apply panel-request; admin_apply panel-request-guard --guard-only; status_write'
+cp "$MS/status.json" "$W/m/status.1.json" 2>/dev/null
+t "m: render_now вернул 1" 'grep -q "^render 1" "$W/m/out"'
+t "m: status.json разбирается; рендер не прошёл — причина из вывода mi-tt-ctl" '[ "$(sj '\''r["ok"] is False and "не разобраны" in r["error"] and r["at"] > 0'\'')" = True ]'
+t "m: полное применение — код 3 и причина; защитный вызов после него её не скрыл" '[ "$(sj '\''a["exit"] == 3 and a["tag"] == "panel-request" and a["error"].endswith("строка 3 " + chr(39) + "x" + chr(39) + " не принята") and s["last_apply"]["exit"] == 0'\'')" = True ]'
+echo '{"version": 1, "default_action": {"type": "direct"}}' >"$ME/config.json"
+echo '#!/bin/sh
+echo "{ \"ok\": true }"' >"$M/tmp/mi-trusttunnel/bin/mi-tt-admin"
+svc 'render_now; admin_apply panel-request; status_write'
+t "m: удачные рендер и применение — ok, exit 0, без ошибки" '[ "$(sj '\''r == {"ok": True, "at": r["at"]} and a["exit"] == 0 and a["error"] is None'\'')" = True ]'
+[ "$FAIL" -eq 0 ] || echo "  вывод (м): $(tail -5 "$W/m/out"); status.json после сбоя: $(cat "$W/m/status.1.json" 2>/dev/null)"
+
 [ $FAIL -eq 0 ] && echo "PASS" || echo "FAIL"
 exit $FAIL

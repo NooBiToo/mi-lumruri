@@ -80,8 +80,9 @@ h = text("panel-headers.txt")
 check("заголовки защиты от nginx: HSTS, X-Frame-Options DENY, CSP frame-ancestors 'none'", "Strict-Transport-Security" in h and "X-Frame-Options: DENY" in h and "frame-ancestors 'none'" in h, h[:200])
 check("WAN появился: служба сама подключила клиент TrustTunnel — ТВ (правило устройства) через туннель, телефон напрямую",
       js("wan-up.json").get("tunnel") is True and seen("W-tv") == (0, VPN) and seen("W-phone") == (0, "10.10.1.3"), [seen("W-tv"), seen("W-phone")])
-check("состояние службы: protection full, клиент trusttunnel работает",
-      js("status.wan.json").get("protection") == "full" and js("status.wan.json").get("engines", {}).get("trusttunnel") is True, js("status.wan.json"))
+check("состояние службы: protection full, клиент trusttunnel работает; рендер и полное применение — без ошибок",
+      js("status.wan.json").get("protection") == "full" and js("status.wan.json").get("engines", {}).get("trusttunnel") is True
+      and (js("status.wan.json").get("render") or {}).get("ok") is True and (js("status.wan.json").get("apply") or {}).get("exit") == 0, js("status.wan.json"))
 DA = jl("dnsauth.jsonl")
 q_tunnel = [q for q in DA if "ok2.lab.test" in json.dumps(q, ensure_ascii=False)]
 q_other = [q for q in DA if '"ok.lab.test' in json.dumps(q, ensure_ascii=False)]
