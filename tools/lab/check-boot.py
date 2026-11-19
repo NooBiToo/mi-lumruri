@@ -150,8 +150,8 @@ check("iptables -S цепочек Q, Z и P совпадает с планом �
       and any(l.startswith("-A FORWARD") and "-j MITT_Z" in l for l in mw.splitlines()) and any(l.startswith("-A OUTPUT") and "-j MITT_P" in l for l in mw.splitlines()),
       {k: (v, live.get(k)) for k, v in qpz.items() if live.get(k) != v} or "совпадает")
 dr = text("nfqws2-dry-run.out")
-check("nfqws2 x86_64 (zapret2 v1.0.7) принимает отрендеренные аргументы каталога: --dry-run — код 0, Lua, блобы и списки хостов из каталога программы",
-      "exit=0" in dr and "Loaded" in dr and "--lua-init=@zapret-auto.lua.gz" in text("nfqws2.args"), dr.strip()[-200:])
+check("nfqws2 x86_64 (zapret2 v1.0.7) принимает отрендеренные аргументы каталога: --dry-run — код 0, «command line parameters verified», списки хостов из каталога программы",
+      "exit=0" in dr and "command line parameters verified" in dr and "Loaded" in dr and "--lua-init=@zapret-auto.lua.gz" in text("nfqws2.args"), dr.strip()[-200:])
 ml = text("mitt.log")
 check("служба запустила nfqws2 с аргументами рендера: работает после WAN, после заявки панели и после подбора; перезапусков не было",
       js("status.wan.json").get("engines", {}).get("nfqws2") is True and all((OUT / f"nfqws2.{x}.alive").exists() for x in ("wan", "panel", "after-test"))
@@ -197,9 +197,11 @@ zt = js("zapret-test.json")
 zl = text("zapret-test.log")
 qt = nfq(text("nfqueue.zapret-test.txt"))
 wz = [r for r in jl("web-zapret.jsonl") if r.get("client") == "10.20.0.2"]
-check("подбор Zapret из панели: 202; контроль и 10 стратегий проверены, у каждой стратегии свой nfqws2 на очереди 201 запустился",
-      text("panel-zapret-test.out").splitlines()[-1:] == ["202"] and zt.get("state") == "done" and zt.get("progress", {}).get("done") == zt.get("progress", {}).get("total") == 11
-      and "не запустился" not in zl and qt.get(201, 0) > 0 and len(wz) >= 33,
+zp = zt.get("progress", {})
+nz = zp.get("total", 0)  # контроль и стратегии общего набора (каталог; прохода YouTube нет — целей YouTube нет)
+check("подбор Zapret из панели: 202; контроль и все стратегии общего набора проверены, у каждой стратегии свой nfqws2 на очереди 201 запустился",
+      text("panel-zapret-test.out").splitlines()[-1:] == ["202"] and zt.get("state") == "done" and nz >= 2 and zp.get("done") == nz
+      and "не запустился" not in zl and qt.get(201, 0) > 0 and len(wz) >= 3 * nz,
       [zt.get("progress"), zl.count("не запустился"), qt, len(wz)])
 check("DPI в лаборатории нет: без Zapret открываются все цели, лучше контроля стратегии нет — ничего не применено",
       zt.get("control") == {"opened": 3, "total": 3} and zt.get("applied") is False and zt.get("message") == "Подходящей стратегии лучше, чем без Zapret, не нашлось",

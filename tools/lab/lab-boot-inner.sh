@@ -85,7 +85,7 @@ ip -n router addr add 10.10.1.1/24 dev br-lan; ip -n router addr add fd00:10::1/
 ip -n router addr add 10.20.0.2/30 dev r-wan; ip -n router route add default via 10.20.0.1
 for c in tv:10.10.1.2 phone:10.10.1.3; do ip -n "${c%%:*}" addr add "${c#*:}/24" dev eth0; ip -n "${c%%:*}" link set eth0 up; ip -n "${c%%:*}" route add default via 10.10.1.1; done
 ip -n inet addr add 10.20.0.1/30 dev i-r; ip -n inet addr add 10.30.0.1/30 dev i-v; ip -n inet link set i-r up; ip -n inet link set i-v up
-for a in 10.99.0.10 10.99.0.11 10.99.0.12 10.99.0.13 10.99.0.20; do ip -n inet addr add "$a/32" dev lo; done;ip -n inet addr add 198.51.100.53/32 dev lo; ip -n inet addr add 198.51.100.54/32 dev lo
+for a in 10.99.0.10 10.99.0.11 10.99.0.12 10.99.0.13 10.99.0.20; do ip -n inet addr add "$a/32" dev lo; done; ip -n inet addr add 198.51.100.53/32 dev lo; ip -n inet addr add 198.51.100.54/32 dev lo
 ip -n inet route add 10.10.1.0/24 via 10.20.0.2
 ip -n vpn addr add 10.30.0.2/30 dev v-i; ip -n vpn link set v-i up; ip -n vpn route add default via 10.30.0.1
 for n in router inet; do nsx "$n" sh -c 'echo 1 > /proc/sys/net/ipv4/ip_forward'; done
