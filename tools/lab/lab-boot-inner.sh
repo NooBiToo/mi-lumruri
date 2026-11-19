@@ -291,7 +291,8 @@ cp "$RN/lists.json" "$OUT/lists.update.json" 2>/dev/null
 for i in $(seq 60); do [ "$(at_of)" -gt "${A0:-0}" ] 2>/dev/null && grep -q '"panel-request' "$RN/last-apply.json" && break; sleep 1; done
 cp "$RN/last-apply.json" "$OUT/last-apply.lists.json"; cp "$RR/tmp/dnsmasq.d/mitt.conf" "$OUT/dnsmasq-mitt.lists.conf" 2>/dev/null
 cp "$E/categories/svc-cloudflare.list" "$OUT/svc-cloudflare.after.list" 2>/dev/null
-nsx tv "${PY[@]}" "$ROOT/tools/lab/dnsq.py" 10.10.1.1 lab-new.lab.test A >"$OUT/dns-tv-lists.json" 2>&1
+# после применения служба перезапускает dnsmasq (новый файл): вопрос — когда он снова отвечает
+for i in $(seq 10); do nsx tv "${PY[@]}" "$ROOT/tools/lab/dnsq.py" 10.10.1.1 lab-new.lab.test A >"$OUT/dns-tv-lists.json" 2>&1 && ! grep -q '"error"' "$OUT/dns-tv-lists.json" && break; sleep 1; done
 
 # 6б) подбор стратегии Zapret по кнопке панели: настоящие nfqws2 и curl стока, проверочная очередь 201 (цепочка P), свой
 # nfqws2 на каждую стратегию. DPI в лаборатории нет: контроль открывает все цели, стратегии лучше него нет
