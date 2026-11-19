@@ -41,11 +41,12 @@ pub const NF: &[Req] = &[
 /// Дополнительно для сети на части моста (physdev: порт SSID на маршрутизируемом трафике моста).
 pub const NF_PHYSDEV: &[Req] = &[r("NETFILTER_XT_MATCH_PHYSDEV", Some("xt_physdev")), r("BRIDGE_NETFILTER", Some("br_netfilter"))];
 
-/// Дополнительно для Zapret (NFQUEUE в mangle FORWARD с отбором по портам).
+/// Дополнительно для Zapret (NFQUEUE в mangle FORWARD с отбором по портам и первым пакетам соединения).
 pub const NF_QUEUE: &[Req] = &[
     r("NETFILTER_NETLINK_QUEUE", Some("nfnetlink_queue")),
     r("NETFILTER_XT_TARGET_NFQUEUE", Some("xt_NFQUEUE")),
     r("NETFILTER_XT_MATCH_MULTIPORT", Some("xt_multiport")),
+    r("NETFILTER_XT_MATCH_CONNBYTES", Some("xt_connbytes")),
 ];
 
 /// CONFIG_X=y|m|"..." → значение; «# CONFIG_X is not set» → "n".

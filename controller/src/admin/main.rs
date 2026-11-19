@@ -25,7 +25,7 @@ use mi_tt::api::{MAX_CONFIG_BYTES, parse_json, read_limited};
 use mi_tt::caps::{self, Caps, Item, check_kernel, help_has, parse_kconfig};
 use mi_tt::model::Config;
 use mi_tt::plan::{
-    Entry, Live, PolicySpec, SetKind, TABLE, build_plan, ipt_tables, needs_physdev, parse_ipsets, parse_ipt, parse_link, parse_routes, parse_rules, parse_v6_prefixes, reconcile,
+    Act, Entry, Live, PolicySpec, SetKind, TABLE, build_plan, ipt_tables, needs_physdev, parse_ipsets, parse_ipt, parse_link, parse_routes, parse_rules, parse_v6_prefixes, reconcile,
 };
 use mi_tt::render::{self, Secrets, TUN_DEVICE};
 use mi_tt::store::{lock, revision, write_atomic};
@@ -247,6 +247,7 @@ fn gather_caps() -> Caps {
     c.netfilter.push(tool("утилита ipset", v.is_ok(), v.unwrap_or_else(|e| e).trim().to_string()));
     c.netfilter_queue.push(tool("iptables -j NFQUEUE --queue-bypass", help_has(&help("iptables", &["-j", "NFQUEUE", "-h"]), "--queue-bypass"), "цель NFQUEUE".into()));
     c.netfilter_queue.push(tool("iptables -m multiport", help_has(&help("iptables", &["-m", "multiport", "-h"]), "--dports"), "расширение multiport".into()));
+    c.netfilter_queue.push(tool("iptables -m connbytes", help_has(&help("iptables", &["-m", "connbytes", "-h"]), "--connbytes"), "расширение connbytes".into()));
     for (f, name) in [("bridge-nf-call-iptables", "IPv4"), ("bridge-nf-call-ip6tables", "IPv6")] {
         let v = fs::read_to_string(format!("/proc/sys/net/bridge/{f}")).unwrap_or_default();
         c.netfilter_physdev.push(tool(&format!("net.bridge.{f}=1"), v.trim() == "1", format!("{name}: physdev на маршрутизируемом трафике моста видит порт только при 1 (сейчас «{}»)", v.trim())));
@@ -382,8 +383,8 @@ fn build(a: &Args, d: &Desired) -> Result<Built, ExitCode> {
             "message": "сеть на части моста требует physdev и bridge-nf-call=1; ничего не изменено" },
             "missing": Caps::missing(&caps.netfilter_physdev), "caps": caps })));
     }
-    if !d.spec.zapret_ports.is_empty() && !caps.netfilter_queue_ok {
-        return Err(out(2, json!({ "ok": false, "error": { "code": "capabilities", "message": "Zapret требует NFQUEUE и multiport в ядре и iptables; ничего не изменено" },
+    if (!d.spec.zapret_queue.is_empty() || d.spec.uses(Act::Zapret)) && !caps.netfilter_queue_ok {
+        return Err(out(2, json!({ "ok": false, "error": { "code": "capabilities", "message": "Zapret требует NFQUEUE, multiport и connbytes в ядре и iptables; ничего не изменено" },
             "missing": Caps::missing(&caps.netfilter_queue), "caps": caps })));
     }
     Ok(Built { set: build_plan(&d.spec, &v6_prefixes(&d.spec), &bp, a.guard_only), caps })

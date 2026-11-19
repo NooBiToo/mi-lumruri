@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 
 use crate::dns::DnsPlan;
 use crate::model::*;
-use crate::plan::{Act, Entry, PolicyRule, PolicySpec, SET_PREFIX, SetKind, SetSpec, SrcMatch, ZAPRET_QNUM, build_plan};
+use crate::plan::{Act, Entry, PolicyRule, PolicySpec, QueueRule, SET_PREFIX, SetKind, SetSpec, SrcMatch, ZAPRET_QNUM, build_plan};
 use crate::preview::{Dest, evaluation_order, expand, normalize_destination};
 use crate::validate::{Index, Issue, normalize_domain, normalize_mac, parse_cidr, plain_text, validate_config};
 use crate::zapret;
@@ -132,8 +132,8 @@ pub fn load_lists(cfg: &Config, config_path: &Path) -> Result<Lists, String> {
     Ok(out)
 }
 
-fn tcp_ports(z: &ZapretConfig) -> Vec<u16> {
-    zapret::queue(z).into_iter().filter(|(p, _)| *p == zapret::Proto::Tcp).flat_map(|(_, v)| v.split(',').filter_map(|x| x.parse().ok()).collect::<Vec<u16>>()).collect()
+fn zapret_queue(z: &ZapretConfig) -> Vec<QueueRule> {
+    zapret::queue(z).into_iter().map(|(p, ports)| QueueRule { proto: p.as_str().into(), ports }).collect()
 }
 
 fn toml_str(v: &str) -> String {
@@ -391,8 +391,7 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
         lan_subnets: cfg.networks.iter().filter_map(net_subnet).collect::<BTreeSet<_>>().into_iter().collect(),
         tun: TUN_DEVICE.into(),
         fail_open: tunnel_profile.is_some_and(|p| p.on_failure == FailurePolicy::Direct),
-        // до очереди UDP в плане — только TCP-порты профилей (в каталоге они одиночные)
-        zapret_ports: if uses_zapret { tcp_ports(&zcfg) } else { Vec::new() },
+        zapret_queue: if uses_zapret { zapret_queue(&zcfg) } else { Vec::new() },
         dns_resolver: (client.is_some() && !dns.tunnel_domains.is_empty()).then(|| dns.resolver.clone()),
         v6_block: v6_block.into_iter().collect(),
     };

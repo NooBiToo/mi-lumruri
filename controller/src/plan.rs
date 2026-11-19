@@ -8,7 +8,8 @@
 //!    (адреса доменов заносит dnsmasq, IP-префиксы — статический набор). «Через TrustTunnel» ставит бит 0x4000,
 //!    `ip rule fwmark 0x4000 lookup 3100` ведёт в TUN клиента; при отказе туннеля — unreachable (или обход).
 //!  - filter FORWARD → та же классификация: «блокировать» — REJECT; выход в TUN разрешается явно.
-//!  - mangle FORWARD → та же классификация: «напрямую с Zapret» — NFQUEUE для nfqws2.
+//!  - mangle FORWARD → та же классификация: «напрямую с Zapret» — первые пакеты соединений к портам профилей
+//!    (TCP 25, UDP 5, connbytes) в NFQUEUE для nfqws2; mangle OUTPUT — проверочный трафик подбора стратегии.
 //!  - mangle OUTPUT: DNS-вопросы роутера к резолверу туннеля тоже идут в туннель.
 //!  - IPv6 защищаемых источников наружу запрещён (IPv6 не туннелируется, а домены сопоставляются только по IPv4).
 //!
@@ -41,6 +42,12 @@ pub const SET_DNS_TIMEOUT: u32 = 86400;
 pub const ZAPRET_QNUM: u16 = 200;
 /// Метка пакетов, которые генерирует nfqws2 (`--fwmark`): вне бита `NF_MARK`.
 pub const ZAPRET_DESYNC_MARK: u32 = 0x4000_0000;
+/// Очередь проверочного трафика подбора стратегии: исходящие соединения роутера с портов `ZAPRET_TEST_SPORTS`.
+pub const ZAPRET_TEST_QNUM: u16 = 201;
+pub const ZAPRET_TEST_SPORTS: &str = "49100:49199";
+/// Сколько первых пакетов соединения (в сторону сервера) уходит в очередь: TCP и UDP, как в Zapret-Manager.
+const QUEUE_PACKETS_TCP: u32 = 25;
+const QUEUE_PACKETS_UDP: u32 = 5;
 
 /// Как печатает `ip rule`: 0x4000/0x4000.
 pub fn fmt_mark(v: u32, m: u32) -> String {
@@ -117,6 +124,14 @@ pub struct SetSpec {
     pub entries: Vec<String>,
 }
 
+/// Порты очереди Zapret одного протокола: `proto` — tcp|udp, `ports` — через запятую, диапазоны «a-b» или «a:b».
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueueRule {
+    pub proto: String,
+    pub ports: String,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PolicySpec {
@@ -127,9 +142,9 @@ pub struct PolicySpec {
     pub tun: String,
     /// При отказе туннеля трафик «через TrustTunnel» идёт напрямую (иначе блокируется).
     pub fail_open: bool,
-    /// Порты TCP для Zapret; пусто — Zapret не используется.
+    /// Порты очереди Zapret по протоколам; пусто — Zapret не используется.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub zapret_ports: Vec<u16>,
+    pub zapret_queue: Vec<QueueRule>,
     /// Резолвер туннеля: DNS-вопросы роутера к нему идут в туннель.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dns_resolver: Option<String>,
@@ -467,18 +482,43 @@ pub fn build_plan(spec: &PolicySpec, v6_lan_prefixes: &[String], bridge_ports: &
         p.insert(Entry::Jump { v6: false, table: f.into(), from: "FORWARD".into(), chain: chain_name(&c) });
         p.insert(c);
     }
-    if !spec.zapret_ports.is_empty() && !guard_only {
-        let ports = spec.zapret_ports.iter().map(u16::to_string).collect::<Vec<_>>().join(",");
-        let leaf = chain(false, m, 'Q', vec![vec![
-            s("-p"), s("tcp"), s("-m"), s("multiport"), s("--dports"), ports, s("-j"), s("NFQUEUE"), s("--queue-num"), ZAPRET_QNUM.to_string(), s("--queue-bypass"),
-        ]]);
-        let q = chain_name(&leaf);
-        if let Some(rows) = classify(spec, bridge_ports, |a| (a == Act::Zapret).then(|| vec![s("-g"), q.clone()])) {
-            p.insert(leaf);
-            let c = chain(false, m, 'Z', rows);
-            p.insert(Entry::Jump { v6: false, table: m.into(), from: "FORWARD".into(), chain: chain_name(&c) });
-            p.insert(c);
+    if spec.uses(Act::Zapret) && !guard_only {
+        // первые пакеты соединений в сторону сервера: по ним nfqws2 видит рукопожатие, остальное идёт мимо очереди
+        let rows: Vec<Vec<String>> = spec
+            .zapret_queue
+            .iter()
+            .map(|q| {
+                let n = if q.proto == "udp" { QUEUE_PACKETS_UDP } else { QUEUE_PACKETS_TCP };
+                vec![
+                    s("-p"), q.proto.clone(), s("-m"), s("multiport"), s("--dports"), q.ports.replace('-', ":"),
+                    s("-m"), s("connbytes"), s("--connbytes"), format!("1:{n}"), s("--connbytes-mode"), s("packets"), s("--connbytes-dir"), s("original"),
+                    s("-j"), s("NFQUEUE"), s("--queue-num"), ZAPRET_QNUM.to_string(), s("--queue-bypass"),
+                ]
+            })
+            .collect();
+        if !rows.is_empty() {
+            let leaf = chain(false, m, 'Q', rows);
+            let q = chain_name(&leaf);
+            if let Some(rows) = classify(spec, bridge_ports, |a| (a == Act::Zapret).then(|| vec![s("-g"), q.clone()])) {
+                p.insert(leaf);
+                let c = chain(false, m, 'Z', rows);
+                p.insert(Entry::Jump { v6: false, table: m.into(), from: "FORWARD".into(), chain: chain_name(&c) });
+                p.insert(c);
+            }
         }
+        // проверочный трафик подбора стратегии: соединения роутера с выделенных портов, кроме пакетов самого nfqws2
+        let rows = ["tcp", "udp"]
+            .iter()
+            .map(|proto| {
+                vec![
+                    s("-p"), s(proto), s("-m"), s(proto), s("--sport"), s(ZAPRET_TEST_SPORTS), s("-m"), s("mark"), s("!"), s("--mark"),
+                    fmt_mark(ZAPRET_DESYNC_MARK, ZAPRET_DESYNC_MARK), s("-j"), s("NFQUEUE"), s("--queue-num"), ZAPRET_TEST_QNUM.to_string(), s("--queue-bypass"),
+                ]
+            })
+            .collect();
+        let c = chain(false, m, 'P', rows);
+        p.insert(Entry::Jump { v6: false, table: m.into(), from: "OUTPUT".into(), chain: chain_name(&c) });
+        p.insert(c);
     }
     if !spec.v6_block.is_empty() {
         let mut rows: Vec<Vec<String>> = v6_lan_prefixes.iter().map(|x| vec![s("-d"), ipt_prefix(x), s("-j"), s("RETURN")]).collect();
@@ -690,13 +730,17 @@ pub fn spec_mark_masks(spec: &[String]) -> Vec<u32> {
     v
 }
 
-/// Маска всех меток, которые использует план (fwmark в правилах, MARK в цепочках).
+/// Маска всех меток, которые использует план (fwmark в правилах, MARK в цепочках). Отбор `-m mark` в цепочке P
+/// только читает метку nfqws2 и в маску не входит.
 pub fn our_mark_mask<'a>(entries: impl IntoIterator<Item = &'a Entry>) -> u32 {
     let mut m = 0;
     for e in entries {
         match e {
             Entry::Rule { fwmark: Some(f), .. } => m |= mark_parts(f).map(|(_, mask)| mask).unwrap_or(0),
-            Entry::Chain { rows, .. } => m |= rows.iter().flat_map(|r| spec_mark_masks(r)).fold(0, |a, b| a | b),
+            Entry::Chain { rows, .. } => {
+                let sets = rows.iter().map(|r| r.iter().filter(|w| *w != "--mark").cloned().collect::<Vec<_>>());
+                m |= sets.flat_map(|r| spec_mark_masks(&r)).fold(0, |a, b| a | b)
+            }
             _ => {}
         }
     }
@@ -860,7 +904,7 @@ mod tests {
             lan_subnets: vec!["10.10.1.0/24".into(), "10.10.2.0/24".into()],
             tun: "mitt0".into(),
             fail_open: false,
-            zapret_ports: vec![80, 443],
+            zapret_queue: vec![QueueRule { proto: "tcp".into(), ports: "80,443".into() }, QueueRule { proto: "udp".into(), ports: "443".into() }],
             dns_resolver: Some("1.1.1.1".into()),
             v6_block: vec![SrcMatch::Mac { bridge: "br-lan".into(), mac: "02:00:00:00:0a:02".into() }],
         }
@@ -922,6 +966,45 @@ mod tests {
         s.fail_open = true;
         let p = build_plan(&s, &[], &whole(), false);
         assert!(!p.contains(&Entry::guard_route()), "обход при отказе: без unreachable");
+    }
+
+    #[test]
+    fn zapret_queue_tcp_udp_with_connbytes() {
+        let p = build_plan(&spec(), &[], &whole(), false);
+        // вид `iptables -S` (iptables 1.6.2/1.8): --connbytes-mode печатается перед --connbytes-dir
+        let q: Vec<String> = chain_rows(&p, "mangle", 'Q').iter().map(|r| r.join(" ")).collect();
+        assert_eq!(q, [
+            "-p tcp -m multiport --dports 80,443 -m connbytes --connbytes 1:25 --connbytes-mode packets --connbytes-dir original -j NFQUEUE --queue-num 200 --queue-bypass",
+            "-p udp -m multiport --dports 443 -m connbytes --connbytes 1:5 --connbytes-mode packets --connbytes-dir original -j NFQUEUE --queue-num 200 --queue-bypass",
+        ]);
+        // диапазоны каталога (a-b) — в записи multiport (a:b)
+        let mut s = spec();
+        s.zapret_queue = vec![QueueRule { proto: "udp".into(), ports: "443,19294-19344,50000-50100".into() }];
+        let q = chain_rows(&build_plan(&s, &[], &whole(), false), "mangle", 'Q')[0].join(" ");
+        assert!(q.starts_with("-p udp -m multiport --dports 443,19294:19344,50000:50100 -m connbytes --connbytes 1:5 "), "{q}");
+    }
+
+    #[test]
+    fn test_queue_only_router_sports() {
+        let p = build_plan(&spec(), &[], &whole(), false);
+        let rows: Vec<String> = chain_rows(&p, "mangle", 'P').iter().map(|r| r.join(" ")).collect();
+        assert_eq!(rows, [
+            "-p tcp -m tcp --sport 49100:49199 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num 201 --queue-bypass",
+            "-p udp -m udp --sport 49100:49199 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num 201 --queue-bypass",
+        ]);
+        assert_eq!(ZAPRET_TEST_SPORTS, "49100:49199");
+        assert!(p.iter().any(|e| matches!(e, Entry::Jump { v6: false, table, from, chain } if table == "mangle" && from == "OUTPUT" && chain.starts_with("MITT_P"))), "{p:#?}");
+        // без правил Zapret нет ни очереди, ни проверочной цепочки
+        let mut s = spec();
+        s.rules.retain(|r| r.act != Act::Zapret);
+        let p = build_plan(&s, &[], &whole(), false);
+        assert!(!p.iter().any(|e| ["MITT_Q", "MITT_Z", "MITT_P"].iter().any(|x| e.label().contains(x))), "{p:#?}");
+    }
+
+    #[test]
+    fn guard_only_has_no_queues() {
+        let p = build_plan(&spec(), &[], &whole(), true);
+        assert!(!p.iter().any(|e| e.label().contains("NFQUEUE") || ["MITT_Q", "MITT_Z", "MITT_P"].iter().any(|x| e.label().contains(x))), "{p:#?}");
     }
 
     #[test]

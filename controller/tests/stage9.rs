@@ -43,7 +43,7 @@ fn direct_zapret_renders_queue_policy_and_nfqws2_args() {
     assert!(!out.join("client.toml").exists());
     let pol: Value = serde_json::from_slice(&std::fs::read(out.join("policy.json")).unwrap()).unwrap();
     assert_eq!(pol, v["policy"]);
-    assert_eq!(pol["zapret_ports"], json!([443, 2053, 2083, 2087, 2096, 8443]));
+    assert_eq!(pol["zapret_queue"], json!([{ "proto": "tcp", "ports": "443,2053,2083,2087,2096,8443" }, { "proto": "udp", "ports": "443,19294-19344,50000-50100" }]));
     let rules = pol["rules"].as_array().unwrap();
     assert_eq!(rules.len(), 1, "{pol}");
     assert_eq!((rules[0]["from"].as_str(), rules[0]["act"].as_str()), (Some("r-z"), Some("zapret")));
@@ -55,7 +55,9 @@ fn direct_zapret_renders_queue_policy_and_nfqws2_args() {
 ", rules[0]["set"].as_str().unwrap())) && !dns.contains("server="), "{dns}");
     // план: очередь NFQUEUE для портов Zapret, без маршрута через TUN
     let plan: Vec<&str> = v["plan"].as_array().unwrap().iter().map(|x| x.as_str().unwrap()).collect();
-    assert!(plan.iter().any(|x| x.contains("-p tcp -m multiport --dports 443,2053,2083,2087,2096,8443 -j NFQUEUE --queue-num 200 --queue-bypass")), "{plan:#?}");
+    assert!(plan.iter().any(|x| x.contains("-p tcp -m multiport --dports 443,2053,2083,2087,2096,8443 -m connbytes --connbytes 1:25 --connbytes-mode packets --connbytes-dir original -j NFQUEUE --queue-num 200 --queue-bypass")), "{plan:#?}");
+    assert!(plan.iter().any(|x| x.contains("-p udp -m multiport --dports 443,19294:19344,50000:50100 -m connbytes --connbytes 1:5 ")), "{plan:#?}");
+    assert!(plan.iter().any(|x| x.contains("--sport 49100:49199 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num 201 --queue-bypass")), "{plan:#?}");
     assert!(!plan.iter().any(|x| x.contains("mitt0") || x.contains("table 3100")), "{plan:#?}");
     // по умолчанию — круговой режим каталога: общий профиль, YouTube, Discord и YouTube по QUIC
     let args = std::fs::read_to_string(out.join("nfqws2.args")).unwrap();
@@ -95,7 +97,7 @@ fn zapret_settings_are_validated_and_no_free_form_args() {
     c["rules"][0]["action"] = json!({ "type": "direct" });
     let (code, v, out) = render(&c);
     assert_eq!(code, 0);
-    assert!(v["policy"].get("zapret_ports").is_none() && v["nfqws2_args"].as_array().unwrap().is_empty(), "{v}");
+    assert!(v["policy"].get("zapret_queue").is_none() && v["nfqws2_args"].as_array().unwrap().is_empty(), "{v}");
     assert!(!v["plan"].as_array().unwrap().iter().any(|x| x.as_str().unwrap().contains("NFQUEUE")));
     assert!(!out.join("nfqws2.args").exists());
 }
