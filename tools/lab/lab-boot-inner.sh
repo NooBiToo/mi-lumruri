@@ -22,7 +22,7 @@ for a in sh ash cat cp mv ln rm mkdir chmod readlink sed awk grep head tail wc t
   printf '#!/bin/sh\nexec %s -L %s %s/bin/busybox %s "$@"\n' "$Q" "$F" "$F" "$a" >"$SB/$a"
   else echo "$a" >>"$OUT/stock-missing-applets.txt"; fi
 done
-for p in sbin/uci usr/bin/openssl usr/sbin/uhttpd; do printf '#!/bin/sh\nexec %s -L %s %s/%s "$@"\n' "$Q" "$F" "$F" "$p" >"$SB/$(basename "$p")"; done
+for p in sbin/uci usr/bin/openssl usr/sbin/uhttpd usr/bin/curl; do printf '#!/bin/sh\nexec %s -L %s %s/%s "$@"\n' "$Q" "$F" "$F" "$p" >"$SB/$(basename "$p")"; done
 # nginx стока: в user namespace отображён только uid 0 — рабочий процесс от root, setgroups — через seccomp-обёртку (только лаборатория)
 cat >"$SB/nginx" <<PYEOF
 #!/usr/bin/python3
@@ -46,7 +46,12 @@ printf '#!/bin/sh\nexport LD_LIBRARY_PATH=%s\nexec %s "$@"\n' "$ISD/usr/lib/x86_
 ln -sf "$(command -v ip)" "$NFBIN/ip"
 chmod +x "$SB"/* "$NFBIN"/*
 LB="$W/labbin"; mkdir -p "$LB"
-for n in mi-tt-ctl mi-tt-admin nfqws2; do printf '#!/bin/sh\nexec %s "$0.arm64" "$@"\n' "$Q" >"$LB/$n"; done
+for n in mi-tt-ctl mi-tt-admin; do printf '#!/bin/sh\nexec %s "$0.arm64" "$@"\n' "$Q" >"$LB/$n"; done
+# nfqws2 — x86_64 той же версии zapret2, что aarch64 в пакете (очередь NFQUEUE под qemu-user не проверяется); файл лежит
+# рядом с Lua, блобами и списками хостов пакета, поэтому --chdir (каталог программы) — тот же, что на роутере.
+# В namespace отображён только uid/gid 0: сброс привилегий — к --uid=0:0, setgroups — через seccomp-обёртку (только лаборатория)
+cp "$ROOT/.tools/lab/zapret2/zapret2-v1.0.7/binaries/linux-x86_64/nfqws2" "$LB/nfqws2.x86"
+printf '#!/bin/sh\nexec %s -I %s "${0%%/*}/nfqws2.x86" "$@" --uid=0:0\n' "$(command -v python3)" "$ROOT/tools/lab/nosetgroups.py" >"$LB/nfqws2"
 printf '#!/bin/sh\nexec %s "$@"\n' "$TTCLIENT" >"$LB/trusttunnel_client"
 chmod +x "$LB"/*
 RR="$W/root"; mkdir -p "$RR/data" "$RR/tmp" "$RR/etc/config" "$RR/usr/share/xiaoqiang"
@@ -65,7 +70,7 @@ exec env LD_LIBRARY_PATH="$DMQ/usr/lib/x86_64-linux-gnu" python3 -I "$ROOT/tools
 EOF
 chmod +x "$W/dnsmasq-restart"
 ENVR=(PATH="$SB:$NFBIN" MITT_ROOT="$RR" MITT_LAB_BIN="$LB" MITT_UCI_CONF="$RR/etc/config" MITT_INTERVAL=2 MITT_LEASES="$RR/tmp/dhcp.leases"
-  MITT_DNSMASQ_RESTART="$W/dnsmasq-restart" MI_TT_IPTABLES="$NFBIN/iptables" MI_TT_IP6TABLES="$NFBIN/ip6tables" MI_TT_IPTABLES_SAVE="$NFBIN/iptables-save" MI_TT_IPSET="$NFBIN/ipset")
+  MITT_DNSMASQ_RESTART="$W/dnsmasq-restart" MITT_LISTS_URL="http://10.99.0.20:8080" MITT_ZAPRET_TARGETS="$W/zapret-targets.txt" MI_TT_IPTABLES="$NFBIN/iptables" MI_TT_IP6TABLES="$NFBIN/ip6tables" MI_TT_IPTABLES_SAVE="$NFBIN/iptables-save" MI_TT_IPSET="$NFBIN/ipset")
 
 # --- топология ---
 for n in router tv phone inet vpn; do ip netns add "$n" || die "netns $n"; ip -n "$n" link set lo up; done
@@ -80,7 +85,7 @@ ip -n router addr add 10.10.1.1/24 dev br-lan; ip -n router addr add fd00:10::1/
 ip -n router addr add 10.20.0.2/30 dev r-wan; ip -n router route add default via 10.20.0.1
 for c in tv:10.10.1.2 phone:10.10.1.3; do ip -n "${c%%:*}" addr add "${c#*:}/24" dev eth0; ip -n "${c%%:*}" link set eth0 up; ip -n "${c%%:*}" route add default via 10.10.1.1; done
 ip -n inet addr add 10.20.0.1/30 dev i-r; ip -n inet addr add 10.30.0.1/30 dev i-v; ip -n inet link set i-r up; ip -n inet link set i-v up
-ip -n inet addr add 10.99.0.10/32 dev lo; ip -n inet addr add 10.99.0.11/32 dev lo; ip -n inet addr add 198.51.100.53/32 dev lo; ip -n inet addr add 198.51.100.54/32 dev lo
+for a in 10.99.0.10 10.99.0.11 10.99.0.12 10.99.0.13 10.99.0.20; do ip -n inet addr add "$a/32" dev lo; done;ip -n inet addr add 198.51.100.53/32 dev lo; ip -n inet addr add 198.51.100.54/32 dev lo
 ip -n inet route add 10.10.1.0/24 via 10.20.0.2
 ip -n vpn addr add 10.30.0.2/30 dev v-i; ip -n vpn link set v-i up; ip -n vpn route add default via 10.30.0.1
 for n in router inet; do nsx "$n" sh -c 'echo 1 > /proc/sys/net/ipv4/ip_forward'; done
@@ -112,6 +117,15 @@ EOF
 printf '[[main_hosts]]\nhostname = "vpn.lab.test"\ncert_chain_path = "%s"\nprivate_key_path = "%s"\n' "$W/tls/cert.pem" "$W/tls/key.pem" >"$W/tt/hosts.toml"
 printf '[[client]]\nusername = "tv-user"\npassword = "%s"\n' "$TTPASS" >"$W/tt/credentials.toml"
 nsx vpn "$TTBIN" "$W/tt/vpn.toml" "$W/tt/hosts.toml" >>"$OUT/trusttunnel-server.log" 2>&1 &
+# Zapret: эхо на порту 443 (TCP и UDP) — трафик телефона идёт через очередь nfqws2; веб-цели подбора стратегии
+nsx inet "${PY[@]}" "$ROOT/tools/lab/echo.py" serve 10.99.0.12 443 "$OUT/echo-zapret.jsonl" echo-zapret &
+WS="$W/web"; mkdir -p "$WS"; printf 'mi-trusttunnel lab\n' >"$WS/index.html"
+printf 'required https://10.99.0.13/\nrequired http://10.99.0.13/\noptional https://10.99.0.13/index.html\n' >"$W/zapret-targets.txt"
+nsx inet "${PY[@]}" "$ROOT/tools/lab/web.py" 10.99.0.13 80 "$WS" "$OUT/web-zapret.jsonl" &
+nsx inet "${PY[@]}" "$ROOT/tools/lab/web.py" 10.99.0.13 443 "$WS" "$OUT/web-zapret.jsonl" "$W/tls/cert.pem" "$W/tls/key.pem" &
+# готовые списки: «репозиторий itdoginfo» — копия снимка пакета; один список позже изменится
+LS="$W/lists-srv"; cp -r "$PKG/payload/lists" "$LS"
+nsx inet "${PY[@]}" "$ROOT/tools/lab/web.py" 10.99.0.20 8080 "$LS" "$OUT/web-lists.jsonl" &
 nsx router "$W/dnsmasq-restart" || die "dnsmasq"
 
 # --- установка пакета (штатный BusyBox, без запуска) и настройки владельца ---
@@ -126,11 +140,15 @@ d={"version":1,
  "networks":[{"id":"home","name":"Дом","ssid":"Home","subnet":"10.10.1.0/24","bridge":"br-lan","ports":["r-tv","r-ph"]}],
  "devices":[{"id":"tv","name":"Телевизор","mac":"02:00:00:00:0a:02","network":"home"},{"id":"phone","name":"Телефон","mac":"02:00:00:00:0b:02","network":"home"}],
  "groups":[{"id":"video","name":"Видео (стенд)","destinations":[{"type":"domain_suffix","value":"video.lab.test"},{"type":"cidr","value":"10.99.0.10/32"}]},
-   {"id":"dnsgrp","name":"Домен (стенд)","destinations":[{"type":"domain_suffix","value":"ok2.lab.test"}]}],
+   {"id":"dnsgrp","name":"Домен (стенд)","destinations":[{"type":"domain_suffix","value":"ok2.lab.test"}]},
+   {"id":"lists","name":"Готовый список","destinations":[{"type":"category","id":"svc-cloudflare"}]}],
+ "categories":[{"id":"svc-cloudflare","name":"Cloudflare","kind":"domain","source":"itdoginfo:Services/cloudflare.lst"}],
  "rules":[{"id":"r-tv-video","source":{"type":"device","id":"tv"},"destination":{"type":"group","id":"video"},"action":{"type":"profile","id":"tt-lab"}},
-   {"id":"r-tv-dns","source":{"type":"device","id":"tv"},"destination":{"type":"group","id":"dnsgrp"},"action":{"type":"profile","id":"tt-lab"}}],
+   {"id":"r-tv-dns","source":{"type":"device","id":"tv"},"destination":{"type":"group","id":"dnsgrp"},"action":{"type":"profile","id":"tt-lab"}},
+   {"id":"r-tv-lists","source":{"type":"device","id":"tv"},"destination":{"type":"group","id":"lists"},"action":{"type":"profile","id":"tt-lab"}}],
  "dns":{"tunnel_resolver":"198.51.100.54"},
- "default_action":{"type":"direct"}}
+ "zapret":{"strategy":"auto","youtube":"auto"},
+ "default_action":{"type":"direct_zapret"}}
 json.dump(d,open(sys.argv[1],"w"),ensure_ascii=False,indent=2)' "$E/config.json" "$W/tls/cert.pem" || die "настройки"
 printf '{"version":1,"profiles":{"tt-lab":{"password":"%s"}}}\n' "$TTPASS" >"$E/secrets.json"
 for c in tv:10.10.1.2 phone:10.10.1.3; do nsx "${c%%:*}" ping -c1 -W1 10.10.1.1 >/dev/null; done
@@ -146,7 +164,7 @@ h=hmac.new(k,c,hashlib.sha1).digest();o=h[-1]&15;print("%06d"%((struct.unpack(">
 totp 0 | env -i MI_TT_AUTH_DIR="$E/auth" MI_TT_SESSION_DIR="$RR/tmp/mi-trusttunnel/sessions" "$Q" "$ADM" auth confirm --stdin >/dev/null || die "auth confirm"
 
 : >"$OUT/probes.jsonl"; : >"$OUT/phases.jsonl"
-probe() { local id="$1" ns="$2" host="${3:-10.99.0.10}" t0 out rc; t0="$(now)"; out="$(nsx "$ns" "${PY[@]}" "$ROOT/tools/lab/echo.py" probe tcp "$host" 7007 "$id" 2>&1)"; rc=$?
+probe() { local id="$1" ns="$2" host="${3:-10.99.0.10}" port="${4:-7007}" t0 out rc; t0="$(now)"; out="$(nsx "$ns" "${PY[@]}" "$ROOT/tools/lab/echo.py" probe tcp "$host" "$port" "$id" 2>&1)"; rc=$?
   "${PY[@]}" -c 'import json,sys
 a=sys.argv
 try: r=json.loads(a[5])
@@ -189,6 +207,8 @@ cu -w '\n%{http_code}' https://10.10.1.1:8443/cgi-bin/api/lists >"$OUT/panel-lis
 cu -w '\n%{http_code}' https://10.10.1.1:8443/cgi-bin/api/router >"$OUT/panel-router.out"
 ls "$E/categories" >"$OUT/categories.ls" 2>&1
 nsx tv curl -sk -m 10 -D - -o /dev/null https://10.10.1.1:8443/ | tr -d '\r' >"$OUT/panel-headers.txt"
+# первая проверка обновлений списков (служба, curl стока) без WAN: «нет связи», прежние списки остаются
+for i in $(seq 60); do [ -f "$RN/lists.json" ] && break; sleep 1; done; cp "$RN/lists.json" "$OUT/lists.boot.json" 2>/dev/null
 
 # 2) WAN появился: служба сама подключает туннель
 phase wan_up
@@ -196,6 +216,20 @@ wan_on
 if wait_tunnel; then echo '{"tunnel":true}' >"$OUT/wan-up.json"; else echo '{"tunnel":false}' >"$OUT/wan-up.json"; fi
 probe W-tv tv; probe W-phone phone; cp_status wan; snapz full
 nsx router ip route show >"$OUT/routes.main.txt"; nsx router ip rule show >"$OUT/rules.all.txt"; nsx router ip link show >"$OUT/links.txt"
+
+# 2б) Zapret на настоящем ядре: остальной трафик LAN — «напрямую с Zapret»; план mi-tt-admin (цепочки Q, Z, P) применён
+# и сверен, nfqws2 x86_64 работает с аргументами рендера (каталог стратегий пакета), трафик телефона к порту 443 проходит
+# через очередь 200
+phase zapret
+TAG="$(sed -n 's/.*"tag":"\([^"]*\)".*/\1/p' "$RN/last-apply.json")"; cp "$RN/apply.$TAG.json" "$OUT/apply.wan.json" 2>/dev/null
+RD="$RR/tmp/mi-trusttunnel/render"; cp "$RD/nfqws2.args" "$OUT/nfqws2.args" 2>/dev/null
+nsx router "$RR/tmp/mi-trusttunnel/bin/nfqws2" --dry-run $(cat "$RD/nfqws2.args") >"$OUT/nfqws2-dry-run.out" 2>&1; echo "exit=$?" >>"$OUT/nfqws2-dry-run.out"
+probe Z-phone-443 phone 10.99.0.12 443
+nsx phone "${PY[@]}" "$ROOT/tools/lab/echo.py" probe udp 10.99.0.12 443 Z-phone-udp443 >"$OUT/zapret-udp.json" 2>&1
+nsx router cat /proc/net/netfilter/nfnetlink_queue >"$OUT/nfqueue.wan.txt" 2>&1
+ipt -t mangle -S >"$OUT/mangle.wan.txt"; ipt -t mangle -L -v -x -n >"$OUT/mangle-counters.wan.txt"
+kill -0 "$(cat "$RN/nfqws2.pid")" 2>/dev/null && echo alive >"$OUT/nfqws2.wan.alive"
+cp "$RR/tmp/mi-trusttunnel/log/nfqws2.log" "$OUT/nfqws2.wan.log" 2>/dev/null
 
 # 2a) домен из правила: до вопроса DNS адрес не в наборе (напрямую), вопрос ТВ к dnsmasq роутера уходит к резолверу
 # через туннель, ответ попадает в ipset — и трафик ТВ к этому адресу идёт в туннель; телефон без правила — напрямую
@@ -242,6 +276,38 @@ phase panel_apply
 cu -X POST -H 'Content-Type: application/json' -H 'Origin: https://10.10.1.1:8443' -H 'Sec-Fetch-Site: same-origin' -H "X-MITT-CSRF: $CSRF" -d '{}' -w '\n%{http_code}' https://10.10.1.1:8443/cgi-bin/api/apply-request >"$OUT/panel-apply.out"; tail -1 "$OUT/panel-apply.out" >"$OUT/panel-apply.code"
 for i in $(seq 30); do grep -q '"panel-request' "$RN/last-apply.json" 2>/dev/null && break; sleep 1; done
 cu -w '\n%{http_code}' https://10.10.1.1:8443/cgi-bin/api/status >"$OUT/panel-status.out"; cp_status panel
+kill -0 "$(cat "$RN/nfqws2.pid")" 2>/dev/null && echo alive >"$OUT/nfqws2.panel.alive"
+post() { cu -X POST -H 'Content-Type: application/json' -H 'Origin: https://10.10.1.1:8443' -H 'Sec-Fetch-Site: same-origin' -H "X-MITT-CSRF: $CSRF" -d "$2" -w '\n%{http_code}' "https://10.10.1.1:8443/cgi-bin/api/$1"; }
+at_of() { sed -n 's/.*"at":\([0-9]*\).*/\1/p' "$RN/last-apply.json" 2>/dev/null; }
+
+# 6а) обновление готовых списков по кнопке панели: в «репозитории» изменился один список — служба (mitt-lists.sh update,
+# curl стока) загружает и проверяет файлы, синхронизирует категории и применяет политику заново; новый домен — в dnsmasq
+phase lists_update
+LT="$(date +%s)"; A0="$(at_of)"
+f="$LS/Services/cloudflare.lst"; [ -z "$(tail -c1 "$f")" ] || echo >>"$f"; echo lab-new.lab.test >>"$f"
+post lists/update '{}' >"$OUT/panel-lists-update.out"
+for i in $(seq 300); do c="$(sed -n 's/.*"checked":\([0-9]*\).*/\1/p' "$RN/lists.json" 2>/dev/null)"; [ "${c:-0}" -ge "$LT" ] && break; sleep 1; done
+cp "$RN/lists.json" "$OUT/lists.update.json" 2>/dev/null
+for i in $(seq 60); do [ "$(at_of)" -gt "${A0:-0}" ] 2>/dev/null && grep -q '"panel-request' "$RN/last-apply.json" && break; sleep 1; done
+cp "$RN/last-apply.json" "$OUT/last-apply.lists.json"; cp "$RR/tmp/dnsmasq.d/mitt.conf" "$OUT/dnsmasq-mitt.lists.conf" 2>/dev/null
+cp "$E/categories/svc-cloudflare.list" "$OUT/svc-cloudflare.after.list" 2>/dev/null
+nsx tv "${PY[@]}" "$ROOT/tools/lab/dnsq.py" 10.10.1.1 lab-new.lab.test A >"$OUT/dns-tv-lists.json" 2>&1
+
+# 6б) подбор стратегии Zapret по кнопке панели: настоящие nfqws2 и curl стока, проверочная очередь 201 (цепочка P), свой
+# nfqws2 на каждую стратегию. DPI в лаборатории нет: контроль открывает все цели, стратегии лучше него нет
+phase zapret_test
+ZP="$(ipt -t mangle -S | awk '/^-N MITT_P/ {print $2}')"
+ipt -t mangle -L "$ZP" -v -x -n >"$OUT/zapret-test.P.before.txt" 2>&1
+post zapret/test '{"mode":"quick"}' >"$OUT/panel-zapret-test.out"
+( while :; do nsx router cat /proc/net/netfilter/nfnetlink_queue; echo --; sleep 0.3; done ) >"$OUT/nfqueue.zapret-test.txt" 2>&1 & SAMP=$!
+for i in $(seq 900); do grep -qE '"state":"(done|failed)"' "$RN/zapret-test.json" 2>/dev/null && break; sleep 1; done
+kill "$SAMP" 2>/dev/null
+cp "$RN/zapret-test.json" "$OUT/zapret-test.json" 2>/dev/null
+ipt -t mangle -L "$ZP" -v -x -n >"$OUT/zapret-test.P.after.txt" 2>&1
+grep 'подбор Zapret' "$RR/tmp/mi-trusttunnel/log/mitt.log" >"$OUT/zapret-test.log" 2>/dev/null
+cp "$RR/tmp/mi-trusttunnel/log/zapret-nfqws.log" "$OUT/zapret-nfqws.log" 2>/dev/null
+kill -0 "$(cat "$RN/nfqws2.pid")" 2>/dev/null && echo alive >"$OUT/nfqws2.after-test.alive"
+probe Z-phone-after-test phone 10.99.0.12 443
 
 # 7) «перезагрузка роутера»: RAM очищена, правила ядра сняты; снова холодный старт без WAN
 phase reboot

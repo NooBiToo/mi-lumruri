@@ -63,11 +63,11 @@ try:
     lj = json.loads("\n".join(pl[:-1]))
 except ValueError:
     lj = {}
-ls_ = js("lists.json")
-check("готовые списки: svc-*.list из снимка релиза разложены до рендера; /lists отдаёт каталог; проверка обновлений без сети — ok=false, «нет связи» (состояние пережило «перезагрузку»)",
+lb = js("lists.boot.json")
+check("готовые списки: svc-*.list из снимка релиза разложены до рендера; /lists отдаёт каталог; проверка обновлений без WAN (curl стока) — ok=false, «нет связи»",
       "svc-youtube.list" in cl and "svc-meta-ip.list" in cl and pl[-1:] == ["200"] and len(lj.get("catalog", {}).get("services", [])) >= 20
-      and ls_.get("ok") is False and "нет связи" in " ".join(ls_.get("errors", [])),
-      [cl[:4], pl[-1:], len(lj.get("catalog", {}).get("services", [])), ls_])
+      and lb.get("ok") is False and "нет связи" in " ".join(lb.get("errors", [])),
+      [cl[:4], pl[-1:], len(lj.get("catalog", {}).get("services", [])), lb])
 rj = text("panel-router.out").splitlines()
 try:
     rl = json.loads(chr(10).join(rj[:-1])).get("lan", {})
@@ -127,6 +127,83 @@ check("известное ограничение: пока цепочки сня
 check("секреты (пароль панели, TOTP, пароль TrustTunnel, ключ TLS) не попали в артефакты", js("secret-leak.json").get("found") == [], js("secret-leak.json"))
 bt = js("boot-time.json").get("boot_seconds")
 check("время холодного старта до защиты и панели (под qemu на x86) измерено", isinstance(bt, (int, float)), f"{bt} с")
+# --- Zapret на настоящем ядре: план mi-tt-admin (Q, Z, P), nfqws2 x86_64 с аргументами рендера, очередь 200
+aw = js("apply.wan.json")
+owned = aw.get("owned", [])
+plan = {}
+for lab in owned:
+    if lab.startswith("iptables -t mangle MITT_") and ": " in lab:
+        name, rows = lab[len("iptables -t mangle "):].split(": ", 1)
+        plan[name] = rows.lower().split(" | ")  # MAC в плане — заглавными, iptables -S печатает строчными
+live = {}
+for line in text("mangle.wan.txt").splitlines():
+    if line.startswith("-A MITT_"):
+        name, _, row = line[3:].partition(" ")
+        live.setdefault(name, []).append(row.lower())
+qpz = {k: v for k, v in plan.items() if k[5] in "QPZ"}
+mw = text("mangle.wan.txt")
+check("Zapret («напрямую с Zapret» по умолчанию): mi-tt-admin применил цепочки Q, Z и P без конфликтов, сверка с ядром — verified",
+      aw.get("ok") is True and aw.get("verified") is True and sorted(k[5] for k in qpz) == ["P", "Q", "Z"],
+      [aw.get("ok"), aw.get("verified"), sorted(qpz)])
+check("iptables -S цепочек Q, Z и P совпадает с планом построчно (без учёта регистра MAC); Z — из FORWARD, P — из OUTPUT",
+      qpz and all(live.get(k) == v for k, v in qpz.items())
+      and any(l.startswith("-A FORWARD") and "-j MITT_Z" in l for l in mw.splitlines()) and any(l.startswith("-A OUTPUT") and "-j MITT_P" in l for l in mw.splitlines()),
+      {k: (v, live.get(k)) for k, v in qpz.items() if live.get(k) != v} or "совпадает")
+dr = text("nfqws2-dry-run.out")
+check("nfqws2 x86_64 (zapret2 v1.0.7) принимает отрендеренные аргументы каталога: --dry-run — код 0, Lua, блобы и списки хостов из каталога программы",
+      "exit=0" in dr and "Loaded" in dr and "--lua-init=@zapret-auto.lua.gz" in text("nfqws2.args"), dr.strip()[-200:])
+ml = text("mitt.log")
+check("служба запустила nfqws2 с аргументами рендера: работает после WAN, после заявки панели и после подбора; перезапусков не было",
+      js("status.wan.json").get("engines", {}).get("nfqws2") is True and all((OUT / f"nfqws2.{x}.alive").exists() for x in ("wan", "panel", "after-test"))
+      and "движок nfqws2 завершился" not in ml,
+      [js("status.wan.json").get("engines"), [x for x in ("wan", "panel", "after-test") if (OUT / f"nfqws2.{x}.alive").exists()], ml.count("движок nfqws2 завершился")])
+
+
+def nfq(txt):
+    r = {}
+    for line in txt.splitlines():
+        f = line.split()
+        if len(f) >= 8 and f[0].isdigit():
+            r[int(f[0])] = max(r.get(int(f[0]), 0), int(f[7]))
+    return r
+
+
+q = nfq(text("nfqueue.wan.txt"))
+udp = js("zapret-udp.json")
+check("трафик телефона к порту 443 (TCP и UDP) идёт через очередь 200 (nfqws2 привязан, пакеты прошли) и доходит до сервера",
+      q.get(200, 0) > 0 and seen("Z-phone-443") == (0, "10.10.1.3") and udp.get("seen_client") == "10.10.1.3" and seen("Z-phone-after-test") == (0, "10.10.1.3"),
+      [q, seen("Z-phone-443"), udp, seen("Z-phone-after-test")])
+
+# --- обновление готовых списков по кнопке панели (curl стока, локальный «репозиторий»)
+lu = js("lists.update.json")
+wl = jl("web-lists.jsonl")
+check("обновление списков из панели: 202; служба загрузила файлы с «репозитория» (curl стока через WAN роутера), проверка без ошибок",
+      text("panel-lists-update.out").splitlines()[-1:] == ["202"] and lu.get("ok") is True and lu.get("errors") == [] and isinstance(lu.get("updated"), int)
+      and wl and all(r.get("client") == "10.20.0.2" and r.get("code") == 200 for r in wl),
+      [text("panel-lists-update.out").splitlines()[-1:], lu, len(wl)])
+dl = text("dnsmasq-mitt.lists.conf")
+q_new = [x for x in DA if "lab-new.lab.test" in json.dumps(x, ensure_ascii=False)]
+check("изменённый список применён заново: svc-cloudflare.list с новым доменом, применение panel-request, домен в dnsmasq (ipset и резолвер туннеля), вопрос ТВ — через туннель",
+      "lab-new.lab.test" in text("svc-cloudflare.after.list") and js("last-apply.lists.json").get("tag") == "panel-request" and js("last-apply.lists.json").get("exit") == 0
+      and "ipset=/lab-new.lab.test/" in dl and "server=/lab-new.lab.test/198.51.100.54" in dl and "lab-new" not in text("dnsmasq-mitt.conf")
+      and q_new and all(x.get("client") == VPN for x in q_new),
+      [js("last-apply.lists.json"), [l for l in dl.splitlines() if "lab-new" in l][:2], q_new[:1]])
+ls_ = js("lists.json")
+check("состояние проверки списков пережило «перезагрузку» (копия в /data): после неё — итог обновления",
+      ls_.get("ok") is True and ls_.get("updated") == lu.get("updated"), ls_)
+
+# --- подбор стратегии по кнопке панели: настоящие nfqws2 и curl стока, очередь 201
+zt = js("zapret-test.json")
+zl = text("zapret-test.log")
+qt = nfq(text("nfqueue.zapret-test.txt"))
+wz = [r for r in jl("web-zapret.jsonl") if r.get("client") == "10.20.0.2"]
+check("подбор Zapret из панели: 202; контроль и 10 стратегий проверены, у каждой стратегии свой nfqws2 на очереди 201 запустился",
+      text("panel-zapret-test.out").splitlines()[-1:] == ["202"] and zt.get("state") == "done" and zt.get("progress", {}).get("done") == zt.get("progress", {}).get("total") == 11
+      and "не запустился" not in zl and qt.get(201, 0) > 0 and len(wz) >= 33,
+      [zt.get("progress"), zl.count("не запустился"), qt, len(wz)])
+check("DPI в лаборатории нет: без Zapret открываются все цели, лучше контроля стратегии нет — ничего не применено",
+      zt.get("control") == {"opened": 3, "total": 3} and zt.get("applied") is False and zt.get("message") == "Подходящей стратегии лучше, чем без Zapret, не нашлось",
+      [zt.get("control"), zt.get("best"), zt.get("message")])
 ok = all(c["ok"] for c in checks)
 json.dump({"ok": ok, "checks": checks, "probes": list(P.values())}, open(OUT / "summary.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 md = ["| Проверка | Детали | Итог |", "|---|---|---|"] + [f"| {c['check']} | {c['detail'].replace('|', '/')} | {'да' if c['ok'] else 'НЕТ'} |" for c in checks]
