@@ -81,41 +81,6 @@
       "ipv4": null
     },
     {
-      "id": "cloudflare",
-      "name": "Cloudflare",
-      "group": "Сервисы",
-      "domains": "Services/cloudflare.lst",
-      "ipv4": "Subnets/IPv4/cloudflare.lst"
-    },
-    {
-      "id": "cloudfront",
-      "name": "Amazon CloudFront",
-      "group": "Сервисы",
-      "domains": "Services/cloudfront.lst",
-      "ipv4": "Subnets/IPv4/cloudfront.lst"
-    },
-    {
-      "id": "digitalocean",
-      "name": "DigitalOcean",
-      "group": "Сервисы",
-      "domains": "Services/digitalocean.lst",
-      "ipv4": "Subnets/IPv4/digitalocean.lst"
-    },
-    {
-      "id": "hetzner",
-      "name": "Hetzner",
-      "group": "Сервисы",
-      "domains": "Services/hetzner.lst",
-      "ipv4": "Subnets/IPv4/hetzner.lst"
-    },
-    {
-      "id": "ovh",
-      "name": "OVH",
-      "group": "Сервисы",
-      "domains": "Services/ovh.lst",
-      "ipv4": "Subnets/IPv4/ovh.lst"
-    },
-    {
       "id": "anime",
       "name": "Аниме",
       "group": "Категории",
@@ -131,30 +96,65 @@
     },
     {
       "id": "block",
-      "name": "Заблокированное",
+      "name": "Заблокированные сайты",
       "group": "Категории",
       "domains": "Categories/block.lst",
       "ipv4": null
     },
     {
       "id": "geoblock",
-      "name": "Геоблок",
+      "name": "Сайты, закрытые для России",
       "group": "Категории",
       "domains": "Categories/geoblock.lst",
       "ipv4": null
     },
     {
-      "id": "hodca",
-      "name": "Ходячие",
-      "group": "Категории",
-      "domains": "Categories/hodca.lst",
+      "id": "russia_inside",
+      "name": "Всё заблокированное в России (общий список)",
+      "group": "Россия",
+      "domains": "Russia/inside-raw.lst",
       "ipv4": null
     },
     {
-      "id": "russia_inside",
-      "name": "Заблокированное в России",
-      "group": "Россия",
-      "domains": "Russia/inside-raw.lst",
+      "id": "cloudflare",
+      "name": "Cloudflare",
+      "group": "Хостинги и CDN",
+      "domains": "Services/cloudflare.lst",
+      "ipv4": "Subnets/IPv4/cloudflare.lst"
+    },
+    {
+      "id": "cloudfront",
+      "name": "Amazon CloudFront",
+      "group": "Хостинги и CDN",
+      "domains": "Services/cloudfront.lst",
+      "ipv4": "Subnets/IPv4/cloudfront.lst"
+    },
+    {
+      "id": "digitalocean",
+      "name": "DigitalOcean",
+      "group": "Хостинги и CDN",
+      "domains": "Services/digitalocean.lst",
+      "ipv4": "Subnets/IPv4/digitalocean.lst"
+    },
+    {
+      "id": "hetzner",
+      "name": "Hetzner",
+      "group": "Хостинги и CDN",
+      "domains": "Services/hetzner.lst",
+      "ipv4": "Subnets/IPv4/hetzner.lst"
+    },
+    {
+      "id": "ovh",
+      "name": "OVH",
+      "group": "Хостинги и CDN",
+      "domains": "Services/ovh.lst",
+      "ipv4": "Subnets/IPv4/ovh.lst"
+    },
+    {
+      "id": "hodca",
+      "name": "Хостинги (Hetzner, OVH, Cloudflare…)",
+      "group": "Хостинги и CDN",
+      "domains": "Categories/hodca.lst",
       "ipv4": null
     }
   ]

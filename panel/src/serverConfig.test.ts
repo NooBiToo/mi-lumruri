@@ -99,4 +99,19 @@ included_routes = []
       expect(parseDeepLink(t), t).toHaveProperty('error')
     }
   })
+
+  it('reads http3, anti-DPI and unsupported flags from a tt:// link (DEEP_LINK.md: 0x09 = 0x02 is http3)', () => {
+    const enc = new TextEncoder()
+    const tlv = (tag: number, v: Uint8Array | string) => {
+      const b = typeof v === 'string' ? enc.encode(v) : v
+      return [tag, b.length, ...b]
+    }
+    const base = [...tlv(0, new Uint8Array([2])), ...tlv(1, 'vpn.example.com'), ...tlv(2, '203.0.113.10:8443'), ...tlv(5, 'bob'), ...tlv(6, 'pw')]
+    const link = (b: number[]) => 'tt://?' + btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    const r = parseDeepLink(link([...base, ...tlv(9, new Uint8Array([2])), ...tlv(0x0a, new Uint8Array([1])), ...tlv(3, 'cdn.example.net'), ...tlv(7, new Uint8Array([1]))]))
+    expect(r).toMatchObject({ endpoint: { server: '203.0.113.10', port: 8443, sni: 'vpn.example.com', username: 'bob', quic: true, anti_dpi: true }, password: 'pw' })
+    if (!('error' in r)) expect(r.warnings).toHaveLength(2)
+    expect(parseDeepLink(link([...base, ...tlv(9, new Uint8Array([1]))]))).toMatchObject({ endpoint: { quic: false, anti_dpi: false } })
+    expect(parseDeepLink(link(base))).toMatchObject({ endpoint: { quic: false } })
+  })
 })

@@ -29,17 +29,17 @@ google_play|Google Play|Сервисы|Services/google_play.lst
 google_meet|Google Meet|Сервисы|Services/google_meet.lst
 roblox|Roblox|Сервисы|Services/roblox.lst
 hdrezka|HDRezka|Сервисы|Services/hdrezka.lst
-cloudflare|Cloudflare|Сервисы|Services/cloudflare.lst
-cloudfront|Amazon CloudFront|Сервисы|Services/cloudfront.lst
-digitalocean|DigitalOcean|Сервисы|Services/digitalocean.lst
-hetzner|Hetzner|Сервисы|Services/hetzner.lst
-ovh|OVH|Сервисы|Services/ovh.lst
 anime|Аниме|Категории|Categories/anime.lst
 news|Новости|Категории|Categories/news.lst
-block|Заблокированное|Категории|Categories/block.lst
-geoblock|Геоблок|Категории|Categories/geoblock.lst
-hodca|Ходячие|Категории|Categories/hodca.lst
-russia_inside|Заблокированное в России|Россия|Russia/inside-raw.lst'
+block|Заблокированные сайты|Категории|Categories/block.lst
+geoblock|Сайты, закрытые для России|Категории|Categories/geoblock.lst
+russia_inside|Всё заблокированное в России (общий список)|Россия|Russia/inside-raw.lst
+cloudflare|Cloudflare|Хостинги и CDN|Services/cloudflare.lst
+cloudfront|Amazon CloudFront|Хостинги и CDN|Services/cloudfront.lst
+digitalocean|DigitalOcean|Хостинги и CDN|Services/digitalocean.lst
+hetzner|Hetzner|Хостинги и CDN|Services/hetzner.lst
+ovh|OVH|Хостинги и CDN|Services/ovh.lst
+hodca|Хостинги (Hetzner, OVH, Cloudflare…)|Хостинги и CDN|Categories/hodca.lst'
 
 fetch() { curl -sSfL --proto '=https' "$RAW/$1" -o "$OUT/$1"; }
 : > "$OUT/.rows"; BAD=()

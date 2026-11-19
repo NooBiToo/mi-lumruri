@@ -119,30 +119,37 @@ export function devicesSummary(s: Simple): string {
 
 export const AUTO = 'auto'
 
-/** Название стратегии Zapret для людей: id каталога («v4») сам по себе ничего не говорит. */
-export function strategyLabel(z: ZapretConfig | undefined): string {
-  const g = z?.strategy ?? AUTO
-  const y = z?.youtube ?? AUTO
-  if (g === AUTO && y === AUTO) return 'Автоматически (рекомендуется)'
-  const found = [g !== AUTO ? g : null, y !== AUTO ? `YouTube — ${y}` : null].filter(Boolean).join(', ')
-  return `Найдена подбором: ${found}`
+/** Название стратегии Zapret для людей: id каталога («v4») не показываем никогда. */
+export function strategyLabel(z: ZapretConfig | undefined, tested?: number | null): string {
+  if ((z?.strategy ?? AUTO) === AUTO && (z?.youtube ?? AUTO) === AUTO) return 'Автоматически (рекомендуется)'
+  return tested ? `Подобран автоматически ${when(tested)}` : 'Подобран автоматически'
 }
 
-/** Строка прогресса подбора: «Проверяю v4: 5 из 11». */
+/** Когда последний подбор применил способ (для подписи «Подобран автоматически …»), иначе null. */
+export function testedAt(t: ZapretTestState | null | undefined): number | null {
+  return t && t.state === 'done' && t.applied ? t.finished ?? t.started ?? null : null
+}
+
+/** Строка прогресса подбора: «Проверяю способы обхода: 5 из 11». */
 export function zapretProgress(t: ZapretTestState): string {
   const p = t.progress
   if (!p || !p.total) return 'Готовлю проверку…'
-  const what = !p.current ? 'Проверяю' : p.current === 'control' ? 'Проверяю без Zapret' : `Проверяю ${p.current}`
+  const what = p.current === 'control' ? 'Проверяю, что открывается без обхода' : 'Проверяю способы обхода'
   return `${what}: ${Math.min(p.done + 1, p.total)} из ${p.total}`
 }
 
-/** Итог последнего подбора: «Открылось 47 из 54, без Zapret — 12» и что применено. */
+/** Итог последнего подбора: «Открылось 47 из 54, без обхода — 12» и что сделано — без id стратегий. */
 export function zapretResult(t: ZapretTestState): { summary: string | null; message: string } {
   const c = t.control
-  const summary = t.best && c ? `Открылось ${t.best.opened} из ${c.total}, без Zapret — ${c.opened}` : null
-  // сообщение подбора часто уже содержит те же числа: тогда от него нужна только первая часть («Применена стратегия v4»)
-  let message = t.message ?? ''
-  if (summary && t.best && message.includes(`${t.best.opened} из ${c!.total}`)) message = message.split(':')[0] ?? message
+  const summary = t.best && c ? `Открылось ${t.best.opened} из ${c.total}, без обхода — ${c.opened}` : null
+  let message: string
+  if (t.state === 'done') message = t.applied ? 'Лучший способ применён.' : 'Способа лучше, чем без обхода, не нашлось — оставлен прежний.'
+  // сообщения сбоя сценария могут называть стратегии по id: заменяем их словом «способ»
+  else {
+    const m = (t.message ?? 'Подбор не удался.').replace(/стратеги\S* y?v\d+/gi, 'способ').replace(/\s*\((?:y?v\d+|auto)\)/g, '')
+      .replace(/\b(?:y?v\d+)\b/g, 'новый способ').replace(/\s+/g, ' ').trim()
+    message = m.charAt(0).toUpperCase() + m.slice(1)
+  }
   return { summary, message }
 }
 

@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import ToggleSwitch from 'primevue/toggleswitch'
-import type { ZapretConfig } from '../api'
+import { api, type ZapretConfig, type ZapretTestState } from '../api'
 import { DEFAULT_TUNNEL_RESOLVER, dnsToForm, formToDns, type DnsForm } from '../manage'
-import { AUTO, strategyLabel } from '../status'
-import { config, save, simple } from '../store'
+import { AUTO, strategyLabel, testedAt } from '../status'
+import { config, save, scrollTarget, simple } from '../store'
 
 defineProps<{ totp: boolean }>()
 const emit = defineEmits<{ navigate: [tab: 'sites'] }>()
@@ -22,6 +22,13 @@ watch(config, () => { if (!dirty.value) { draft.value = toDraft(); pristine.valu
 const zapret = computed(() => config.value?.zapret)
 const zapretAuto = computed(() => (zapret.value?.strategy ?? AUTO) === AUTO && (zapret.value?.youtube ?? AUTO) === AUTO)
 const zapretOn = computed(() => simple.value?.rest === 'zapret')
+const test = ref<ZapretTestState | null>(null)
+onMounted(async () => { const r = await api.zapretTest(); if (r.body.ok && r.body.test) test.value = r.body.test })
+function openZapret() {
+  scrollTarget.value = 'zapret'
+  emit('navigate', 'sites')
+}
+const totpHelp = ref(false)
 
 const saving = ref(false)
 const error = ref<string | null>(null)
@@ -68,10 +75,10 @@ async function submit() {
 
     <div class="card">
       <h2 class="card__title">Обход блокировок (Zapret)</h2>
-      <p><span class="muted">Способ обхода:</span> {{ draft.autoZapret ? strategyLabel(undefined) : strategyLabel(zapret) }}</p>
+      <p><span class="muted">Способ обхода:</span> {{ draft.autoZapret ? strategyLabel(undefined) : strategyLabel(zapret, testedAt(test)) }}</p>
       <p v-if="!zapretOn" class="hint">Сейчас выключен. Включается на экране «Сайты»: «Напрямую с обходом блокировок».</p>
       <div class="actions">
-        <Button :label="zapretOn ? 'Подобрать способ заново' : 'Открыть «Сайты»'" severity="secondary" variant="outlined" @click="emit('navigate', 'sites')" />
+        <Button :label="zapretOn ? 'Подобрать способ заново' : 'Открыть «Сайты»'" severity="secondary" variant="outlined" @click="openZapret" />
         <Button v-if="!zapretAuto && !draft.autoZapret" label="Вернуть автоматический" severity="secondary" variant="text" @click="draft.autoZapret = true" />
       </div>
     </div>
@@ -81,8 +88,12 @@ async function submit() {
       <p v-if="totp">Вход по паролю и коду из приложения-аутентификатора.</p>
       <template v-else>
         <p>Вход только по паролю.</p>
-        <p class="hint">Чтобы при входе спрашивался ещё и код из приложения (Google Authenticator и подобные), подключитесь к роутеру
-          по SSH и выполните <code>sh /data/mi-trusttunnel/mitt-boot.sh auth reset-totp</code>, отсканируйте QR-код, затем
+        <p class="hint">Можно добавить второй шаг: код из приложения на телефоне (Google Authenticator и подобные).</p>
+        <button type="button" class="disclose" :aria-expanded="totpHelp" aria-controls="totp-help" @click="totpHelp = !totpHelp">
+          {{ totpHelp ? 'Скрыть' : 'Как включить' }}
+        </button>
+        <p v-show="totpHelp" id="totp-help" class="hint">Подключитесь к роутеру по SSH и выполните
+          <code>sh /data/mi-trusttunnel/mitt-boot.sh auth reset-totp</code>, отсканируйте QR-код приложением, затем
           <code>sh /data/mi-trusttunnel/mitt-boot.sh auth confirm</code>. Подробнее — в инструкции, раздел «Второй фактор».</p>
       </template>
     </div>

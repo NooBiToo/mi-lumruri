@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Config, Lease, ListCatalog, ManageResponse } from './api'
 import { defaultSimple, toConfig } from './simple'
-import { deviceRows, knownDevices, lines, plural, readSimple, sitesSummary, strategyLabel, tunnelState, zapretProgress, zapretResult } from './status'
+import { deviceRows, knownDevices, lines, plural, readSimple, sitesSummary, strategyLabel, testedAt, tunnelState, when, zapretProgress, zapretResult } from './status'
 
 const fresh: Config = { version: 1, profiles: [], networks: [], devices: [], groups: [], rules: [], default_action: { type: 'direct' } }
 const profile = { id: 'tt', name: 'Мой сервер', kind: 'trusttunnel' as const, on_failure: 'block' as const,
@@ -70,15 +70,22 @@ describe('status', () => {
     expect(sitesSummary({ ...defaultSimple(), mode: 'all', exceptions: ['a.ru'] }, catalog)).toBe('Все сайты, кроме 1 исключения')
   })
 
-  it('Zapret: название стратегии, прогресс и итог подбора', () => {
+  it('Zapret: без id стратегий — название, прогресс и итог подбора', () => {
     expect(strategyLabel(undefined)).toBe('Автоматически (рекомендуется)')
     expect(strategyLabel({ strategy: 'auto', youtube: 'auto' })).toBe('Автоматически (рекомендуется)')
-    expect(strategyLabel({ strategy: 'v4', youtube: 'auto' })).toBe('Найдена подбором: v4')
-    expect(zapretProgress({ state: 'running', progress: { done: 4, total: 11, current: 'v4' } })).toBe('Проверяю v4: 5 из 11')
-    expect(zapretProgress({ state: 'running', progress: { done: 0, total: 11, current: 'control' } })).toBe('Проверяю без Zapret: 1 из 11')
-    const r = zapretResult({ state: 'done', control: { opened: 12, total: 54 }, best: { id: 'v4', opened: 47 }, applied: true, message: 'Применена стратегия v4' })
-    expect(r).toEqual({ summary: 'Открылось 47 из 54, без Zapret — 12', message: 'Применена стратегия v4' })
-    const full = zapretResult({ state: 'done', control: { opened: 12, total: 54 }, best: { id: 'v4', opened: 47 }, message: 'Применена стратегия v4: открылось 47 из 54, без Zapret — 12' })
-    expect(full.message).toBe('Применена стратегия v4')
+    expect(strategyLabel({ strategy: 'v4', youtube: 'auto' })).toBe('Подобран автоматически')
+    const done = { state: 'done' as const, started: 1763540000, finished: 1763540200, control: { opened: 12, total: 54 }, best: { id: 'v4', opened: 47 }, applied: true,
+      message: 'Применена стратегия v4: открылось 47 из 54, без Zapret — 12' }
+    expect(testedAt(done)).toBe(1763540200)
+    expect(strategyLabel({ strategy: 'v4', youtube: 'yv2' }, testedAt(done))).toBe(`Подобран автоматически ${when(1763540200)}`)
+    expect(testedAt({ ...done, applied: false })).toBeNull()
+    expect(zapretProgress({ state: 'running', progress: { done: 4, total: 11, current: 'v4' } })).toBe('Проверяю способы обхода: 5 из 11')
+    expect(zapretProgress({ state: 'running', progress: { done: 0, total: 11, current: 'control' } })).toBe('Проверяю, что открывается без обхода: 1 из 11')
+    expect(zapretResult(done)).toEqual({ summary: 'Открылось 47 из 54, без обхода — 12', message: 'Лучший способ применён.' })
+    expect(zapretResult({ ...done, applied: false }).message).toBe('Способа лучше, чем без обхода, не нашлось — оставлен прежний.')
+    const failed = zapretResult({ state: 'failed', message: 'Стратегия v4 при повторной проверке хуже, но вернуть прежнюю (v3) не удалось; действует v4' })
+    expect(failed.message).not.toMatch(/[vV]\d/)
+    expect(failed.message).toBe('Способ при повторной проверке хуже, но вернуть прежнюю не удалось; действует новый способ')
   })
+
 })

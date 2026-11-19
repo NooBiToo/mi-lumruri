@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import Textarea from 'primevue/textarea'
 import { api, type ZapretTestState } from '../api'
-import { build, buildBlocker, catalog, config, knownDevicesNow, loadConfig, save, serverReady, simple, simpleState } from '../store'
-import { lines, strategyLabel, when, zapretProgress, zapretResult } from '../status'
+import { build, buildBlocker, catalog, config, knownDevicesNow, loadConfig, save, scrollTarget, serverReady, simple, simpleState } from '../store'
+import { lines, strategyLabel, testedAt, when, zapretProgress, zapretResult } from '../status'
 import { normalizeDomain, type Simple } from '../simple'
 import ManualBanner from './ManualBanner.vue'
 
@@ -35,6 +35,8 @@ watch(simple, (s) => { if (s && (!draft.value || !dirty.value)) draft.value = to
 // ---- сервисы каталога ----
 const search = ref('')
 const GROUPS = ['Сервисы', 'Категории', 'Россия']
+/** Хостинги и CDN нужны редко и путают новичка: группа свёрнута, но выбирать из неё можно. */
+const EXPERT = 'Хостинги и CDN'
 const groups = computed(() => {
   const q = search.value.trim().toLowerCase()
   const all = catalog.value?.services ?? []
@@ -42,6 +44,9 @@ const groups = computed(() => {
   return names.map((g) => ({ name: g, items: all.filter((s) => s.group === g && (!q || s.name.toLowerCase().includes(q) || s.id.includes(q))) }))
     .filter((g) => g.items.length)
 })
+const basicGroups = computed(() => groups.value.filter((g) => g.name !== EXPERT))
+const expertGroup = computed(() => groups.value.find((g) => g.name === EXPERT) ?? null)
+const expertChecked = computed(() => expertGroup.value?.items.filter((s) => draft.value?.services.includes(s.id)).length ?? 0)
 function toggle(id: string) {
   if (!draft.value) return
   const s = draft.value.services
@@ -73,9 +78,11 @@ const saveError = ref<string | null>(null)
 const test = ref<ZapretTestState | null>(null)
 const testError = ref<string | null>(null)
 let poll: number | undefined
+let unmounted = false
 async function readTest() {
   const r = await api.zapretTest()
-  if (!r.body.ok || !r.body.test) return
+  // экран могли закрыть, пока шёл запрос: опрос не запускаем
+  if (unmounted || !r.body.ok || !r.body.test) return
   const was = test.value?.state
   test.value = r.body.test
   const running = r.body.test.state === 'running' || r.body.requested
@@ -87,6 +94,7 @@ async function readTest() {
 async function startTest() {
   testError.value = null
   const r = await api.startZapretTest()
+  if (unmounted) return
   if (r.status === 202 || r.status === 409) {
     test.value = { ...(test.value ?? {}), state: 'running', progress: undefined }
     if (poll === undefined) poll = window.setInterval(() => void readTest(), 2000)
@@ -95,8 +103,17 @@ async function startTest() {
 const running = computed(() => test.value?.state === 'running')
 const result = computed(() => (test.value && (test.value.state === 'done' || test.value.state === 'failed') ? zapretResult(test.value) : null))
 const zapretSaved = computed(() => simple.value?.rest === 'zapret')
-onMounted(() => void readTest())
-onBeforeUnmount(() => clearInterval(poll))
+onMounted(async () => {
+  void readTest()
+  // переход с «Дополнительно» на подбор способа: сразу к блоку Zapret
+  if (scrollTarget.value) {
+    const id = scrollTarget.value
+    scrollTarget.value = null
+    await nextTick()
+    document.getElementById(id)?.scrollIntoView({ block: 'start' })
+  }
+})
+onBeforeUnmount(() => { unmounted = true; clearInterval(poll); poll = undefined })
 </script>
 
 <template>
@@ -134,7 +151,7 @@ onBeforeUnmount(() => clearInterval(poll))
         <template v-if="catalog">
           <label for="svc-search" class="sr-only">Найти сервис</label>
           <InputText id="svc-search" v-model="search" placeholder="Найти сервис" class="search" />
-          <div v-for="g in groups" :key="g.name" class="svc-group">
+          <div v-for="g in basicGroups" :key="g.name" class="svc-group">
             <h3 class="svc-group__title">{{ g.name }}</h3>
             <div class="tiles">
               <label v-for="s in g.items" :key="s.id" :class="['tile', { 'tile--on': draft.services.includes(s.id) }]">
@@ -143,8 +160,18 @@ onBeforeUnmount(() => clearInterval(poll))
               </label>
             </div>
           </div>
+          <details v-if="expertGroup" class="svc-expert" :open="!!search.trim() || expertChecked > 0">
+            <summary>Хостинги и CDN — для специалистов<span v-if="expertChecked" class="muted"> · отмечено: {{ expertChecked }}</span></summary>
+            <p class="hint">Целые сети хостингов. Нужны, только если вы точно знаете, что сайт работает у такого хостинга и без VPN не открывается.</p>
+            <div class="tiles">
+              <label v-for="s in expertGroup.items" :key="s.id" :class="['tile', { 'tile--on': draft.services.includes(s.id) }]">
+                <Checkbox :model-value="draft.services.includes(s.id)" binary :input-id="`svc-${s.id}`" @update:model-value="toggle(s.id)" />
+                <span class="tile__name">{{ s.name }}</span>
+              </label>
+            </div>
+          </details>
           <p v-if="!groups.length" class="muted">Ничего не нашлось. Сайт можно добавить в поле «Свои сайты».</p>
-          <p class="hint">Списки сайтов обновляются сами раз в сутки. «Заблокированное в России» — большой общий список: его хватает, если не знаете, что выбрать.</p>
+          <p class="hint">Списки сайтов обновляются сами раз в сутки. «Всё заблокированное в России» — большой общий список: его хватает, если не знаете, что выбрать.</p>
         </template>
         <Message v-else severity="warn" :closable="false">Каталог сайтов не загрузился. Обновите страницу.</Message>
 
@@ -180,7 +207,7 @@ onBeforeUnmount(() => clearInterval(poll))
         </div>
 
         <div v-if="draft.rest === 'zapret'" class="zapret">
-          <p><span class="muted">Способ обхода:</span> {{ strategyLabel(config?.zapret) }}</p>
+          <p><span class="muted">Способ обхода:</span> {{ strategyLabel(config?.zapret, testedAt(test)) }}</p>
           <template v-if="zapretSaved">
             <div v-if="running" class="zapret__run" aria-live="polite">
               <span class="spinner" aria-hidden="true" />

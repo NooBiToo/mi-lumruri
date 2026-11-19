@@ -5,7 +5,7 @@ import Checkbox from 'primevue/checkbox'
 import InputText from 'primevue/inputtext'
 import { build, buildBlocker, config, knownDevicesNow, leases, loadLeases, save, serverReady, simple, simpleState } from '../store'
 import { deviceRows, plural } from '../status'
-import type { Simple } from '../simple'
+import { normalizeMac, type Simple } from '../simple'
 import ManualBanner from './ManualBanner.vue'
 
 const emit = defineEmits<{ navigate: [tab: 'server' | 'sites'] }>()
@@ -17,8 +17,9 @@ const draft = ref<Draft | null>(simple.value ? toDraft(simple.value) : null)
 const renames = ref<Record<string, string>>({})
 
 const rows = computed(() => (config.value && draft.value ? deviceRows(leases.value, config.value, renames.value, draft.value.macs) : []))
-const savedName = (mac: string) => config.value?.devices.find((d) => d.mac.toLowerCase() === mac)?.name
-const renamed = computed(() => Object.entries(renames.value).some(([mac, n]) => n.trim() && n.trim() !== (savedName(mac) ?? rows.value.find((r) => r.mac === mac)?.name)))
+const savedName = (mac: string) => config.value?.devices.find((d) => normalizeMac(d.mac) === normalizeMac(mac))?.name
+// в настройках хранятся только выбранные устройства: переименование считается лишь у них
+const renamed = computed(() => Object.entries(renames.value).some(([mac, n]) => draft.value?.macs.includes(mac) && n.trim() && n.trim() !== savedName(mac)))
 const dirty = computed(() => {
   const s = simple.value, d = draft.value
   if (!s || !d) return false
@@ -43,8 +44,13 @@ async function startRename(mac: string, name: string) {
   await nextTick()
   document.getElementById(`rename-${mac}`)?.focus()
 }
+/** Переименованное устройство отмечается: имя сохраняется только у выбранных устройств, а раз его назвали — оно нужно. */
 function finishRename() {
-  if (editing.value && editText.value.trim()) renames.value = { ...renames.value, [editing.value]: editText.value.trim() }
+  const mac = editing.value
+  if (mac && editText.value.trim()) {
+    renames.value = { ...renames.value, [mac]: editText.value.trim() }
+    if (draft.value && !draft.value.macs.includes(mac)) draft.value.macs = [...draft.value.macs, mac]
+  }
   editing.value = null
 }
 
@@ -122,7 +128,7 @@ onMounted(() => void loadLeases())
             <Button v-if="editing !== d.mac" label="Переименовать" variant="text" severity="secondary" size="small" @click="startRename(d.mac, d.name)" />
           </li>
         </ul>
-        <p class="hint">Имя нужно только вам, чтобы узнавать устройство в списке. Оно сохранится по кнопке «Сохранить».</p>
+        <p class="hint">Имя нужно только вам, чтобы узнавать устройство в списке. Переименованное устройство отмечается само; имя сохранится по кнопке «Сохранить».</p>
       </div>
       <p v-else-if="rows.length" class="muted">Сейчас дома {{ plural(rows.length, 'устройство', 'устройства', 'устройств') }} в сети.</p>
 

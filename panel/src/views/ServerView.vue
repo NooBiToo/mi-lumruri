@@ -19,7 +19,7 @@ const form = ref<ProfileForm>(formFrom())
 const pristine = ref(JSON.stringify(form.value))
 const dirty = computed(() => JSON.stringify(form.value) !== pristine.value)
 watch(profile, () => { if (!dirty.value) { form.value = formFrom(); pristine.value = JSON.stringify(form.value) } })
-const firstTime = ref(!profile.value?.endpoint)
+const firstTime = computed(() => !profile.value?.endpoint)
 const advanced = ref(false)
 
 // ---- вставка конфигурации ----
@@ -62,12 +62,20 @@ async function submit() {
   error.value = null
   try {
     const secret = formToSecret(form.value)
-    const r = await save({ ...config.value, profiles: [p, ...config.value.profiles.slice(1)] }, secret ? '' : undefined)
+    const writeSecret = async (): Promise<boolean> => {
+      const s = await manage.setSecret(p.id, secret!)
+      if (s.status !== 200) error.value = `Пароль не записан: ${s.body.error?.message ?? s.status}`
+      return s.status === 200
+    }
+    // Пароль пишется до настроек: заявка на применение от POST /config уже застанет новый пароль. Но контроллер
+    // принимает пароль только для профиля, который уже есть в настройках, — при первой настройке сервера пароль
+    // пишется после настроек, и тогда применение запрашивается ещё раз.
+    const known = config.value.profiles.some((x) => x.id === p.id)
+    if (secret && known && !(await writeSecret())) return
+    const r = await save({ ...config.value, profiles: [p, ...config.value.profiles.slice(1)] }, secret && !known ? '' : undefined)
     if (!r.ok) { error.value = r.message; return }
-    if (secret) {
-      const s = await manage.setSecret(p.id, secret)
-      if (s.status !== 200) { error.value = `Пароль не записан: ${s.body.error?.message ?? s.status}`; return }
-      // заявку на применение поставило сохранение настроек; пароль записан позже — просим применить ещё раз
+    if (secret && !known) {
+      if (!(await writeSecret())) return
       await manage.applyRequest()
       notify.show('success', 'Сохранено, применяю на роутере')
     }

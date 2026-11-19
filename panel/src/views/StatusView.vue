@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import { api } from '../api'
@@ -31,13 +31,14 @@ const snapshot = computed(() => {
   const d = catalog.value?.date
   return d ? new Date(`${d}T00:00:00`).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) : null
 })
+let listsTimer: number | undefined
 async function updateLists() {
   updating.value = true
   try {
     const r = await api.updateLists()
     if (r.status === 202) {
       notify.show('info', 'Проверяю обновления списков', 'Это займёт до минуты.')
-      setTimeout(() => void loadLists().finally(() => (updating.value = false)), 20000)
+      listsTimer = window.setTimeout(() => void loadLists().finally(() => (updating.value = false)), 20000)
     } else {
       notify.show('error', 'Не получилось', r.body.error?.message)
       updating.value = false
@@ -47,6 +48,7 @@ async function updateLists() {
   }
 }
 onMounted(() => { void loadStatus(); void loadLists() })
+onBeforeUnmount(() => clearTimeout(listsTimer))
 </script>
 
 <template>

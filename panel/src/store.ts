@@ -15,6 +15,8 @@ export const lanError = ref<string | null>(null)
 export const leases = ref<Lease[]>([])
 export const service = ref<ManageResponse | null>(null)
 export const hasPassword = ref(false)
+/** Куда прокрутить экран, который сейчас откроется (id блока), например `zapret` на «Сайтах». */
+export const scrollTarget = ref<string | null>(null)
 
 export const catalog = computed(() => lists.value?.catalog ?? null)
 export const simpleState = computed(() => (config.value ? readSimple(config.value) : null))

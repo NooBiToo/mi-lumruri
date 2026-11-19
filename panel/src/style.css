@@ -246,3 +246,8 @@ code { font: inherit; font-variant-numeric: tabular-nums; background: color-mix(
   .card--row { grid-template-columns: minmax(0, 1fr); justify-items: start; }
   .dev { flex-wrap: wrap; }
 }
+.svc-expert { display: grid; gap: 0.625rem; border-top: 1px solid var(--line); padding-top: 0.875rem; }
+.svc-expert > summary { cursor: pointer; font-weight: 600; color: var(--muted); }
+.svc-expert > summary:hover, .svc-expert[open] > summary { color: var(--ink); }
+.svc-expert[open] { gap: 0.75rem; }
+#zapret { scroll-margin-top: 7rem; }
