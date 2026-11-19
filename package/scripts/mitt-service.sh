@@ -18,7 +18,7 @@ engines_start() {
   if [ -f "$RENDER/nfqws2.args" ]; then
     touch "$STATE/nfqws2.wanted"
     # shellcheck disable=SC2046 — аргументы по одному в строке, без пробелов (формирует рендер)
-    pid_alive nfqws2 || start_bg nfqws2 ${MITT_NFQWS_WRAP:-} "$BIN/nfqws2" $(cat "$RENDER/nfqws2.args")
+    pid_alive nfqws2 || { zapret_readable; start_bg nfqws2 ${MITT_NFQWS_WRAP:-} "$BIN/nfqws2" $(cat "$RENDER/nfqws2.args"); }
   fi
   return 0
 }

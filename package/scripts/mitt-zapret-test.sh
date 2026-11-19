@@ -94,6 +94,7 @@ try() { # try <id> <all|yt>
   RES=""
   args="$(ctl zapret-args "$1")" || { mlog "подбор Zapret: нет аргументов для $1"; return 0; }
   # shellcheck disable=SC2086 — аргументы по одному в строке, без пробелов (каталог стратегий)
+  zapret_readable
   start_bg zapret-nfqws ${MITT_NFQWS_WRAP:-} "$NFQ" $args
   sleep "$SETTLE"
   if ! pid_alive zapret-nfqws; then mlog "подбор Zapret: nfqws2 со стратегией $1 не запустился"; nfq_stop; return 0; fi

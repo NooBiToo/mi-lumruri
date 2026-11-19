@@ -130,6 +130,13 @@ admin_apply() { # admin_apply <метка> [--guard-only]
 
 pid_alive() { [ -f "$STATE/$1.pid" ] && kill -0 "$(cat "$STATE/$1.pid")" 2>/dev/null; }
 pid_stop() { if pid_alive "$1"; then kill "$(cat "$STATE/$1.pid")" 2>/dev/null; sleep 1; kill -9 "$(cat "$STATE/$1.pid")" 2>/dev/null; fi; rm -f "$STATE/$1.pid"; }
+# nfqws2 после запуска сбрасывает права (UID 2147483647) и перечитывает списки хостов уже без root: данным Zapret
+# нужно чтение для всех, каталогу $BIN — проход (распаковка идёт под umask 077). Секретов в этих файлах нет.
+zapret_readable() {
+  chmod 711 "$RUN" "$BIN"
+  for f in "$BIN"/zapret-hosts-*.txt "$BIN"/*.lua.gz "$BIN"/*.bin; do [ -f "$f" ] && chmod 644 "$f"; done
+  return 0
+}
 start_bg() { # start_bg <имя> <команда…>
   local n="$1"; shift
   "$@" >>"$LOG/$n.log" 2>&1 &
