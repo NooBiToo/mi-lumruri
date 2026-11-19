@@ -1,16 +1,19 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, type Component } from 'vue'
 import Button from 'primevue/button'
 import ConfirmDialog from 'primevue/confirmdialog'
 import Message from 'primevue/message'
-import Select from 'primevue/select'
 import Skeleton from 'primevue/skeleton'
+import ToggleSwitch from 'primevue/toggleswitch'
 import Toast from 'primevue/toast'
+import { Check, CircleAlert, Globe, LayoutDashboard, LoaderCircle, LogOut, MonitorSmartphone, Server, SlidersHorizontal, Waypoints } from 'lucide-vue-next'
 import { useToast } from 'primevue/usetoast'
 import { api, onAuthLost, setCsrf, type SessionResponse } from './api'
 import type { LoginStage } from './auth'
 import LoginView from './LoginView.vue'
-import { broken, config, configIssues, issuesText, loadAll, loadError, loadStatus, notify, reset, serverReady, tunnel } from './store'
+import { broken, config, configIssues, issuesText, loadAll, loadError, loadStatus, notify, reset, serverReady, service, simple, tunnel } from './store'
+import { flushPending, resetSaveStatus, saveLabel, saveStatus } from './autosave'
+import { toggleVpn, vpnAvailable, vpnBusy } from './vpn'
 import StatusView from './views/StatusView.vue'
 import SitesView from './views/SitesView.vue'
 import DevicesView from './views/DevicesView.vue'
@@ -31,15 +34,17 @@ const lost = ref(false)
 const loading = ref(false)
 
 type Tab = 'status' | 'sites' | 'devices' | 'server' | 'more'
-const TABS: { value: Tab; label: string }[] = [
-  { value: 'status', label: 'Состояние' },
-  { value: 'sites', label: 'Сайты' },
-  { value: 'devices', label: 'Устройства' },
-  { value: 'server', label: 'Сервер' },
-  { value: 'more', label: 'Дополнительно' },
+const TABS: { value: Tab; label: string; short: string; icon: Component }[] = [
+  { value: 'status', label: 'Обзор', short: 'Обзор', icon: LayoutDashboard },
+  { value: 'sites', label: 'Сайты', short: 'Сайты', icon: Globe },
+  { value: 'devices', label: 'Устройства', short: 'Устройства', icon: MonitorSmartphone },
+  { value: 'server', label: 'Сервер', short: 'Сервер', icon: Server },
+  { value: 'more', label: 'Дополнительно', short: 'Ещё', icon: SlidersHorizontal },
 ]
 const fromHash = (): Tab | null => TABS.find((t) => `#${t.value}` === location.hash)?.value ?? null
 const tab = ref<Tab>(fromHash() ?? 'status')
+const title = computed(() => TABS.find((t) => t.value === tab.value)?.label ?? '')
+const saveText = computed(() => saveLabel(saveStatus, !!service.value?.apply_pending))
 
 function go(t: Tab) {
   tab.value = t
@@ -86,9 +91,11 @@ async function onLoggedIn(s: SessionResponse) {
 }
 
 async function logout() {
+  await flushPending()
   await api.logout()
   setCsrf(null)
   reset()
+  resetSaveStatus()
   loginStage.value = 'password'
   auth.value = 'login'
 }
@@ -140,48 +147,75 @@ onBeforeUnmount(() => { removeEventListener('hashchange', onHash); clearInterval
   </div>
 
   <div v-else class="app">
-    <header class="top">
-      <div class="top__in">
-        <div class="top__row">
-          <span class="top__brand">mi-trusttunnel</span>
-          <div :class="['state', `state--${tunnel.tone}`]" role="status" aria-live="polite">
-            <span class="state__dot" aria-hidden="true" />
-            <span class="state__title">{{ tunnel.title }}</span>
-          </div>
-          <Button label="Выйти" severity="secondary" variant="text" size="small" class="top__out" @click="logout" />
-        </div>
-        <nav class="tabs" aria-label="Разделы">
-          <button v-for="t in TABS" :key="t.value" type="button" :class="['tabs__item', { 'tabs__item--on': tab === t.value }]"
-            :aria-current="tab === t.value ? 'page' : undefined" @click="go(t.value)">{{ t.label }}</button>
-        </nav>
-        <div class="mnav">
-          <label for="mnav-select" class="sr-only">Раздел</label>
-          <Select input-id="mnav-select" :model-value="tab" :options="TABS" option-label="label" option-value="value" fluid
-            @update:model-value="(v: Tab) => go(v)" />
-        </div>
+    <a href="#main" class="skip">К содержимому</a>
+    <aside class="side" aria-label="Разделы">
+      <div class="side__brand">
+        <span class="side__mark" aria-hidden="true"><Waypoints :size="18" :stroke-width="2.25" /></span>
+        <span class="side__name">mi-trusttunnel</span>
       </div>
-    </header>
+      <nav class="side__nav">
+        <a v-for="t in TABS" :key="t.value" :href="`#${t.value}`" :class="['nav', { 'nav--on': tab === t.value }]" :title="t.label"
+          :aria-current="tab === t.value ? 'page' : undefined" @click.prevent="go(t.value)">
+          <component :is="t.icon" class="nav__icon" :size="20" :stroke-width="1.9" aria-hidden="true" />
+          <span class="nav__label">{{ t.label }}</span>
+        </a>
+      </nav>
+    </aside>
 
-    <main class="page">
-      <div v-if="loading || (!config && !loadError)" class="loading" aria-busy="true">
-        <span class="sr-only">Читаю настройки</span>
-        <Skeleton height="2rem" width="14rem" />
-        <Skeleton height="6rem" />
-        <Skeleton height="6rem" />
-      </div>
-      <!-- настройки не разобрать (например, от другой версии): заменить простыми -->
-      <section v-else-if="broken" class="sect">
-        <ManualBanner broken :reason="issuesText(configIssues)" />
-      </section>
-      <section v-else-if="!config" class="sect">
-        <Message severity="error" :closable="false"><strong>Настройки не загружены.</strong> {{ loadError }}.</Message>
-        <Button label="Загрузить снова" class="self-start" @click="enter()" />
-      </section>
-      <StatusView v-else-if="tab === 'status'" @navigate="go" />
-      <SitesView v-else-if="tab === 'sites'" @navigate="go" />
-      <DevicesView v-else-if="tab === 'devices'" @navigate="go" />
-      <ServerView v-else-if="tab === 'server'" @navigate="go" />
-      <MoreView v-else :totp="totpOn" @navigate="go" />
-    </main>
+    <div class="main">
+      <header class="top">
+        <h1 class="top__title">{{ title }}</h1>
+        <div :class="['pill', `pill--${tunnel.tone}`]" role="status" aria-live="polite">
+          <span class="pill__dot" aria-hidden="true" />
+          <span class="pill__text">{{ tunnel.title }}</span>
+        </div>
+        <div v-if="saveStatus.tone !== 'idle'" :class="['save', `save--${saveStatus.tone}`]" aria-live="polite">
+          <LoaderCircle v-if="saveStatus.tone === 'saving'" class="save__icon spin" :size="16" aria-hidden="true" />
+          <Check v-else-if="saveStatus.tone === 'saved'" class="save__icon" :size="16" aria-hidden="true" />
+          <CircleAlert v-else-if="saveStatus.tone === 'error' || saveStatus.tone === 'blocked'" class="save__icon" :size="16" aria-hidden="true" />
+          <span v-else class="save__dot" aria-hidden="true" />
+          <span class="save__text" :title="saveText">{{ saveText }}</span>
+          <button v-if="saveStatus.action" type="button" class="save__act" @click="saveStatus.action.run()">{{ saveStatus.action.label }}</button>
+        </div>
+        <div class="top__end">
+          <label v-if="vpnAvailable && simple" class="master" :title="simple.enabled ? 'Выключить VPN' : 'Включить VPN'">
+            <span class="master__label">VPN</span>
+            <ToggleSwitch :model-value="simple.enabled" input-id="vpn-master" :disabled="vpnBusy" :aria-label="simple.enabled ? 'Выключить VPN' : 'Включить VPN'"
+              @update:model-value="toggleVpn()" />
+          </label>
+          <button type="button" class="out" title="Выйти" @click="logout"><LogOut :size="18" aria-hidden="true" /><span class="out__text">Выйти</span></button>
+        </div>
+      </header>
+
+      <main id="main" class="page" tabindex="-1">
+        <div v-if="loading || (!config && !loadError)" class="loading" aria-busy="true">
+          <span class="sr-only">Читаю настройки</span>
+          <Skeleton height="9rem" border-radius="14px" />
+          <div class="kpis"><Skeleton v-for="i in 4" :key="i" height="6.5rem" border-radius="14px" /></div>
+          <Skeleton height="8rem" border-radius="14px" />
+        </div>
+        <!-- настройки не разобрать (например, от другой версии): заменить простыми -->
+        <section v-else-if="broken" class="sect">
+          <ManualBanner broken :reason="issuesText(configIssues)" />
+        </section>
+        <section v-else-if="!config" class="sect">
+          <Message severity="error" :closable="false"><strong>Настройки не загружены.</strong> {{ loadError }}.</Message>
+          <Button label="Загрузить снова" class="self-start" @click="enter()" />
+        </section>
+        <StatusView v-else-if="tab === 'status'" @navigate="go" />
+        <SitesView v-else-if="tab === 'sites'" @navigate="go" />
+        <DevicesView v-else-if="tab === 'devices'" @navigate="go" />
+        <ServerView v-else-if="tab === 'server'" @navigate="go" />
+        <MoreView v-else :totp="totpOn" @navigate="go" />
+      </main>
+    </div>
+
+    <nav class="tabbar" aria-label="Разделы">
+      <a v-for="t in TABS" :key="t.value" :href="`#${t.value}`" :class="['tabbar__item', { 'tabbar__item--on': tab === t.value }]"
+        :aria-current="tab === t.value ? 'page' : undefined" :aria-label="t.label" @click.prevent="go(t.value)">
+        <component :is="t.icon" :size="22" :stroke-width="1.9" aria-hidden="true" />
+        <span>{{ t.short }}</span>
+      </a>
+    </nav>
   </div>
 </template>

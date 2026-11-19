@@ -34,3 +34,7 @@ dpi-detector (tcp16.json и domains.txt).
 Снимок списков сайтов package/lists (Services, Categories, Russia/inside-raw, Subnets/IPv4) взят из itdoginfo/allow-domains
 (https://github.com/itdoginfo/allow-domains, коммит 932e11c43a9e000a24ba08129c15d99287c6e9a9 от 2026-11-09). В репозитории нет файла
 лицензии; списки используются как общедоступные данные с указанием источника и не изменяются. Автор списков — itdoginfo.
+
+Панель (panel) использует значки Lucide (пакет lucide-vue-next, лицензия ISC, https://lucide.dev) и логотипы
+сервисов из Simple Icons (пакет simple-icons, лицензия CC0-1.0, https://simpleicons.org). Логотипы — товарные знаки
+своих владельцев и показываются только для узнавания сервисов в списке.
