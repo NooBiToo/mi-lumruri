@@ -386,9 +386,9 @@ pub fn plain_text(v: &str) -> bool {
 }
 
 fn check_endpoint(issues: &mut Vec<Issue>, path: &str, e: &Endpoint) {
-    // клиент TrustTunnel подключается по адресу: имя сервера не разрешается через DNS провайдера
-    if e.server.parse::<IpAddr>().is_err() {
-        issues.push(Issue::new(format!("{path}.server"), "bad_server", "укажите IP-адрес сервера; доменное имя — в поле sni"));
+    // IP-адрес или доменное имя: домен клиент TrustTunnel разрешает сам через DNS роутера
+    if e.server.parse::<IpAddr>().is_err() && normalize_domain(&e.server, 1).is_err() {
+        issues.push(Issue::new(format!("{path}.server"), "bad_server", "адрес сервера — IP-адрес или доменное имя, например vpn.example.com"));
     }
     if e.port == 0 {
         issues.push(Issue::new(format!("{path}.port"), "bad_port", "порт должен быть от 1 до 65535"));
@@ -508,6 +508,21 @@ mod tests {
         assert!(normalize_domain("a..com", 1).is_err());
         assert!(normalize_domain("10.0.0.1", 1).is_err());
         assert!(normalize_domain(&format!("{}.com", "a".repeat(64)), 2).is_err());
+    }
+
+    #[test]
+    fn endpoint_server_ip_or_domain() {
+        let ep = |s: &str| Endpoint { server: s.into(), port: 443, sni: None, username: "u".into(), quic: false, anti_dpi: false, certificate: None };
+        for ok in ["203.0.113.10", "2001:db8::1", "tunnel.example.com"] {
+            let mut i = Vec::new();
+            check_endpoint(&mut i, "e", &ep(ok));
+            assert!(i.is_empty(), "{ok}");
+        }
+        for bad in ["", "tunnel example", "a..com", "host:443"] {
+            let mut i = Vec::new();
+            check_endpoint(&mut i, "e", &ep(bad));
+            assert!(i.iter().any(|x| x.code == "bad_server"), "{bad}");
+        }
     }
 
     #[test]

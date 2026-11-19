@@ -77,10 +77,11 @@ fn endpoint_validation_ip_username_certificate() {
         codes(&validate(&with_endpoint(e)).1)
     };
     let p = "profiles[0].endpoint";
-    // сервер — только IP: имя не разрешается через DNS провайдера, имя для TLS — в sni
-    for s in ["vpn.example.com", "bad host", "", "10.0.0.1:443"] {
+    // сервер — IP или доменное имя (домен разрешает клиент TrustTunnel); адрес с портом и пробелы — ошибка
+    for s in ["bad host", "a..com", "", "10.0.0.1:443"] {
         assert_eq!(case(json!({ "server": s })), [format!("{p}.server:bad_server")], "{s:?}");
     }
+    assert!(case(json!({ "server": "vpn.example.com" })).is_empty());
     assert_eq!(case(json!({ "port": 0 })), [format!("{p}.port:bad_port")]);
     assert_eq!(case(json!({ "sni": "*.example.com" })), [format!("{p}.sni:bad_sni")]);
     // имя пользователя обязательно: 1–64 символа без «:», кавычек, «\» и управляющих

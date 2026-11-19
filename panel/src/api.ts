@@ -4,7 +4,7 @@
 export type ProfileKind = 'trusttunnel'
 
 export interface Endpoint {
-  /** IP-адрес сервера; доменное имя для TLS — в `sni`. */
+  /** IP-адрес или доменное имя сервера (домен разрешает клиент TrustTunnel на роутере). */
   server: string
   port: number
   /** Имя сервера в сертификате (TLS). Без него — адрес сервера. */

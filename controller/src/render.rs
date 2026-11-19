@@ -146,9 +146,13 @@ fn toml_str(v: &str) -> String {
 /// client.toml для trusttunnel_client 1.1.x. Маршруты (`included_routes`) пустые: выбор маршрута держит
 /// mi-tt-admin (метка и таблица 3100), клиент только создаёт TUN `mitt0` и передаёт в туннель то, что в него пришло.
 pub fn client_toml(e: &Endpoint, password: &str) -> String {
-    let ip: std::net::IpAddr = e.server.parse().expect("проверено");
-    let addr = if ip.is_ipv6() { format!("[{ip}]:{}", e.port) } else { format!("{ip}:{}", e.port) };
-    let host = e.sni.as_deref().map(|s| normalize_domain(s, 1).unwrap_or_else(|_| s.to_string())).unwrap_or_else(|| e.server.clone());
+    // домен в addresses клиент разрешает сам (проверено на trusttunnel_client 1.1.12)
+    let server = match e.server.parse::<std::net::IpAddr>() {
+        Ok(ip) => ip.to_string(),
+        Err(_) => normalize_domain(&e.server, 1).unwrap_or_else(|_| e.server.clone()),
+    };
+    let addr = if server.contains(':') { format!("[{server}]:{}", e.port) } else { format!("{server}:{}", e.port) };
+    let host = e.sni.as_deref().map(|s| normalize_domain(s, 1).unwrap_or_else(|_| s.to_string())).unwrap_or_else(|| server.clone());
     let cert = match &e.certificate {
         Some(c) => format!("certificate = '''\n{}\n'''", c.trim()),
         None => "certificate = \"\"".into(),
@@ -425,6 +429,15 @@ mod tests {
 
     fn ep() -> Endpoint {
         Endpoint { server: "203.0.113.10".into(), port: 443, sni: Some("vpn.example".into()), username: "user1".into(), quic: false, anti_dpi: true, certificate: None }
+    }
+
+    #[test]
+    fn client_toml_accepts_domain_server() {
+        let e = Endpoint { server: "Tunnel.Example.com".into(), sni: None, ..ep() };
+        let t = client_toml(&e, "p");
+        assert!(t.contains("hostname = \"tunnel.example.com\"\n") && t.contains("addresses = [\"tunnel.example.com:443\"]\n"), "{t}");
+        let v6 = client_toml(&Endpoint { server: "2001:db8::1".into(), ..ep() }, "p");
+        assert!(v6.contains("addresses = [\"[2001:db8::1]:443\"]\n"), "{v6}");
     }
 
     #[test]

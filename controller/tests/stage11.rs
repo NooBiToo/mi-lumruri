@@ -98,7 +98,7 @@ fn profiles_and_write_only_secrets() {
     let second = json!({ "id": "tt2", "name": "Второй", "kind": "trusttunnel", "endpoint": { "server": "10.0.0.1", "port": 443, "username": "u" } });
     let o = p.post("/profiles", json!({ "base_revision": p.rev(), "profile": second }));
     assert_eq!((o.status, o.body["issues"][0]["code"].as_str()), (422, Some("too_many_profiles")), "{}", o.body);
-    let bad = json!({ "id": "tt-lab", "name": "Bad", "kind": "trusttunnel", "endpoint": { "server": "vpn.example.com", "port": 443, "username": "u" } });
+    let bad = json!({ "id": "tt-lab", "name": "Bad", "kind": "trusttunnel", "endpoint": { "server": "vpn example", "port": 443, "username": "u" } });
     let o = p.post("/profiles", json!({ "base_revision": p.rev(), "profile": bad }));
     assert_eq!((o.status, o.body["issues"][0]["code"].as_str()), (422, Some("bad_server")), "{}", o.body);
     let hy = json!({ "id": "hy", "name": "Hysteria2", "kind": "hysteria2", "endpoint": { "server": "10.0.0.1", "port": 443 } });

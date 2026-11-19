@@ -297,7 +297,7 @@ fn render_refuses_when_rule_cannot_be_applied_exactly() {
 
 #[test]
 fn endpoint_validation() {
-    let bad = r#"{"version":1,"profiles":[{"id":"t","name":"T","kind":"trusttunnel","endpoint":{"server":"vpn.example.com","port":0,"sni":"*.x","username":"a:b","certificate":"zz"}}],
+    let bad = r#"{"version":1,"profiles":[{"id":"t","name":"T","kind":"trusttunnel","endpoint":{"server":"vpn example","port":0,"sni":"*.x","username":"a:b","certificate":"zz"}}],
                   "networks":[{"id":"h","name":"H","ssid":"H","subnet":"10.0.0.1/24"}],"default_action":{"type":"direct"}}"#;
     let (code, v) = run(&["validate", &tmp("bad-endpoint.json", bad)]);
     assert_eq!(code, 1);
