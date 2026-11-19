@@ -68,6 +68,13 @@ check("готовые списки: svc-*.list из снимка релиза р
       "svc-youtube.list" in cl and "svc-meta-ip.list" in cl and pl[-1:] == ["200"] and len(lj.get("catalog", {}).get("services", [])) >= 20
       and ls_.get("ok") is False and "нет связи" in " ".join(ls_.get("errors", [])),
       [cl[:4], pl[-1:], len(lj.get("catalog", {}).get("services", [])), ls_])
+rj = text("panel-router.out").splitlines()
+try:
+    rl = json.loads(chr(10).join(rj[:-1])).get("lan", {})
+except ValueError:
+    rl = {}
+check("/router через nginx: LAN лаборатории — мост br-lan, 10.10.1.0/24, адрес 10.10.1.1 (из uci-файла роутера)",
+      rj[-1:] == ["200"] and rl == {"bridge": "br-lan", "subnet": "10.10.1.0/24", "address": "10.10.1.1"}, [rj[-1:], rl])
 check("после входа /config — 200", text("panel-config-auth.code").strip() == "200", text("panel-config-auth.code"))
 h = text("panel-headers.txt")
 check("заголовки защиты от nginx: HSTS, X-Frame-Options DENY, CSP frame-ancestors 'none'", "Strict-Transport-Security" in h and "X-Frame-Options: DENY" in h and "frame-ancestors 'none'" in h, h[:200])

@@ -148,6 +148,10 @@ pub fn handle_with(method: &str, path: &str, body: Option<&[u8]>, config_path: &
                 }
             }
         }
+        ("POST", "/config") => match access {
+            WriteAccess::Denied(r) => r,
+            WriteAccess::Local | WriteAccess::Allowed => crate::manage::replace_config(body, config_path),
+        },
         ("POST", "/rules") => match access {
             WriteAccess::Denied(r) => r,
             WriteAccess::Local | WriteAccess::Allowed => save(body, config_path),

@@ -186,6 +186,7 @@ cu -w '\n%{http_code}' https://10.10.1.1:8443/cgi-bin/api/config | tail -1 >"$OU
 grep -c "__Host-mitt_sess" "$CJ" >"$OUT/panel-cookie.count"
 # готовые списки: категории svc-* разложены из снимка релиза до первого рендера; каталог — через API панели
 cu -w '\n%{http_code}' https://10.10.1.1:8443/cgi-bin/api/lists >"$OUT/panel-lists.out"
+cu -w '\n%{http_code}' https://10.10.1.1:8443/cgi-bin/api/router >"$OUT/panel-router.out"
 ls "$E/categories" >"$OUT/categories.ls" 2>&1
 nsx tv curl -sk -m 10 -D - -o /dev/null https://10.10.1.1:8443/ | tr -d '\r' >"$OUT/panel-headers.txt"
 

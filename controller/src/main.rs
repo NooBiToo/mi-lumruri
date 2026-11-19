@@ -344,7 +344,7 @@ fn cgi_request() -> gate::Reply {
         let Ok(len) = len.parse::<usize>() else {
             return Response::error(400, "bad_length", "некорректный Content-Length").into();
         };
-        let max = if mi_tt::manage::is_list_upload(&path) { mi_tt::manage::MAX_LIST_BODY } else { MAX_BODY_BYTES };
+        let max = if mi_tt::manage::is_list_upload(&path) { mi_tt::manage::MAX_LIST_BODY } else if path.trim_end_matches('/') == "/config" { MAX_CONFIG_BYTES as usize } else { MAX_BODY_BYTES };
         if len > max {
             return Response::error(413, "too_large", format!("тело запроса больше {max} байт")).into();
         }

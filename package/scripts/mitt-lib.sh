@@ -137,7 +137,7 @@ start_panel() {
 #!/bin/sh
 export MI_TT_CONFIG='$ETC/config.json' MI_TT_AUTH_DIR='$ETC/auth' MI_TT_SESSION_DIR='$RUN/sessions' MI_TT_RUN_DIR='$STATE'
 export MI_TT_SECRETS='$ETC/secrets.json' MI_TT_LEASES='$LEASES' MI_TT_ALLOWED_ORIGINS='$(panel_origins)' MI_TT_TRUST_PROXY=1
-export MI_TT_LISTS_DIR='$REL/payload/lists'
+export MI_TT_LISTS_DIR='$REL/payload/lists' MI_TT_UCI_NETWORK='$R/etc/config/network'
 exec '$BIN/mi-tt-ctl' cgi
 EOF
   # uhttpd исполняет CGI только при бите x для прочих (S_IXOTH); секретов в обёртке нет

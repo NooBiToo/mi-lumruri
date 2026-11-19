@@ -21,7 +21,7 @@ pub const MAX_LIST_BODY: usize = 8 * 1024 * 1024;
 
 pub const PATHS: &[&str] = &["/rules/delete", "/rules/move", "/profiles", "/profiles/delete", "/groups", "/groups/delete", "/categories",
     "/categories/delete", "/networks", "/networks/delete", "/devices", "/devices/delete", "/leases", "/dns", "/zapret", "/adblock/list",
-    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update"];
+    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update", "/router"];
 
 pub fn is_manage_path(path: &str) -> bool {
     PATHS.contains(&path.trim_end_matches('/'))
@@ -246,6 +246,96 @@ pub fn category_list(config_path: &str, id: &str, text: &str) -> Response {
     }
 }
 
+/// Заявка на применение: CGI без привилегий только пишет запрос; применяет служба mi-tt-admin (root) по текущей ревизии настроек.
+fn queue_apply(config_path: &str) -> Result<Option<String>, String> {
+    let rev = read_limited(config_path, MAX_CONFIG_BYTES).ok().map(|b| store::revision(&b));
+    let d = run_dir();
+    let req = json!({ "requested_unix": crate::auth::now(), "config_revision": rev });
+    std::fs::create_dir_all(&d).map_err(|e| e.to_string()).and_then(|_| store::write_atomic(&d.join("apply.request"), req.to_string().as_bytes()))?;
+    Ok(rev)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Replace {
+    base_revision: String,
+    config: Config,
+}
+
+/// `POST /config`: замена настроек целиком (полная проверка, атомарная запись) и сразу заявка на применение.
+pub fn replace_config(body: Option<&[u8]>, config_path: &str) -> Response {
+    let q = match parse_json::<Replace>(body.unwrap_or_default(), "") {
+        Ok(q) => q,
+        Err(i) => return bad(i),
+    };
+    let r = saved(update_config(Path::new(config_path), &q.base_revision, MAX_CONFIG_BYTES, |c| {
+        *c = q.config;
+        Ok("replace")
+    }), "config");
+    if r.status != 200 {
+        return r;
+    }
+    match queue_apply(config_path) {
+        Ok(_) => Response { status: 200, body: { let mut b = r.body; b["queued"] = json!(true); b } },
+        Err(m) => Response::error(500, "write_failed", format!("настройки сохранены, но заявка на применение не записана: {m}")),
+    }
+}
+
+fn uci_network_path() -> PathBuf {
+    std::env::var("MI_TT_UCI_NETWORK").ok().filter(|s| !s.is_empty()).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/etc/config/network"))
+}
+
+fn uci_value(s: &str) -> String {
+    s.trim().trim_matches(|c| c == '\'' || c == '"').trim().to_string()
+}
+
+/// Параметры секции `config interface 'lan'` из файла uci: (ipaddr, netmask, device|ifname, type).
+fn parse_uci_lan(text: &str) -> Option<BTreeMap<String, String>> {
+    let mut in_lan = false;
+    let mut found = false;
+    let mut m = BTreeMap::new();
+    for line in text.lines() {
+        let t = line.split('#').next().unwrap_or("").trim();
+        let mut w = t.splitn(3, char::is_whitespace);
+        match (w.next(), w.next(), w.next()) {
+            (Some("config"), Some(kind), name) => {
+                in_lan = kind == "interface" && name.map(uci_value).as_deref() == Some("lan");
+                found |= in_lan;
+            }
+            (Some("option"), Some(k), Some(v)) if in_lan => {
+                m.entry(k.to_string()).or_insert_with(|| uci_value(v));
+            }
+            _ => {}
+        }
+    }
+    found.then_some(m)
+}
+
+fn router_lan() -> Response {
+    let unavailable = |m: String| Response::error(503, "router_network_unavailable", m);
+    let path = uci_network_path();
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) => return unavailable(format!("не удалось прочитать сетевые настройки роутера ({}): {e}", path.display())),
+    };
+    let Some(o) = parse_uci_lan(&text) else {
+        return unavailable("в сетевых настройках роутера нет интерфейса lan".into());
+    };
+    let (Some(ip), Some(mask)) = (o.get("ipaddr"), o.get("netmask")) else {
+        return unavailable("у интерфейса lan не заданы адрес и маска сети".into());
+    };
+    let (Ok(ip), Ok(mask)) = (ip.parse::<std::net::Ipv4Addr>(), mask.parse::<std::net::Ipv4Addr>()) else {
+        return unavailable("адрес или маска интерфейса lan записаны в неизвестном виде".into());
+    };
+    let m = u32::from(mask);
+    if m.count_ones() != m.leading_ones() {
+        return unavailable("маска интерфейса lan не является маской подсети".into());
+    }
+    let net = std::net::Ipv4Addr::from(u32::from(ip) & m);
+    let bridge = o.get("device").or_else(|| o.get("ifname")).filter(|d| d.starts_with("br-")).cloned().unwrap_or_else(|| "br-lan".into());
+    Response { status: 200, body: json!({ "ok": true, "lan": { "bridge": bridge, "subnet": format!("{net}/{}", m.count_ones()), "address": ip.to_string() }, "issues": [] }) }
+}
+
 /// Маршруты управления. `None` — адрес не относится к управлению.
 pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) -> Option<Response> {
     let p = Path::new(config_path);
@@ -397,16 +487,10 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
             }
             Err(i) => bad(i),
         },
-        ("POST", "/apply-request") => {
-            // CGI без привилегий: только запрос; применяет служба mi-tt-admin (root) по текущей ревизии настроек
-            let rev = read_limited(config_path, MAX_CONFIG_BYTES).ok().map(|b| store::revision(&b));
-            let d = run_dir();
-            let req = json!({ "requested_unix": crate::auth::now(), "config_revision": rev });
-            match std::fs::create_dir_all(&d).map_err(|e| e.to_string()).and_then(|_| store::write_atomic(&d.join("apply.request"), req.to_string().as_bytes())) {
-                Ok(()) => Response { status: 202, body: json!({ "ok": true, "queued": true, "config_revision": rev, "issues": [] }) },
-                Err(m) => Response::error(500, "write_failed", m),
-            }
-        }
+        ("POST", "/apply-request") => match queue_apply(config_path) {
+            Ok(rev) => Response { status: 202, body: json!({ "ok": true, "queued": true, "config_revision": rev, "issues": [] }) },
+            Err(m) => Response::error(500, "write_failed", m),
+        },
         ("GET", "/zapret/test") => {
             // файл состояния пишет сценарий подбора (mitt-zapret-test.sh); до первого подбора — idle
             let st = std::fs::read(run_dir().join("zapret-test.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).unwrap_or(json!({ "state": "idle" }));
@@ -445,6 +529,7 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
                 Err(m) => Response::error(500, "write_failed", m),
             }
         }
+        ("GET", "/router") => router_lan(),
         ("GET", "/status") => {
             let st = std::fs::read(run_dir().join("status.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
             let pending = run_dir().join("apply.request").exists();
