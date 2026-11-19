@@ -1,0 +1,147 @@
+{
+  "source": "itdoginfo/allow-domains",
+  "commit": "932e11c43a9e000a24ba08129c15d99287c6e9a9",
+  "date": "2026-11-09",
+  "services": [
+    {
+      "id": "youtube",
+      "name": "YouTube",
+      "group": "Сервисы",
+      "domains": "Services/youtube.lst",
+      "ipv4": null
+    },
+    {
+      "id": "meta",
+      "name": "Instagram и Facebook",
+      "group": "Сервисы",
+      "domains": "Services/meta.lst",
+      "ipv4": "Subnets/IPv4/meta.lst"
+    },
+    {
+      "id": "discord",
+      "name": "Discord",
+      "group": "Сервисы",
+      "domains": "Services/discord.lst",
+      "ipv4": "Subnets/IPv4/discord.lst"
+    },
+    {
+      "id": "telegram",
+      "name": "Telegram",
+      "group": "Сервисы",
+      "domains": "Services/telegram.lst",
+      "ipv4": "Subnets/IPv4/telegram.lst"
+    },
+    {
+      "id": "google_ai",
+      "name": "ChatGPT и Google AI",
+      "group": "Сервисы",
+      "domains": "Services/google_ai.lst",
+      "ipv4": null
+    },
+    {
+      "id": "tiktok",
+      "name": "TikTok",
+      "group": "Сервисы",
+      "domains": "Services/tiktok.lst",
+      "ipv4": null
+    },
+    {
+      "id": "twitter",
+      "name": "X (Twitter)",
+      "group": "Сервисы",
+      "domains": "Services/twitter.lst",
+      "ipv4": "Subnets/IPv4/twitter.lst"
+    },
+    {
+      "id": "google_play",
+      "name": "Google Play",
+      "group": "Сервисы",
+      "domains": "Services/google_play.lst",
+      "ipv4": null
+    },
+    {
+      "id": "google_meet",
+      "name": "Google Meet",
+      "group": "Сервисы",
+      "domains": "Services/google_meet.lst",
+      "ipv4": "Subnets/IPv4/google_meet.lst"
+    },
+    {
+      "id": "roblox",
+      "name": "Roblox",
+      "group": "Сервисы",
+      "domains": "Services/roblox.lst",
+      "ipv4": "Subnets/IPv4/roblox.lst"
+    },
+    {
+      "id": "hdrezka",
+      "name": "HDRezka",
+      "group": "Сервисы",
+      "domains": "Services/hdrezka.lst",
+      "ipv4": null
+    },
+    {
+      "id": "cloudflare",
+      "name": "Cloudflare",
+      "group": "Сервисы",
+      "domains": "Services/cloudflare.lst",
+      "ipv4": "Subnets/IPv4/cloudflare.lst"
+    },
+    {
+      "id": "cloudfront",
+      "name": "Amazon CloudFront",
+      "group": "Сервисы",
+      "domains": "Services/cloudfront.lst",
+      "ipv4": "Subnets/IPv4/cloudfront.lst"
+    },
+    {
+      "id": "digitalocean",
+      "name": "DigitalOcean",
+      "group": "Сервисы",
+      "domains": "Services/digitalocean.lst",
+      "ipv4": "Subnets/IPv4/digitalocean.lst"
+    },
+    {
+      "id": "hetzner",
+      "name": "Hetzner",
+      "group": "Сервисы",
+      "domains": "Services/hetzner.lst",
+      "ipv4": "Subnets/IPv4/hetzner.lst"
+    },
+    {
+      "id": "ovh",
+      "name": "OVH",
+      "group": "Сервисы",
+      "domains": "Services/ovh.lst",
+      "ipv4": "Subnets/IPv4/ovh.lst"
+    },
+    {
+      "id": "anime",
+      "name": "Аниме",
+      "group": "Категории",
+      "domains": "Categories/anime.lst",
+      "ipv4": null
+    },
+    {
+      "id": "news",
+      "name": "Новости",
+      "group": "Категории",
+      "domains": "Categories/news.lst",
+      "ipv4": null
+    },
+    {
+      "id": "geoblock",
+      "name": "Геоблок",
+      "group": "Категории",
+      "domains": "Categories/geoblock.lst",
+      "ipv4": null
+    },
+    {
+      "id": "hodca",
+      "name": "Ходячие",
+      "group": "Категории",
+      "domains": "Categories/hodca.lst",
+      "ipv4": null
+    }
+  ]
+}

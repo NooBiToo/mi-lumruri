@@ -37,7 +37,7 @@ if (!existsSync(join(ZAP, 'binaries', 'linux-arm64', 'nfqws2'))) throw new Error
 
 // --- раскладка ---
 rmSync(PKG, { recursive: true, force: true })
-for (const d of ['payload/bin', 'payload/engines', 'payload/www', 'payload/scripts', 'payload/defaults']) mkdirSync(join(PKG, d), { recursive: true })
+for (const d of ['payload/bin', 'payload/engines', 'payload/www', 'payload/scripts', 'payload/defaults', 'payload/lists']) mkdirSync(join(PKG, d), { recursive: true })
 const files = []
 function xz(src, rel, unpacked) {
   const dst = join(PKG, rel)
@@ -70,6 +70,13 @@ for (const f of readdirSync(WWW)) {
   } else xz(join(WWW, f), `payload/www/${f}.xz`, `www/${f}`)
 }
 for (const s of readdirSync(join(ROOT, 'package', 'scripts'))) plain(join(ROOT, 'package', 'scripts', s), `payload/scripts/${s}`)
+// Снимок списков сайтов itdoginfo (tools/fetch-lists.sh): payload/lists/<тот же путь, что в package/lists>
+const LISTS = join(ROOT, 'package', 'lists')
+const walk = (d, rel = '') => readdirSync(join(d, rel), { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1)).flatMap((e) => (e.isDirectory() ? walk(d, `${rel}${e.name}/`) : [`${rel}${e.name}`]))
+for (const f of walk(LISTS)) {
+  mkdirSync(dirname(join(PKG, 'payload', 'lists', f)), { recursive: true })
+  plain(join(LISTS, f), `payload/lists/${f}`)
+}
 plain(join(ROOT, 'package', 'defaults', 'config.json'), 'payload/defaults/config.json')
 copyFileSync(join(ROOT, 'package', 'install.sh'), join(PKG, 'install.sh'))
 copyFileSync(join(ROOT, 'NOTICE'), join(PKG, 'NOTICE'))

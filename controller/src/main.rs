@@ -17,6 +17,7 @@ const USAGE: &str = "mi-tt-ctl — чтение, проверка и предп�
   mi-tt-ctl render <config.json> <secrets.json> <out-dir>   # client.toml TrustTunnel, policy.json, dnsmasq, nfqws2.args
   mi-tt-ctl adblock-update <config.json> <list>      # проверить и атомарно заменить adblock.list рядом с настройками
   mi-tt-ctl category-update <config.json> <id> <list> # проверить и атомарно заменить categories/<id>.list
+  mi-tt-ctl category-check <domain|ip> <list>        # проверить файл списка по виду, ничего не записывая
   mi-tt-ctl zapret-list <general|youtube>            # кандидаты подбора стратегии Zapret (без auto), по строке
   mi-tt-ctl zapret-args <strategy-id>                # аргументы nfqws2 для проверки одной стратегии на очереди 201
   mi-tt-ctl zapret-set <config.json> <general|youtube> <id>   # атомарно сменить выбор стратегии Zapret
@@ -47,6 +48,7 @@ fn main() -> ExitCode {
         ["render", cfg, secrets, out] => cli(render_cmd(cfg, secrets, out)),
         ["adblock-update", cfg, list] => cli(adblock_update(cfg, list)),
         ["category-update", cfg, id, list] => cli(category_update(cfg, id, list)),
+        ["category-check", kind, list] => cli(category_check(kind, list)),
         ["zapret-list", kind] => match zapret_kind(kind) {
             Some(k) => lines(zapret::candidates(k).into_iter().map(str::to_string)),
             None => usage(),
@@ -229,6 +231,24 @@ fn write_dns_file(config: &model::Config, plan: &mi_tt::dns::DnsPlan, cfg: &std:
         return Ok(());
     }
     store::write_atomic(&conf, text.as_bytes())
+}
+
+/// Проверка файла списка без записи: непустой список в формате `parse_category_list` (HTML и прочий мусор не проходит).
+fn category_check(kind: &str, list: &str) -> Response {
+    use serde_json::json;
+    let kind = match kind {
+        "domain" => model::CategoryKind::Domain,
+        "ip" => model::CategoryKind::Ip,
+        _ => return Response::error(400, "bad_kind", "вид списка: domain или ip"),
+    };
+    let text = match read_limited(list, 8 * 1024 * 1024) {
+        Ok(t) => t,
+        Err(m) => return Response::error(500, "unreadable", m),
+    };
+    match render::parse_category_list(kind, &String::from_utf8_lossy(&text)) {
+        Ok(e) => Response { status: 200, body: json!({ "ok": true, "entries": e.len(), "issues": [] }) },
+        Err(i) => Response { status: 422, body: json!({ "ok": false, "error": { "code": "category_invalid", "message": "список не прошёл проверку" }, "issues": i }) },
+    }
 }
 
 /// Обновление списка категории: проверка по виду категории (домены или IP-префиксы), атомарная замена

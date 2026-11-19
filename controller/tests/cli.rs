@@ -312,3 +312,17 @@ fn zapret_list_and_test_args() {
     assert_eq!(lines(&["zapret-args", "auto"]).0, 1, "круговой режим проверкой не подбирается");
     assert_eq!(lines(&["zapret-args", "nope"]).0, 1);
 }
+
+#[test]
+fn category_check_validates_lists() {
+    let dom = tmp("cc-domains.lst", "youtube.com\n# комментарий\nytimg.com\n");
+    let (code, v) = run(&["category-check", "domain", &dom]);
+    assert_eq!((code, v["ok"].as_bool(), v["entries"].as_u64()), (0, Some(true), Some(2)));
+    let html = tmp("cc-page.lst", "<!DOCTYPE html>\n<html><body>Not Found</body></html>\n");
+    let (code, v) = run(&["category-check", "domain", &html]);
+    assert_eq!((code, v["ok"].as_bool()), (1, Some(false)));
+    let ip = tmp("cc-ip.lst", "10.0.0.0/8\n192.0.2.0/24\n");
+    assert_eq!(run(&["category-check", "ip", &ip]).0, 0);
+    assert_eq!(run(&["category-check", "ip", &dom]).0, 1);
+    assert_eq!(run(&["category-check", "bogus", &dom]).0, 1);
+}
