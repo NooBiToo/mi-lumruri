@@ -10,8 +10,7 @@
         "server": "10.30.0.2",
         "port": 443,
         "sni": "vpn.lab.test",
-        "username": "tv-user",
-        "cert_sha256": "EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE:EE"
+        "username": "tv-user"
       }
     }
   ],

@@ -52,7 +52,7 @@ done
 
 # --- модули (файл и загружен ли) ---
 MD="/lib/modules/$rel"
-for m in tun sch_ingress cls_flower cls_matchall act_skbedit ip_tables iptable_filter iptable_mangle ipt_REJECT \
+for m in tun ip_set ip_set_hash_ip ip_set_hash_net xt_set sch_ingress cls_flower cls_matchall act_skbedit ip_tables iptable_filter iptable_mangle ipt_REJECT \
          ip6_tables ip6table_filter ip6table_mangle ip6t_REJECT xt_mac xt_comment xt_mark xt_physdev br_netfilter; do
   f=no; [ -f "$MD/$m.ko" ] && f=yes
   l=no; [ -d "/sys/module/$m" ] && l=yes
@@ -60,12 +60,15 @@ for m in tun sch_ingress cls_flower cls_matchall act_skbedit ip_tables iptable_f
 done
 
 # --- утилиты ---
-for t in ip tc iptables ip6tables iptables-save ip6tables-save brctl zcat flock unxz xzcat sha256sum md5sum; do
+for t in ip tc iptables ip6tables iptables-save ip6tables-save ipset dnsmasq brctl zcat flock unxz xzcat sha256sum md5sum; do
   if has "$t"; then kv "tool.$t" "$(command -v "$t")"; else kv "tool.$t" missing; fi
 done
 has ip && kv tool.ip.version "$(ip -V 2>&1 | first)"
 has tc && kv tool.tc.version "$(tc -V 2>&1 | first)"
 has iptables && kv tool.iptables.version "$(iptables -V 2>&1 | first)"
+has ipset && kv tool.ipset.version "$(ipset -v 2>&1 | first)"
+# dnsmasq с ipset: адреса доменов правил попадают в наборы ipset (выборочная маршрутизация)
+has dnsmasq && { dnsmasq --version 2>&1 | grep -q " ipset" && kv tool.dnsmasq.ipset yes || kv tool.dnsmasq.ipset no; }
 if [ "$HELP" = 1 ]; then
   for t in iptables ip6tables; do
     has "$t" || continue

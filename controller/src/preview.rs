@@ -417,13 +417,9 @@ pub fn preview(cfg: &Config, req: &PreviewRequest) -> Result<Preview, Vec<Issue>
     }
     if let Action::Profile { id } = &draft.action {
         if let Some(p) = idx.profiles.get(id.as_str()) {
-            if !crate::render::renderable(p.kind) || p.endpoint.is_none() {
+            if p.endpoint.is_none() {
                 findings.push(Finding { severity: "warning", code: "profile_not_ready",
-                    message: if p.endpoint.is_none() {
-                        format!("у профиля «{}» не задана точка подключения: правило сохранится, но применить его нельзя", p.name)
-                    } else {
-                        format!("{} пока не формируется для Mihomo: правило сохранится, но применить его нельзя", p.kind.label())
-                    } });
+                    message: format!("у профиля «{}» не задана точка подключения: правило сохранится, но применить его нельзя", p.name) });
             }
             findings.push(match p.on_failure {
                 FailurePolicy::Block => Finding { severity: "info", code: "fail_closed",

@@ -1,32 +1,94 @@
 {
   "version": 1,
   "profiles": [
-    { "id": "tt-home", "name": "TrustTunnel дом", "kind": "trusttunnel", "on_failure": "block" },
-    { "id": "vless-main", "name": "VLESS основной", "kind": "vless" }
+    {
+      "id": "tt-home",
+      "name": "TrustTunnel дом",
+      "kind": "trusttunnel",
+      "on_failure": "block"
+    }
   ],
   "networks": [
-    { "id": "home", "name": "Домашняя", "ssid": "Home" },
-    { "id": "guest", "name": "Гостевая", "ssid": "Home-Guest" }
+    {
+      "id": "home",
+      "name": "Домашняя",
+      "ssid": "Home"
+    },
+    {
+      "id": "guest",
+      "name": "Гостевая",
+      "ssid": "Home-Guest"
+    }
   ],
   "devices": [
-    { "id": "tv", "name": "Телевизор", "mac": "A4-77-33-10-20-30", "network": "home" },
-    { "id": "phone", "name": "Телефон", "mac": "3c:22:fb:01:02:03", "network": "home" }
+    {
+      "id": "tv",
+      "name": "Телевизор",
+      "mac": "A4-77-33-10-20-30",
+      "network": "home"
+    },
+    {
+      "id": "phone",
+      "name": "Телефон",
+      "mac": "3c:22:fb:01:02:03",
+      "network": "home"
+    }
   ],
   "groups": [
     {
       "id": "video",
       "name": "Видео",
       "destinations": [
-        { "type": "domain_suffix", "value": "youtube.com" },
-        { "type": "domain_suffix", "value": "googlevideo.com" },
-        { "type": "domain_suffix", "value": "ytimg.com" },
-        { "type": "cidr", "value": "203.0.113.0/24" }
+        {
+          "type": "domain_suffix",
+          "value": "youtube.com"
+        },
+        {
+          "type": "domain_suffix",
+          "value": "googlevideo.com"
+        },
+        {
+          "type": "domain_suffix",
+          "value": "ytimg.com"
+        },
+        {
+          "type": "cidr",
+          "value": "203.0.113.0/24"
+        }
       ]
     }
   ],
   "rules": [
-    { "id": "r-home-video", "source": { "type": "network", "id": "home" }, "destination": { "type": "group", "id": "video" }, "action": { "type": "profile", "id": "vless-main" } },
-    { "id": "r-guest-direct", "source": { "type": "network", "id": "guest" }, "destination": { "type": "group", "id": "video" }, "action": { "type": "direct" } }
+    {
+      "id": "r-home-video",
+      "source": {
+        "type": "network",
+        "id": "home"
+      },
+      "destination": {
+        "type": "group",
+        "id": "video"
+      },
+      "action": {
+        "type": "direct_zapret"
+      }
+    },
+    {
+      "id": "r-guest-direct",
+      "source": {
+        "type": "network",
+        "id": "guest"
+      },
+      "destination": {
+        "type": "group",
+        "id": "video"
+      },
+      "action": {
+        "type": "direct"
+      }
+    }
   ],
-  "default_action": { "type": "direct" }
+  "default_action": {
+    "type": "direct"
+  }
 }

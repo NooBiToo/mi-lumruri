@@ -14,7 +14,7 @@ const USAGE: &str = "mi-tt-ctl — чтение, проверка и предп�
   mi-tt-ctl validate <config.json>
   mi-tt-ctl preview <config.json> <request.json>
   mi-tt-ctl save <config.json> <request.json>        # {\"base_revision\", \"rule\"}: атомарно, с блокировкой
-  mi-tt-ctl render <config.json> <secrets.json> <dhcp.leases> <out-dir>   # config.yaml для Mihomo, routes.json, DNS-файлы
+  mi-tt-ctl render <config.json> <secrets.json> <out-dir>   # client.toml TrustTunnel, policy.json, dnsmasq, nfqws2.args
   mi-tt-ctl adblock-update <config.json> <list>      # проверить и атомарно заменить adblock.list рядом с настройками
   mi-tt-ctl category-update <config.json> <id> <list> # проверить и атомарно заменить categories/<id>.list
   mi-tt-ctl cgi            # CGI для uhttpd (HTTPS): вход паролем и TOTP, затем /config, /preview, /rules
@@ -40,7 +40,7 @@ fn main() -> ExitCode {
             Ok(body) => cli(handle("POST", "/rules", Some(&body), cfg)),
             Err(m) => cli(Response::error(500, "request_unreadable", m)),
         },
-        ["render", cfg, secrets, leases, out] => cli(render_cmd(cfg, secrets, leases, out)),
+        ["render", cfg, secrets, out] => cli(render_cmd(cfg, secrets, out)),
         ["adblock-update", cfg, list] => cli(adblock_update(cfg, list)),
         ["category-update", cfg, id, list] => cli(category_update(cfg, id, list)),
         ["cgi"] => cgi(),
@@ -62,12 +62,12 @@ fn cli(r: Response) -> ExitCode {
     }
 }
 
-fn render_cmd(cfg: &str, secrets: &str, leases: &str, out: &str) -> Response {
+fn render_cmd(cfg: &str, secrets: &str, out: &str) -> Response {
     use serde_json::json;
     let read = |p: &str, max: u64| read_limited(p, max).map_err(|m| Response::error(500, "unreadable", m));
-    let (c, s, l) = match (read(cfg, MAX_CONFIG_BYTES), read(secrets, 64 * 1024), read(leases, MAX_CONFIG_BYTES)) {
-        (Ok(c), Ok(s), Ok(l)) => (c, s, l),
-        (Err(r), _, _) | (_, Err(r), _) | (_, _, Err(r)) => return r,
+    let (c, s) = match (read(cfg, MAX_CONFIG_BYTES), read(secrets, 64 * 1024)) {
+        (Ok(c), Ok(s)) => (c, s),
+        (Err(r), _) | (_, Err(r)) => return r,
     };
     let config: model::Config = match api::parse_json(&c, "config") {
         Ok(v) => v,
@@ -85,51 +85,62 @@ fn render_cmd(cfg: &str, secrets: &str, leases: &str, out: &str) -> Response {
             warnings.push(format!("{secrets} доступен не только владельцу (режим {:o})", m.permissions().mode() & 0o777));
         }
     }
-    let leases = render::parse_leases(&String::from_utf8_lossy(&l));
-    match render::render(&config, &sec, &leases) {
+    let cfg_path = std::path::Path::new(cfg);
+    let lists = match render::load_lists(&config, cfg_path) {
+        Ok(l) => l,
+        Err(m) => return Response { status: 422, body: json!({ "ok": false, "error": { "code": "list_invalid", "message": m }, "issues": [] }) },
+    };
+    match render::render(&config, &sec, &lists) {
         Err(i) => Response { status: 422, body: json!({ "ok": false, "error": { "code": "not_renderable", "message": "действующую конфигурацию нельзя сформировать точно; ничего не записано" }, "issues": i }) },
         Ok(r) => {
             let dir = std::path::Path::new(out);
-            let yaml = serde_json::to_vec_pretty(&r.mihomo).unwrap_or_default();
+            let policy = serde_json::to_vec_pretty(&r.policy).unwrap_or_default();
             let routes = serde_json::to_vec_pretty(&r.routes).unwrap_or_default();
-            if let Err(m) = std::fs::create_dir_all(dir).map_err(|e| format!("не удалось создать каталог {}: {e}", dir.display()))
-                .and_then(|_| store::write_atomic(&dir.join("config.yaml"), &yaml))
-                .and_then(|_| store::write_atomic(&dir.join("routes.json"), &routes))
-                .and_then(|_| write_dns_files(&config, std::path::Path::new(cfg), dir))
-                .and_then(|_| write_category_lists(&config, &r.categories, std::path::Path::new(cfg), dir))
-                .and_then(|_| {
-                    // аргументы nfqws2 для службы Zapret (по одному на строку); без Zapret файла нет
-                    let f = dir.join("nfqws2.args");
-                    if r.nfqws2_args.is_empty() {
+            let opt = |name: &str, body: Option<String>, private: bool| -> Result<(), String> {
+                let f = dir.join(name);
+                match body {
+                    None => {
                         let _ = std::fs::remove_file(&f);
                         Ok(())
-                    } else {
-                        store::write_atomic(&f, format!("{}\n", r.nfqws2_args.join("\n")).as_bytes())
                     }
-                })
+                    Some(b) => {
+                        store::write_atomic(&f, b.as_bytes())?;
+                        #[cfg(unix)]
+                        if private {
+                            use std::os::unix::fs::PermissionsExt;
+                            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o600)).map_err(|e| format!("{}: {e}", f.display()))?;
+                        }
+                        let _ = private;
+                        Ok(())
+                    }
+                }
+            };
+            if let Err(m) = std::fs::create_dir_all(dir)
+                .map_err(|e| format!("не удалось создать каталог {}: {e}", dir.display()))
+                .and_then(|_| store::write_atomic(&dir.join("policy.json"), &policy))
+                .and_then(|_| store::write_atomic(&dir.join("routes.json"), &routes))
+                .and_then(|_| opt("client.toml", r.client_toml.clone(), true))
+                .and_then(|_| write_dns_file(&config, &r.dns, cfg_path, dir))
+                .and_then(|_| opt("nfqws2.args", (!r.nfqws2_args.is_empty()).then(|| format!("{}\n", r.nfqws2_args.join("\n"))), false))
             {
                 return Response::error(500, "write_failed", m);
             }
             warnings.extend(r.warnings.iter().cloned());
-            Response { status: 200, body: json!({ "ok": true, "source_revision": store::revision(&c), "mihomo_sha256": store::revision(&yaml),
-                "rules": r.rules, "capture": r.capture,
-                "plan": r.plan.iter().map(|e| e.label()).collect::<Vec<_>>(), "routes": r.routes, "nfqws2_args": r.nfqws2_args, "warnings": warnings, "issues": [] }) }
+            Response { status: 200, body: json!({ "ok": true, "source_revision": store::revision(&c), "tunnel": r.client_toml.is_some(),
+                "policy": r.policy, "plan": r.plan.iter().map(|e| e.label()).collect::<Vec<_>>(), "routes": r.routes,
+                "nfqws2_args": r.nfqws2_args, "warnings": warnings, "issues": [] }) }
         }
     }
 }
 
-/// DNS-файлы службы: conf для dnsmasq (с блокировкой рекламы из `adblock.list` рядом с настройками) и dnscrypt-proxy.toml
-/// для ODoH. Без раздела dns — файлов нет. Ошибочный список рекламы — отказ (действующие файлы не меняются).
-fn write_dns_files(config: &model::Config, cfg: &std::path::Path, dir: &std::path::Path) -> Result<(), String> {
+/// Файл dnsmasq: наборы ipset доменов правил, резолвер туннеля и блокировка рекламы (`adblock.list` рядом с настройками).
+/// Пустой — файла нет. Ошибочный список рекламы — отказ (действующие файлы не меняются).
+fn write_dns_file(config: &model::Config, plan: &mi_tt::dns::DnsPlan, cfg: &std::path::Path, dir: &std::path::Path) -> Result<(), String> {
     use mi_tt::dns;
-    let (conf, toml) = (dir.join("dnsmasq-mitt.conf"), dir.join("dnscrypt-proxy.toml"));
-    let Some(d) = &config.dns else {
-        let _ = std::fs::remove_file(&conf);
-        let _ = std::fs::remove_file(&toml);
-        return Ok(());
-    };
+    let conf = dir.join("dnsmasq-mitt.conf");
+    let adblock = config.dns.as_ref().and_then(|d| d.adblock.as_ref());
     let mut blocked = Vec::new();
-    if d.adblock.as_ref().is_some_and(|a| a.enabled) {
+    if adblock.is_some_and(|a| a.enabled) {
         let list = cfg.with_file_name("adblock.list");
         if list.exists() {
             let text = read_limited(&list.to_string_lossy(), dns::ADBLOCK_MAX_BYTES as u64)?;
@@ -137,34 +148,12 @@ fn write_dns_files(config: &model::Config, cfg: &std::path::Path, dir: &std::pat
                 .map_err(|i| format!("adblock.list не прошёл проверку: {}", i.iter().map(|x| format!("{} {}", x.path, x.message)).collect::<Vec<_>>().join("; ")))?;
         }
     }
-    store::write_atomic(&conf, dns::dnsmasq_conf(d, &blocked).as_bytes())?;
-    match dns::dnscrypt_toml(d) {
-        Some(t) => store::write_atomic(&toml, t.as_bytes()),
-        None => {
-            let _ = std::fs::remove_file(&toml);
-            Ok(())
-        }
-    }
-}
-
-/// Списки категорий для Mihomo (rules/<id>.txt) из categories/<id>.list рядом с настройками. Нет или ошибочный список
-/// категории, на которую ссылаются правила, — отказ: правило не применяется молча без своих назначений.
-fn write_category_lists(config: &model::Config, used: &[String], cfg: &std::path::Path, dir: &std::path::Path) -> Result<(), String> {
-    let rules = dir.join("rules");
-    let _ = std::fs::remove_dir_all(&rules);
-    if used.is_empty() {
+    let text = dns::dnsmasq_conf(plan, adblock, &blocked);
+    if text.is_empty() {
+        let _ = std::fs::remove_file(&conf);
         return Ok(());
     }
-    std::fs::create_dir_all(&rules).map_err(|e| e.to_string())?;
-    for id in used {
-        let c = config.categories.iter().find(|c| &c.id == id).ok_or(format!("категория {id} не найдена"))?;
-        let src = cfg.with_file_name("categories").join(format!("{id}.list"));
-        let text = read_limited(&src.to_string_lossy(), 8 * 1024 * 1024).map_err(|e| format!("список категории «{id}»: {e}"))?;
-        let entries = render::parse_category_list(c.kind, &String::from_utf8_lossy(&text))
-            .map_err(|i| format!("список категории «{id}» не прошёл проверку: {}", i.iter().map(|x| format!("{} {}", x.path, x.message)).collect::<Vec<_>>().join("; ")))?;
-        store::write_atomic(&rules.join(format!("{id}.txt")), format!("{}\n", entries.join("\n")).as_bytes())?;
-    }
-    Ok(())
+    store::write_atomic(&conf, text.as_bytes())
 }
 
 /// Обновление списка категории: проверка по виду категории (домены или IP-префиксы), атомарная замена

@@ -34,6 +34,8 @@ data-encoding = "2"
 subtle = { version = "2", default-features = false }
 # Подпись релиза (Ed25519): mi-tt-admin release verify проверяет пакет обновления закреплённым ключом
 ed25519-compact = { version = "2", default-features = false }
+# QR-код otpauth для приложения-аутентификатора в терминале (auth init/reset-totp); без image/svg
+qrcode = { version = "0.14", default-features = false }
 
 [profile.release]
 opt-level = "z"

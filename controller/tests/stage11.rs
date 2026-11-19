@@ -86,30 +86,47 @@ fn rules_delete_and_reorder_with_revision_check() {
 #[test]
 fn profiles_and_write_only_secrets() {
     let p = Panel::new("mgmt-profiles");
-    let hy = json!({ "id": "hy", "name": "Hysteria2", "kind": "hysteria2", "endpoint": { "server": "hy.example.com", "port": 443 } });
-    assert_eq!(p.post("/profiles", json!({ "base_revision": p.rev(), "profile": hy })).status, 200);
-    // невалидный профиль не записывается
-    let bad = json!({ "id": "hy2", "name": "Bad", "kind": "hysteria2", "endpoint": { "server": "10.0.0.1", "port": 443 } });
+    // единственный профиль TrustTunnel заменяется по id
+    let tt = json!({ "id": "tt-lab", "name": "TrustTunnel", "kind": "trusttunnel", "on_failure": "direct",
+        "endpoint": { "server": "10.30.0.3", "port": 8443, "sni": "vpn2.lab.test", "username": "tv-user", "quic": true } });
+    let o = p.post("/profiles", json!({ "base_revision": p.rev(), "profile": tt }));
+    assert_eq!((o.status, o.body["mode"].as_str()), (200, Some("replace")), "{}", o.body);
+    assert_eq!(p.config()["profiles"].as_array().unwrap().len(), 1);
+    assert_eq!(p.config()["profiles"][0]["endpoint"]["quic"], true);
+    // второй профиль не поддерживается; невалидный профиль не записывается
+    let before = std::fs::read(p.dir.join("config.json")).unwrap();
+    let second = json!({ "id": "tt2", "name": "Второй", "kind": "trusttunnel", "endpoint": { "server": "10.0.0.1", "port": 443, "username": "u" } });
+    let o = p.post("/profiles", json!({ "base_revision": p.rev(), "profile": second }));
+    assert_eq!((o.status, o.body["issues"][0]["code"].as_str()), (422, Some("too_many_profiles")), "{}", o.body);
+    let bad = json!({ "id": "tt-lab", "name": "Bad", "kind": "trusttunnel", "endpoint": { "server": "vpn.example.com", "port": 443, "username": "u" } });
     let o = p.post("/profiles", json!({ "base_revision": p.rev(), "profile": bad }));
-    assert_eq!((o.status, o.body["issues"][0]["code"].as_str()), (422, Some("tls_unverifiable")));
+    assert_eq!((o.status, o.body["issues"][0]["code"].as_str()), (422, Some("bad_server")), "{}", o.body);
+    let hy = json!({ "id": "hy", "name": "Hysteria2", "kind": "hysteria2", "endpoint": { "server": "10.0.0.1", "port": 443 } });
+    assert_eq!(p.post("/profiles", json!({ "base_revision": p.rev(), "profile": hy })).status, 400, "удалённые виды профилей схема не принимает");
+    assert_eq!(std::fs::read(p.dir.join("config.json")).unwrap(), before);
     // секрет: только запись; GET отдаёт признак наличия, но не значение
+    let o = p.get("/secrets");
+    assert_eq!(o.body["profiles"]["tt-lab"].as_bool(), Some(false));
     let pw = format!("s-{}", rand_hex(16));
-    let o = p.post("/secrets", json!({ "profile_id": "hy", "secret": { "password": pw } }));
+    let o = p.post("/secrets", json!({ "profile_id": "tt-lab", "secret": { "password": pw } }));
     assert_eq!(o.status, 200, "{}", o.body);
     assert!(!o.body.to_string().contains(&pw));
     let o = p.get("/secrets");
-    assert_eq!((o.body["profiles"]["hy"].as_bool(), o.body["profiles"]["tt-lab"].as_bool()), (Some(true), Some(false)));
+    assert_eq!(o.body["profiles"]["tt-lab"].as_bool(), Some(true));
     assert!(!o.body.to_string().contains(&pw));
+    assert!(!p.get("/config").body.to_string().contains(&pw), "пароль не попадает в настройки");
     assert!(std::fs::read_to_string(p.dir.join("secrets.json")).unwrap().contains(&pw));
-    // секрет не того вида — отказ; неизвестный профиль — 404
-    assert_eq!(p.post("/secrets", json!({ "profile_id": "hy", "secret": { "uuid": format!("{}-0000-4000-a000-000000000000", rand_hex(8)) } })).code(), "bad_secret");
+    // пустой пароль — отказ; секреты прежних видов профилей схема не принимает; неизвестный профиль — 404
+    assert_eq!(p.post("/secrets", json!({ "profile_id": "tt-lab", "secret": { "password": "" } })).code(), "bad_secret");
+    assert_eq!(p.post("/secrets", json!({ "profile_id": "tt-lab", "secret": { "uuid": format!("{}-0000-4000-a000-000000000000", rand_hex(8)) } })).status, 400);
     assert_eq!(p.post("/secrets", json!({ "profile_id": "nope", "secret": { "password": rand_hex(16) } })).status, 404);
+    assert!(std::fs::read_to_string(p.dir.join("secrets.json")).unwrap().contains(&pw), "отклонённые запросы не стирают секрет");
     // профиль, на который ссылается правило, удалить нельзя
-    let r = rule("r-hy", json!({ "type": "group", "id": "video" }), json!({ "type": "profile", "id": "hy" }));
+    let r = rule("r-tt", json!({ "type": "group", "id": "video" }), json!({ "type": "profile", "id": "tt-lab" }));
     assert_eq!(p.a.api(&p.s, "POST", "/rules", Some(json!({ "base_revision": p.rev(), "rule": r }).to_string().as_bytes()), p.t).status, 200);
-    let o = p.post("/profiles/delete", json!({ "base_revision": p.rev(), "id": "hy" }));
+    let o = p.post("/profiles/delete", json!({ "base_revision": p.rev(), "id": "tt-lab" }));
     assert_eq!((o.status, o.body["issues"][0]["code"].as_str()), (422, Some("unknown_profile")));
-    assert!(p.config()["profiles"].as_array().unwrap().iter().any(|x| x["id"] == "hy"));
+    assert!(p.config()["profiles"].as_array().unwrap().iter().any(|x| x["id"] == "tt-lab"));
 }
 
 #[test]
@@ -131,28 +148,45 @@ fn categories_lists_dns_adblock_zapret_and_apply_request() {
     // категорию, на которую ссылается правило, удалить нельзя
     assert_eq!(p.post("/categories/delete", json!({ "base_revision": p.rev(), "id": "ru-ip" })).body["issues"][0]["code"], "unknown_category");
     // DNS и реклама
-    let dns = json!({ "transport": "doh", "servers": [{ "host": "dns.example", "ip": "9.9.9.9" }], "adblock": { "enabled": true, "exceptions": ["ok.ads.example"] } });
+    let dns = json!({ "tunnel_resolver": "9.9.9.9", "adblock": { "enabled": true, "exceptions": ["ok.ads.example"] } });
     assert_eq!(p.post("/dns", json!({ "base_revision": p.rev(), "dns": dns })).status, 200);
-    assert_eq!(p.post("/adblock/list", json!({ "list": "ads.example\n0.0.0.0 tracker.example\n" })).body["domains"], 2);
+    let o = p.post("/dns", json!({ "base_revision": p.rev(), "dns": { "transport": "doh" } }));
+    assert_eq!(o.status, 400, "прежние поля DNS не принимаются: {}", o.body);
+    assert_eq!(p.post("/adblock/list", json!({ "list": "ads.example
+0.0.0.0 tracker.example
+" })).body["domains"], 2);
     assert_eq!(p.post("/adblock/list", json!({ "list": "" })).code(), "adblock_empty");
     assert_eq!(p.post("/zapret", json!({ "base_revision": p.rev(), "zapret": { "strategy": "multidisorder", "pos": 3 } })).status, 200);
-    // рендер (как служба): RULE-SET категорий, списки rules/<id>.txt, DNS-файлы
-    std::fs::write(p.dir.join("secrets.json"), r#"{"version":1,"profiles":{"tt-lab":{"password":"x"}}}"#).unwrap();
-    std::fs::write(p.dir.join("leases"), "1999999999 02:00:00:00:0a:02 10.10.1.2 tv *\n").unwrap();
+    // рендер (как служба): наборы ipset категорий, домены категорий — в dnsmasq, IP-префиксы — в статический набор
+    let pw = format!("s-{}", rand_hex(16));
+    std::fs::write(p.dir.join("secrets.json"), json!({ "version": 1, "profiles": { "tt-lab": { "password": pw } } }).to_string()).unwrap();
     let out = p.dir.join("out");
     let o = Command::new(ctl())
-        .args(["render", p.dir.join("config.json").to_str().unwrap(), p.dir.join("secrets.json").to_str().unwrap(), p.dir.join("leases").to_str().unwrap(), out.to_str().unwrap()])
+        .args(["render", p.dir.join("config.json").to_str().unwrap(), p.dir.join("secrets.json").to_str().unwrap(), out.to_str().unwrap()])
         .output()
         .unwrap();
     let v: Value = serde_json::from_slice(&o.stdout).unwrap();
     assert_eq!(o.status.code(), Some(0), "{v}");
-    let mh: Value = serde_json::from_slice(&std::fs::read(out.join("config.yaml")).unwrap()).unwrap();
-    assert_eq!(mh["rule-providers"]["cat-video-geo"], json!({ "type": "file", "behavior": "domain", "format": "text", "path": "./rules/video-geo.txt" }));
-    assert_eq!(mh["rule-providers"]["cat-ru-ip"]["behavior"], "ipcidr");
-    assert!(mh["rules"].as_array().unwrap().iter().any(|r| r.as_str().unwrap().contains("RULE-SET,cat-video-geo")));
-    assert_eq!(std::fs::read_to_string(out.join("rules/video-geo.txt")).unwrap(), "+.googlevideo.com\n+.youtube.com\n");
-    assert_eq!(std::fs::read_to_string(out.join("rules/ru-ip.txt")).unwrap(), "2001:db8::/32\n203.0.113.0/24\n");
-    assert!(std::fs::read_to_string(out.join("dnsmasq-mitt.conf")).unwrap().contains("address=/tracker.example/"));
+    let rules = v["policy"]["rules"].as_array().unwrap();
+    let set_of = |from: &str| rules.iter().find(|r| r["from"] == from).unwrap_or_else(|| panic!("нет {from}: {v}"))["set"].as_str().unwrap().to_string();
+    let (cat_set, ip_set) = (set_of("r-cat"), set_of("r-ip"));
+    let kind = |name: &str| v["policy"]["sets"].as_array().unwrap().iter().find(|s| s["name"] == name).unwrap()["kind"].as_str().unwrap().to_string();
+    assert_eq!((kind(&cat_set).as_str(), kind(&ip_set).as_str()), ("dns", "static"));
+    let conf = std::fs::read_to_string(out.join("dnsmasq-mitt.conf")).unwrap();
+    for want in [format!("ipset=/googlevideo.com/{cat_set}
+"), format!("ipset=/youtube.com/{cat_set}
+"), "server=/youtube.com/9.9.9.9
+".into(),
+        "address=/tracker.example/
+".into(), "server=/ok.ads.example/#
+".into()] {
+        assert!(conf.contains(&want), "нет {want:?}: {conf}");
+    }
+    assert_eq!(v["policy"]["dns_resolver"], "9.9.9.9");
+    // IPv6-префикс категории не используется — об этом есть предупреждение
+    assert!(v["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("IPv6-префиксы")), "{v}");
+    assert!(!v.to_string().contains(&pw));
+    assert!(!out.join("rules").exists() && !out.join("config.yaml").exists(), "файлов Mihomo нет");
     // заявка на применение — служба применит; статус читается
     let o = p.a.cgi("POST", "/apply-request", Some(b"{}"), p.t + 2, &[("HTTP_ORIGIN", ORIGIN), ("HTTP_COOKIE", &p.s.cookie), ("HTTP_X_MITT_CSRF", &p.s.csrf),
         ("MI_TT_RUN_DIR", p.dir.join("run").to_str().unwrap())]);

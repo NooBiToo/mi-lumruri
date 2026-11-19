@@ -31,5 +31,5 @@ if [ ! -f "$T/qemu/root/usr/bin/qemu-aarch64" ]; then
   else echo "qemu-aarch64 недоступен: шаг ARM64-запуска будет пропущен"; fi
 fi
 
-# сетевые движки для лаборатории (x86_64): Mihomo v1.19.34 и trusttunnel_endpoint v1.1.0, кэш в .tools/lab
+# сервер TrustTunnel для лабораторий (x86_64): trusttunnel_endpoint v1.1.0, кэш в .tools/lab
 "$ROOT/tools/lab/fetch.sh"

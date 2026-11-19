@@ -127,6 +127,18 @@ pub struct AuthState {
     pub sessions_epoch: u64,
 }
 
+impl AuthState {
+    /// TOTP не включён (пустой секрет): вход в панель только паролем.
+    pub fn totp_off(&self) -> bool {
+        self.totp_secret_b32.is_empty()
+    }
+
+    /// Вход в панель открыт: только паролем или с подтверждённым TOTP. Новый секрет до `confirm` вход закрывает.
+    pub fn login_ready(&self) -> bool {
+        self.totp_off() || self.totp_enrolled
+    }
+}
+
 pub fn load_state(p: &Paths) -> Result<Option<AuthState>, String> {
     let f = p.state();
     if !f.exists() {

@@ -1,32 +1,63 @@
 import { describe, expect, it } from 'vitest'
-import { deviceFromLease, emptyNetworkForm, emptyProfileForm, formToNetwork, formToProfile, formToSecret, networkToForm, parseAwg, profileToForm } from './manage'
+import { deviceFromLease, dnsDefault, dnsToForm, emptyNetworkForm, emptyProfileForm, formToDns, formToNetwork, formToProfile, formToSecret, networkToForm, profileToForm } from './manage'
 import { defaultForm, toRequest } from './draft'
 import type { Config } from './api'
 
-describe('управление профилями', () => {
-  it('Hysteria2 с obfs: профиль и два секрета', () => {
-    const f = { ...emptyProfileForm('hysteria2'), id: 'hy', name: 'HY', server: 'hy.example.com', sni: 'hy.example.com', obfs: true, secret1: 'p', secret2: 'o' }
-    expect(formToProfile(f)).toEqual({ id: 'hy', name: 'HY', kind: 'hysteria2', on_failure: 'block', endpoint: { server: 'hy.example.com', port: 443, sni: 'hy.example.com', obfs: 'salamander' } })
-    expect(formToSecret(f)).toEqual({ password: 'p', obfs_password: 'o' })
+const PEM = '-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUQ\n-----END CERTIFICATE-----'
+
+describe('профиль TrustTunnel', () => {
+  it('минимальная форма: HTTP/2, без SNI и сертификата', () => {
+    const f = { ...emptyProfileForm(), id: 'tt', name: 'TT', server: ' 203.0.113.10 ', username: ' alice ' }
+    expect(formToProfile(f)).toEqual({
+      id: 'tt', name: 'TT', kind: 'trusttunnel', on_failure: 'block',
+      endpoint: { server: '203.0.113.10', port: 443, username: 'alice', quic: false, anti_dpi: false },
+    })
   })
-  it('VLESS REALITY и TLS', () => {
-    const r = { ...emptyProfileForm('vless'), id: 'v', name: 'V', server: 'v.example', sni: 'www.example.org', security: 'reality' as const, realityKey: 'K', realityShortId: 'ab' }
-    expect(formToProfile(r)).toMatchObject({ endpoint: { security: 'reality', flow: 'xtls-rprx-vision', reality: { public_key: 'K', short_id: 'ab' } } })
-    const id = crypto.randomUUID()
-    expect(formToSecret({ ...r, secret1: id })).toEqual({ uuid: id })
-  })
-  it('AmneziaWG: параметры строкой и обратно', () => {
-    const f = { ...emptyProfileForm('wireguard'), id: 'a', name: 'A', server: 'wg.example', publicKey: 'PK', address: '10.66.66.2/32', awg: true }
-    const p = formToProfile(f)
-    expect(typeof p).toBe('object')
-    if (typeof p === 'object') {
-      expect(p.endpoint?.awg).toEqual({ jc: 4, jmin: 40, jmax: 70, s1: 37, s2: 61, h1: 1361409513, h2: 2016328541, h3: 726101713, h4: 1919296617 })
-      expect(profileToForm(p).awgText).toContain('h4=1919296617')
+  it('туда и обратно: SNI, HTTP/3, anti-DPI, сертификат PEM, обход при отказе', () => {
+    const f = {
+      ...emptyProfileForm(), id: 'tt', name: 'TT', server: '203.0.113.10', port: '8443', sni: 'vpn.example.com', username: 'alice',
+      quic: true, antiDpi: true, certificate: `\r\n${PEM.replace(/\n/g, '\r\n')}\r\n\r\n`, onFailure: 'direct' as const,
     }
-    expect(parseAwg('jc=4 bad=1')).toMatch(/неверный/)
-    expect(parseAwg('jc=4')).toMatch(/не хватает/)
-    expect(formToSecret({ ...f, secret1: '' })).toBeNull()
+    const p = formToProfile(f)
+    expect(p).toEqual({
+      id: 'tt', name: 'TT', kind: 'trusttunnel', on_failure: 'direct',
+      endpoint: { server: '203.0.113.10', port: 8443, sni: 'vpn.example.com', username: 'alice', quic: true, anti_dpi: true, certificate: `${PEM}\n` },
+    })
+    if (typeof p !== 'object') throw new Error(p)
+    const back = profileToForm(p)
+    expect(back).toEqual({ ...f, certificate: `${PEM}\n`, password: '' })
+    // повторное сохранение без изменений даёт тот же профиль
+    expect(formToProfile(back)).toEqual(p)
   })
+  it('профиль без точки подключения открывается пустой формой', () => {
+    expect(profileToForm({ id: 'tt', name: 'TT', kind: 'trusttunnel', on_failure: 'block' })).toEqual({ ...emptyProfileForm(), id: 'tt', name: 'TT' })
+  })
+  it('неверный порт — ошибка формы, запрос не отправляется', () => {
+    for (const port of ['', '0', '65536', '44.3', 'abc']) expect(typeof formToProfile({ ...emptyProfileForm(), port })).toBe('string')
+  })
+  it('секрет — только пароль; пустое поле — пароль не меняется', () => {
+    expect(formToSecret({ ...emptyProfileForm(), password: ' p@ss ' })).toEqual({ password: ' p@ss ' }) // secret-scan: allow значение формы в тесте
+    expect(formToSecret(emptyProfileForm())).toBeNull()
+  })
+})
+
+describe('DNS', () => {
+  it('по умолчанию — резолвер 1.1.1.1 без блокировки рекламы; сохраняется как null', () => {
+    expect(dnsDefault()).toEqual({ resolver: '1.1.1.1', adblock: false, exceptions: '' })
+    expect(dnsToForm(undefined)).toEqual(dnsDefault())
+    expect(formToDns(dnsDefault())).toBeNull()
+    expect(formToDns({ ...dnsDefault(), resolver: '  ' })).toBeNull()
+  })
+  it('свой резолвер и блокировка рекламы с исключениями, туда и обратно', () => {
+    const d = formToDns({ resolver: ' 9.9.9.9 ', adblock: true, exceptions: 'ads.example.com\n\n  cdn.example.org ' })
+    expect(d).toEqual({ tunnel_resolver: '9.9.9.9', adblock: { enabled: true, exceptions: ['ads.example.com', 'cdn.example.org'] } })
+    expect(dnsToForm(d ?? undefined)).toEqual({ resolver: '9.9.9.9', adblock: true, exceptions: 'ads.example.com\ncdn.example.org' })
+    expect(formToDns({ ...dnsDefault(), adblock: true })).toEqual({ adblock: { enabled: true } })
+    expect(dnsToForm({ adblock: { enabled: false } })).toEqual(dnsDefault())
+  })
+})
+
+describe('правила', () => {
   it('правило с назначением-категорией', () => {
     const cfg: Config = { version: 1, profiles: [], networks: [{ id: 'home', name: 'H', ssid: 'H' }], devices: [{ id: 'tv', name: 'TV', mac: 'a4:77:33:10:20:30', network: 'home' }],
       groups: [], categories: [{ id: 'geo', name: 'Geo', kind: 'domain' }], rules: [], default_action: { type: 'direct' } }

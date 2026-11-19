@@ -1,13 +1,23 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { api, onAuthLost, setCsrf, type ApiResult, type ConfigResponse, type PreviewResponse, type SaveResponse, type SessionResponse } from './api'
+import Button from 'primevue/button'
+import ConfirmDialog from 'primevue/confirmdialog'
+import Message from 'primevue/message'
+import Select from 'primevue/select'
+import Skeleton from 'primevue/skeleton'
+import Toast from 'primevue/toast'
+import { useToast } from 'primevue/usetoast'
+import { api, manage, onAuthLost, setCsrf, type ApiResult, type ConfigResponse, type ManageResponse, type PreviewResponse, type SaveResponse, type SessionResponse } from './api'
 import type { LoginStage } from './auth'
 import LoginView from './LoginView.vue'
 import ManageView from './ManageView.vue'
 import type { Config } from './api'
 import { defaultForm, fieldForIssue, ruleKey, saveOutcome, toRequest, type DraftForm, type Field, type SaveOutcome } from './draft'
+import { tunnelState } from './route'
 import RuleForm from './RuleForm.vue'
 import PreviewView from './PreviewView.vue'
+
+const toast = useToast()
 
 const cfg = ref<ApiResult<ConfigResponse> | null>(null)
 const form = ref<DraftForm | null>(null)
@@ -23,10 +33,31 @@ const auth = ref<'checking' | 'login' | 'ready' | 'error'>('checking')
 const authError = ref<string | null>(null)
 const loginStage = ref<LoginStage>('password')
 const clockTrusted = ref(true)
+const totpOn = ref(true)
 const lost = ref(false)
+/** Последний ответ /status: из него строится полоса состояния туннеля. */
+const svc = ref<ManageResponse | null>(null)
 type Tab = 'edit' | 'rules' | 'devices' | 'profiles' | 'categories' | 'dns' | 'status'
 const tab = ref<Tab>('edit')
 const TABS: [Tab, string][] = [['edit', 'Новое правило'], ['rules', 'Правила'], ['devices', 'Устройства и сети'], ['profiles', 'Профили'], ['categories', 'Категории'], ['dns', 'DNS, реклама, Zapret'], ['status', 'Состояние']]
+
+const config = computed<Config | null>(() => cfg.value?.body.config ?? null)
+
+/** Число в навигации справа от раздела: сколько правил, устройств, категорий. */
+function navCount(t: Tab): number | null {
+  const c = config.value
+  if (!c) return null
+  if (t === 'rules') return c.rules.length
+  if (t === 'devices') return c.devices.length
+  if (t === 'categories') return c.categories?.length ?? 0
+  return null
+}
+const navOptions = computed(() => TABS.map(([value, label]) => {
+  const n = navCount(value)
+  return { value, label: n === null ? label : `${label} (${n})` }
+}))
+
+const tunnel = computed(() => tunnelState(svc.value, config.value))
 
 function onChanged(c: Config, revision: string) {
   if (cfg.value) cfg.value = { status: 200, body: { ...cfg.value.body, ok: true, config: c, revision, issues: [] } }
@@ -39,6 +70,7 @@ function resetData() {
   saveRes.value = null
   outcome.value = null
   checkedKey.value = null
+  svc.value = null
 }
 
 async function checkSession() {
@@ -46,10 +78,11 @@ async function checkSession() {
   const r = await api.session()
   if (r.status === 200 && r.body.authenticated) {
     setCsrf(r.body.csrf ?? null)
+    totpOn.value = r.body.totp !== false
     auth.value = 'ready'
     await load()
   } else if (r.status === 200) {
-    loginStage.value = r.body.stage ?? 'password'
+    loginStage.value = r.body.stage === 'second_factor' ? 'second_factor' : 'password'
     clockTrusted.value = r.body.clock_trusted !== false
     auth.value = 'login'
   } else {
@@ -58,8 +91,9 @@ async function checkSession() {
   }
 }
 
-async function onLoggedIn(_s: SessionResponse) {
+async function onLoggedIn(s: SessionResponse) {
   lost.value = false
+  totpOn.value = s.totp !== false
   auth.value = 'ready'
   await load()
 }
@@ -80,6 +114,11 @@ onAuthLost(() => {
   auth.value = 'login'
 })
 
+async function loadStatus() {
+  const r = await manage.status()
+  svc.value = r.body
+}
+
 async function load(keepForm = false) {
   cfg.value = await api.config()
   const c = cfg.value.body.config
@@ -88,6 +127,7 @@ async function load(keepForm = false) {
   checkedKey.value = null
   saveRes.value = null
   outcome.value = null
+  if (cfg.value.body.ok) void loadStatus()
 }
 
 async function check() {
@@ -119,9 +159,9 @@ async function save() {
     if (outcome.value.kind === 'saved' && b.config && b.revision) {
       cfg.value = { status: 200, body: { ...cfg.value.body, ok: true, config: b.config, revision: b.revision, issues: [] } }
       checkedKey.value = null
-    } else if (outcome.value.kind === 'conflict') {
-      checkedKey.value = null
+      toast.add({ severity: 'success', summary: 'Правило сохранено', detail: `${outcome.value.message} Чтобы оно заработало, примените настройки в разделе «Состояние».`, life: 6000 })
     }
+    if (outcome.value.kind === 'conflict') checkedKey.value = null
   } finally {
     saving.value = false
   }
@@ -139,80 +179,136 @@ const errors = computed(() => {
   return out
 })
 
-function count(n: number, one: string, few: string, many: string): string {
-  const m10 = n % 10
-  const m100 = n % 100
-  const w = m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many
-  return `${n} ${w}`
+const saveHint = computed(() => {
+  if (outcome.value?.kind === 'saved') return outcome.value.message
+  if (outcome.value) return 'Правило не сохранено.'
+  if (!result.value) return 'Сначала проверьте правило: сохранить можно только проверенное.'
+  if (checkedKey.value === null) return 'Правило не прошло проверку — исправьте его и проверьте снова.'
+  if (form.value && checkedKey.value !== ruleKey(form.value)) return 'Правило изменилось после проверки — проверьте его ещё раз.'
+  return 'Проверка пройдена, правило можно сохранить.'
+})
+
+function go(t: Tab) {
+  tab.value = t
+  if (t === 'status') void loadStatus()
 }
 
 onMounted(() => checkSession())
 </script>
 
 <template>
-  <div class="app">
-    <header class="app__head">
-      <div>
-        <h1>Правило устройства или сети</h1>
-        <p class="app__sub">mi-trusttunnel · BE7000 · сценарий TrustTunnel</p>
-      </div>
-      <div class="app__actions">
-        <span class="app__mode" title="Вход: пароль и второй фактор (TOTP или recovery-код)">HTTPS · вход с TOTP</span>
-        <button v-if="auth === 'ready'" type="button" class="app__logout" @click="logout">Выйти</button>
-      </div>
-    </header>
+  <Toast position="bottom-right" />
+  <ConfirmDialog />
 
-    <section v-if="auth === 'checking'" class="app__status">Проверяю вход…</section>
-    <section v-else-if="auth === 'error'" class="app__status app__status--bad" role="alert">
-      <strong>Панель недоступна.</strong> {{ authError }}
-      <button type="button" @click="checkSession()">Повторить</button>
-    </section>
-    <template v-else-if="auth === 'login'">
-      <p v-if="lost" class="app__status app__status--bad" role="alert">Сессия завершилась. Войдите снова.</p>
+  <!-- вход и сбои до входа: узкая колонка по центру -->
+  <div v-if="auth !== 'ready'" class="gate">
+    <div class="gate__brand">
+      <span class="gate__name">mi-trusttunnel</span>
+      <span class="gate__sub">Вход в панель роутера</span>
+    </div>
+    <div v-if="auth === 'checking'" class="gate__card" aria-busy="true">
+      <span class="sr-only">Проверяю вход</span>
+      <Skeleton height="1rem" width="40%" />
+      <Skeleton height="2.5rem" class="gate__skel" />
+      <Skeleton height="2.5rem" />
+    </div>
+    <div v-else-if="auth === 'error'" class="gate__card">
+      <Message severity="error" :closable="false">
+        <strong>Панель недоступна.</strong> {{ authError }}. Проверьте, что служба роутера запущена, и повторите.
+      </Message>
+      <Button label="Повторить" class="gate__retry" @click="checkSession()" />
+    </div>
+    <template v-else>
+      <Message v-if="lost" severity="warn" :closable="false" class="gate__lost">Сессия завершилась. Войдите снова.</Message>
       <LoginView :initial-stage="loginStage" :clock-trusted="clockTrusted" @done="onLoggedIn" />
     </template>
-    <section v-else-if="!cfg" class="app__status">Читаю настройки…</section>
-    <section v-else-if="!cfg.body.ok || !cfg.body.config" class="app__status app__status--bad" role="alert">
-      <strong>Настройки не загружены.</strong>
-      <span v-if="cfg.body.error"> {{ cfg.body.error.message }}</span>
-      <ul>
-        <li v-for="i in cfg.body.issues" :key="i.path + i.code"><code>{{ i.path }}</code> {{ i.message }}</li>
-      </ul>
-      <button type="button" @click="load()">Повторить</button>
-    </section>
-    <section v-else class="app__status">
-      Настройки v{{ cfg.body.config.version }}: {{ count(cfg.body.config.profiles.length, 'VPN-профиль', 'VPN-профиля', 'VPN-профилей') }},
-      {{ count(cfg.body.config.networks.length, 'сеть', 'сети', 'сетей') }}, {{ count(cfg.body.config.devices.length, 'устройство', 'устройства', 'устройств') }},
-      {{ count(cfg.body.config.groups.length, 'группа', 'группы', 'групп') }}, {{ count(cfg.body.config.rules.length, 'правило', 'правила', 'правил') }}.
-      <span v-if="cfg.body.revision" class="app__rev">Ревизия {{ cfg.body.revision.slice(0, 12) }}</span>
-      <span v-if="cfg.body.config.rules.length" class="app__rules">
-        Сохранены: <code v-for="r in cfg.body.config.rules" :key="r.id">{{ r.id }}</code>
-      </span>
-    </section>
+  </div>
 
-    <nav v-if="auth === 'ready' && cfg?.body.config" class="tabs" aria-label="Разделы">
-      <button v-for="[id, label] in TABS" :key="id" type="button" :class="['tabs__btn', { 'tabs__btn--on': tab === id }]" :aria-current="tab === id ? 'page' : undefined" @click="tab = id">{{ label }}</button>
-    </nav>
-    <ManageView v-if="auth === 'ready' && cfg?.body.config && cfg.body.revision && tab !== 'edit'" :key="tab" :tab="tab" :config="cfg.body.config"
-      :revision="cfg.body.revision" @changed="onChanged" @reload="load(true)" />
-    <main v-if="auth === 'ready' && tab === 'edit' && form && cfg?.body.config" class="app__grid">
-      <RuleForm v-model="form" :config="cfg.body.config" :errors="errors" :busy="busy" @submit="check" />
-      <div class="app__right">
-        <PreviewView :result="result" :stale="stale" />
-        <div class="save">
-          <button type="button" class="save__btn" :disabled="!canSave" @click="save">
-            {{ saving ? 'Сохраняю…' : 'Сохранить правило' }}
-          </button>
-          <span v-if="!outcome" class="save__hint">Сохранить можно только правило, прошедшее проверку и не изменённое после неё.</span>
-          <span v-else :class="`save__msg save__msg--${outcome.kind}`" role="status">{{ outcome.message }}</span>
-          <button v-if="outcome?.kind === 'conflict'" type="button" class="save__reload" @click="load(true)">Обновить настройки</button>
-        </div>
+  <div v-else class="shell">
+    <aside class="rail">
+      <div class="rail__in">
+      <div class="rail__brand">
+        <span class="rail__name">mi-trusttunnel</span>
+        <span class="rail__sub">Xiaomi BE7000</span>
       </div>
-    </main>
+      <nav v-if="config" class="rail__nav" aria-label="Разделы">
+        <button v-for="[id, label] in TABS" :key="id" type="button" :class="['rail__item', { 'rail__item--on': tab === id }]"
+          :aria-current="tab === id ? 'page' : undefined" @click="go(id)">
+          <span>{{ label }}</span>
+          <span v-if="navCount(id) !== null" class="rail__count">{{ navCount(id) }}</span>
+        </button>
+      </nav>
+      <p class="rail__mode" :title="totpOn ? 'Вход: пароль и второй фактор (TOTP или recovery-код)' : 'Вход только паролем. TOTP включается на роутере: mitt-boot.sh auth reset-totp, затем auth confirm'">
+        {{ totpOn ? 'Вход с паролем и TOTP' : 'Вход только по паролю' }}
+      </p>
+      </div>
+    </aside>
 
-    <footer class="app__foot">
-      Чтение, проверка и сохранение доступны только после входа паролем и вторым фактором; изменения принимаются только
-      со страницы панели (Origin и CSRF-токен). Применяет настройки служба роутера (mi-tt-admin) по заявке из раздела «Состояние»; секреты профилей панель только записывает.
-    </footer>
+    <div class="main">
+      <header class="strip">
+        <div :class="['strip__state', `strip__state--${tunnel.tone}`]" role="status" aria-live="polite">
+          <span class="strip__dot" aria-hidden="true" />
+          <span class="strip__title">{{ tunnel.title }}</span>
+          <span v-if="tunnel.detail" class="strip__detail">{{ tunnel.detail }}</span>
+        </div>
+        <div class="strip__side">
+          <span v-if="cfg?.body.revision" class="strip__rev" title="Ревизия сохранённых настроек">Ревизия <span class="num">{{ cfg.body.revision.slice(0, 12) }}</span></span>
+          <Button label="Выйти" severity="secondary" variant="text" size="small" @click="logout" />
+        </div>
+      </header>
+
+      <div v-if="config" class="mnav">
+        <label for="mnav-select" class="sr-only">Раздел</label>
+        <Select input-id="mnav-select" :model-value="tab" :options="navOptions" option-label="label" option-value="value" fluid
+          @update:model-value="(v: Tab) => go(v)" />
+      </div>
+
+      <main class="content">
+        <div v-if="!cfg" class="loading" aria-busy="true">
+          <span class="sr-only">Читаю настройки</span>
+          <Skeleton height="1.75rem" width="14rem" />
+          <Skeleton height="4rem" />
+          <Skeleton height="4rem" />
+        </div>
+        <section v-else-if="!cfg.body.ok || !cfg.body.config" class="sect">
+          <Message severity="error" :closable="false">
+            <strong>Настройки не загружены.</strong>
+            <span v-if="cfg.body.error"> {{ cfg.body.error.message }}.</span>
+            <ul v-if="cfg.body.issues.length" class="issues">
+              <li v-for="i in cfg.body.issues" :key="i.path + i.code"><code>{{ i.path }}</code> {{ i.message }}</li>
+            </ul>
+          </Message>
+          <Button label="Загрузить снова" class="mt" @click="load()" />
+        </section>
+
+        <ManageView v-else-if="cfg.body.revision && tab !== 'edit'" :key="tab" :tab="tab" :config="cfg.body.config"
+          :revision="cfg.body.revision" :status="svc" @changed="onChanged" @reload="load(true)" @status="(s) => (svc = s)"
+          @navigate="go" />
+
+        <section v-else-if="tab === 'edit' && form" class="sect" aria-labelledby="edit-title">
+          <h1 id="edit-title" class="sect__title">Новое правило</h1>
+          <p class="sect__lead">Выберите, чей трафик и куда он идёт, и решите, что с ним делать. Перед сохранением панель покажет, как изменится маршрут.</p>
+          <div class="editor">
+            <RuleForm v-model="form" :config="cfg.body.config" :errors="errors" :busy="busy" @submit="check" @navigate="go" />
+            <div class="editor__side">
+              <PreviewView :result="result" :stale="stale" />
+              <div class="save">
+                <Button :label="saving ? 'Сохраняю…' : 'Сохранить правило'" :loading="saving" :disabled="!canSave" @click="save" />
+                <p class="save__hint" aria-live="polite">{{ saveHint }}</p>
+                <Message v-if="outcome && outcome.kind !== 'saved'" severity="error" :closable="false" class="save__msg">
+                  {{ outcome.message }}
+                  <Button v-if="outcome.kind === 'conflict'" label="Обновить настройки" size="small" severity="secondary" class="save__reload" @click="load(true)" />
+                </Message>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="foot">
+        Чтение, проверка и сохранение доступны только после входа. Изменения принимаются только со страницы панели (Origin и CSRF-токен).
+        Применяет настройки служба роутера (mi-tt-admin) по заявке из раздела «Состояние»; пароли профилей панель только записывает и не показывает.
+      </footer>
+    </div>
   </div>
 </template>

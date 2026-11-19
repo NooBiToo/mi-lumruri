@@ -1,4 +1,4 @@
-// Установочный пакет mi-trusttunnel для BE7000 (RC06 1.1.38, aarch64): контроллер, панель, движки, сценарии,
+// Установочный пакет mi-trusttunnel для BE7000 (RC06 1.1.38, aarch64): контроллер, панель, клиент TrustTunnel, nfqws2, сценарии,
 // манифест с SHA-256 и подпись Ed25519. Без сети, если кэш .tools уже заполнен; результат воспроизводим (подпись Ed25519
 // детерминирована, XZ и tar — без времени и владельцев).
 //   node tools/package.mjs [--version X]   →  out/package/mi-trusttunnel-<версия>.tar (+ каталог для проверки)
@@ -12,7 +12,7 @@ import { gunzipSync } from 'node:zlib'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
-const VERSION = args.includes('--version') ? args[args.indexOf('--version') + 1] : '0.1.0-stage12'
+const VERSION = args.includes('--version') ? args[args.indexOf('--version') + 1] : '0.2.0'
 const OUT = args.includes('--out') ? args[args.indexOf('--out') + 1] : join(ROOT, 'out', 'package')
 const PKG = join(OUT, 'mi-trusttunnel')
 const DL = join(ROOT, '.tools', 'lab', 'dl')
@@ -20,19 +20,18 @@ const PY = process.platform === 'win32' ? 'python' : 'python3'
 const sha = (b) => createHash('sha256').update(b).digest('hex')
 
 // --- движки ARM64 ---
-const MIHOMO_GZ = join(DL, 'mihomo-linux-arm64-v1.19.34.gz')
-const MIHOMO_GZ_SHA = 'daaf78a6240a282cdfd75bcbf98fe321f6bd52765cc29e79f344191198f0b50f'
-const MIHOMO_SHA = '022da41e03ce70641a2f50c485b4f69ade8f1c7aeeece2cf1ec45c614a029441' // распакованный, по ARCHITECTURE.md
-if (!existsSync(MIHOMO_GZ)) {
-  execFileSync('curl', ['-sSfL', '--proto', '=https', '-o', MIHOMO_GZ, 'https://github.com/MetaCubeX/mihomo/releases/download/v1.19.34/mihomo-linux-arm64-v1.19.34.gz'])
+// Официальный клиент TrustTunnel (статически собранный aarch64); архив закреплён по SHA-256 релиза v1.1.12.
+const TT_VER = 'v1.1.12'
+const TT_TGZ = join(DL, `trusttunnel_client-${TT_VER}-linux-aarch64.tar.gz`)
+const TT_TGZ_SHA = '10402be7e715f35380e8bcf67e2d8f2ceb9fad81eef8274a472e3a085a0d5cc1'
+mkdirSync(DL, { recursive: true })
+if (!existsSync(TT_TGZ)) {
+  execFileSync('curl', ['-sSfL', '--proto', '=https', '-o', TT_TGZ, `https://github.com/TrustTunnel/TrustTunnelClient/releases/download/${TT_VER}/trusttunnel_client-${TT_VER}-linux-aarch64.tar.gz`])
 }
-if (sha(readFileSync(MIHOMO_GZ)) !== MIHOMO_GZ_SHA) throw new Error('SHA-256 архива Mihomo arm64 не совпал')
-const mihomo = gunzipSync(readFileSync(MIHOMO_GZ))
-if (sha(mihomo) !== MIHOMO_SHA) throw new Error(`SHA-256 Mihomo arm64 ${sha(mihomo)} не совпал с ARCHITECTURE.md`)
-const DC_TGZ = join(DL, 'dnscrypt-proxy-linux_arm64-2.1.20.tar.gz')
-if (sha(readFileSync(DC_TGZ)) !== 'def151a7f7b3bf62129a975e48875861908e05a1e0effb74929c66b8a50c6527') throw new Error('dnscrypt-proxy arm64: SHA-256 архива')
+if (sha(readFileSync(TT_TGZ)) !== TT_TGZ_SHA) throw new Error('SHA-256 архива trusttunnel_client aarch64 не совпал')
 const tmp = join(OUT, 'work'); rmSync(tmp, { recursive: true, force: true }); mkdirSync(tmp, { recursive: true })
-execFileSync(PY, ['-I', '-c', 'import sys,tarfile;tarfile.open(sys.argv[1]).extract("linux-arm64/dnscrypt-proxy",sys.argv[2],filter="data")', DC_TGZ, tmp])
+execFileSync(PY, ['-I', '-c', 'import sys,tarfile;tarfile.open(sys.argv[1]).extract(sys.argv[3]+"/trusttunnel_client",sys.argv[2],filter="data")', TT_TGZ, tmp, `trusttunnel_client-${TT_VER}-linux-aarch64`])
+const TT_BIN = join(tmp, `trusttunnel_client-${TT_VER}-linux-aarch64`, 'trusttunnel_client')
 const ZAP = join(ROOT, '.tools', 'lab', 'zapret2', 'zapret2-v1.0.7')
 if (!existsSync(join(ZAP, 'binaries', 'linux-arm64', 'nfqws2'))) throw new Error('нет zapret2: tools/lab/fetch-zapret.sh')
 
@@ -54,9 +53,7 @@ function plain(src, rel) {
 const T = join(ROOT, 'controller', 'target', 'aarch64-unknown-linux-musl', 'release')
 xz(join(T, 'mi-tt-ctl'), 'payload/bin/mi-tt-ctl.xz', 'mi-tt-ctl')
 xz(join(T, 'mi-tt-admin'), 'payload/bin/mi-tt-admin.xz', 'mi-tt-admin')
-writeFileSync(join(tmp, 'mihomo'), mihomo)
-xz(join(tmp, 'mihomo'), 'payload/engines/mihomo.xz', 'mihomo')
-xz(join(tmp, 'linux-arm64', 'dnscrypt-proxy'), 'payload/engines/dnscrypt-proxy.xz', 'dnscrypt-proxy')
+xz(TT_BIN, 'payload/engines/trusttunnel_client.xz', 'trusttunnel_client')
 xz(join(ZAP, 'binaries', 'linux-arm64', 'nfqws2'), 'payload/engines/nfqws2.xz', 'nfqws2')
 for (const l of ['zapret-lib.lua.gz', 'zapret-antidpi.lua.gz']) plain(join(ZAP, 'lua', l), `payload/engines/${l}`)
 const WWW = join(ROOT, 'panel', 'dist')

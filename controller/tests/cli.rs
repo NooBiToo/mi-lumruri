@@ -98,16 +98,16 @@ fn tv_trusttunnel_preview_acceptance_example() {
     assert_eq!(p["on_failure"], "блокировать трафик правила");
     assert_eq!(p["match_entries"].as_array().unwrap().len(), 4);
     let f: Vec<&str> = p["findings"].as_array().unwrap().iter().map(|x| x["code"].as_str().unwrap()).collect();
-    assert!(f.contains(&"overrides"), "должно показать, что VLESS-правило сети больше не действует на ТВ: {f:?}");
+    assert!(f.contains(&"overrides"), "должно показать, что правило сети с Zapret больше не действует на ТВ: {f:?}");
     assert!(f.contains(&"fail_closed"));
     assert!(!f.contains(&"shadowed_by"));
     let probes = p["probes"].as_array().unwrap();
-    // ТВ: было VLESS по правилу сети, стало TrustTunnel по правилу устройства
+    // ТВ: было «напрямую с Zapret» по правилу сети, стало TrustTunnel по правилу устройства
     assert_eq!(probes[0]["before"]["rule_id"], "r-home-video");
     assert_eq!(probes[0]["after"]["rule_id"], "r-tv-video");
     assert!(probes[0]["after"]["exit"].as_str().unwrap().contains("TrustTunnel"));
     assert_eq!(probes[0]["changed"], true);
-    // соседний телефон продолжает идти через VLESS
+    // соседний телефон продолжает идти напрямую с Zapret
     assert_eq!(probes[1]["after"]["rule_id"], "r-home-video");
     assert_eq!(probes[1]["changed"], false);
     // гости — напрямую

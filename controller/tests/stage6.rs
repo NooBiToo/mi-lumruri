@@ -404,3 +404,49 @@ fn restart_and_local_recovery() {
     let v: Value = serde_json::from_slice(&o.stdout).unwrap();
     assert_eq!(v["error"]["code"], "cgi_forbidden");
 }
+
+#[test]
+fn password_only_login_and_later_totp_enrollment() {
+    let mut a = Auth::empty("pwonly");
+    let pw = a.password.clone();
+    let t = T0 + 60;
+    let (code, v) = admin_auth(&a, &["init", "--stdin", "--kdf-m", "8192", "--kdf-t", "1"], &format!("{pw}\n{pw}\n"), T0);
+    assert_eq!((code, v["totp"].as_bool()), (0, Some(false)), "{v}");
+    assert!(v.get("totp_secret_base32").is_none() && v.get("recovery_codes").is_none(), "без TOTP секрет и коды не выдаются: {v}");
+    let (code, v) = admin_auth(&a, &["status"], "", T0);
+    assert_eq!((code, v["ok"].as_bool(), v["totp"].as_bool()), (0, Some(true), Some(false)), "{v}");
+    let (code, v) = admin_auth(&a, &["confirm", "--stdin"], "123456\n", T0);
+    assert_eq!((code, v["error"]["code"].as_str()), (3, Some("totp_off")));
+
+    // неверный пароль — отказ; верный — сразу полная сессия, без этапа второго фактора
+    assert_eq!(a.password_step("wrong-password-123", t).code(), "invalid_credentials");
+    let o = a.password_step(&pw, t);
+    assert_eq!((o.status, o.body["stage"].as_str(), o.body["authenticated"].as_bool(), o.body["totp"].as_bool()), (200, Some("done"), Some(true), Some(false)), "{}", o.body);
+    assert!(o.cookie("__Host-mitt_pre").is_none_or(|c| c.is_empty()), "предварительной сессии нет");
+    let s = Sess { cookie: format!("__Host-mitt_sess={}", o.cookie("__Host-mitt_sess").unwrap()), csrf: o.body["csrf"].as_str().unwrap().to_string(), now: t };
+    assert_eq!(a.api(&s, "GET", "/config", None, t + 1).status, 200);
+    let o = a.cgi("POST", "/auth/second", Some(br#"{"totp":"123456"}"#), t, &[("HTTP_ORIGIN", ORIGIN)]);
+    assert_eq!(o.code(), "totp_off");
+
+    // включение TOTP: новый секрет и recovery-коды, сессии отозваны, до confirm вход закрыт
+    let (code, v) = admin_auth(&a, &["reset-totp", "--stdin"], "", t + 10);
+    assert_eq!(code, 0, "{v}");
+    a.secret = v["totp_secret_base32"].as_str().unwrap().to_string();
+    assert_eq!(v["recovery_codes"].as_array().map(Vec::len), Some(10), "{v}");
+    assert_eq!(a.api(&s, "GET", "/config", None, t + 11).code(), "auth_not_configured");
+    assert_eq!(a.password_step(&pw, t + 11).code(), "auth_not_configured");
+    let (code, v) = admin_auth(&a, &["status"], "", t + 11);
+    assert_eq!((code, v["ok"].as_bool()), (1, Some(false)), "{v}");
+    let (code, v) = admin_auth(&a, &["confirm", "--stdin"], &format!("{}\n", a.totp(t + 30)), t + 30);
+    assert_eq!(code, 0, "{v}");
+
+    // теперь после пароля нужен второй фактор
+    let o = a.password_step(&pw, t + 60);
+    assert_eq!(o.body["stage"], "second_factor", "{}", o.body);
+    assert!(o.cookie("__Host-mitt_sess").is_none());
+    let s = a.login(t + 90);
+    assert_eq!(a.api(&s, "GET", "/config", None, t + 91).status, 200);
+    // повторный reset-totp при уже выданных кодах новых кодов не выдаёт
+    let (_, v) = admin_auth(&a, &["reset-totp", "--stdin"], "", t + 100);
+    assert!(v.get("recovery_codes").is_none(), "{v}");
+}

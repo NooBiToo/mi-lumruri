@@ -1,12 +1,21 @@
 // Типы повторяют схему v1 контроллера (controller/src/model.rs, preview.rs).
 
-export type ProfileKind = 'trusttunnel' | 'vless' | 'hysteria2' | 'wireguard'
+/** Единственный вид VPN — TrustTunnel (официальный клиент). Профиль может быть только один. */
+export type ProfileKind = 'trusttunnel'
 
-export interface AwgParams { jc: number; jmin: number; jmax: number; s1: number; s2: number; h1: number; h2: number; h3: number; h4: number }
 export interface Endpoint {
-  server: string; port: number; sni?: string; username?: string; cert_sha256?: string; quic?: boolean; obfs?: 'salamander'
-  security?: 'tls' | 'reality'; flow?: 'xtls-rprx-vision'; reality?: { public_key: string; short_id: string }; client_fingerprint?: string
-  public_key?: string; address?: string; mtu?: number; awg?: AwgParams
+  /** IP-адрес сервера; доменное имя для TLS — в `sni`. */
+  server: string
+  port: number
+  /** Имя сервера в сертификате (TLS). Без него — адрес сервера. */
+  sni?: string
+  username: string
+  /** HTTP/3 (QUIC) вместо HTTP/2. */
+  quic: boolean
+  /** Защита от DPI на стороне клиента. */
+  anti_dpi: boolean
+  /** Сертификат сервера (PEM) для самоподписанного сервера. */
+  certificate?: string
 }
 export interface Profile { id: string; name: string; kind: ProfileKind; on_failure: 'block' | 'direct'; endpoint?: Endpoint }
 export interface Network { id: string; name: string; ssid: string; segment?: string; subnet?: string; bridge?: string; ports?: string[] }
@@ -20,16 +29,13 @@ export type Destination =
   | { type: 'category'; id: string }
 
 export interface Category { id: string; name: string; kind: 'domain' | 'ip'; source?: string }
-export interface DnsServer { host: string; ip: string; port?: number; path?: string }
-export interface OdohEndpoint { host: string; ip: string; port?: number; path: string }
 export interface DnsConfig {
-  transport: 'doh' | 'dot' | 'doq' | 'doh3' | 'odoh'
-  servers?: DnsServer[]
-  odoh?: { target: OdohEndpoint; relays: OdohEndpoint[] }
+  /** Публичный IPv4 DNS-сервера для доменов, идущих через TrustTunnel; запросы к нему идут через туннель. По умолчанию 1.1.1.1. */
+  tunnel_resolver?: string
   adblock?: { enabled: boolean; exceptions?: string[] }
 }
 export interface ZapretConfig { strategy: 'multisplit' | 'multidisorder'; pos?: number; tcp_ports?: number[] }
-export interface ProfileSecret { password?: string; obfs_password?: string; uuid?: string; private_key?: string; preshared_key?: string }
+export interface ProfileSecret { password: string }
 
 export interface Group { id: string; name: string; destinations: Destination[] }
 
@@ -99,7 +105,9 @@ export interface ApiResult<T> { status: number; body: T }
 export interface SessionResponse {
   ok: boolean
   authenticated?: boolean
-  stage?: 'password' | 'second_factor'
+  stage?: 'password' | 'second_factor' | 'done'
+  /** Включён ли второй фактор (TOTP); без него вход только паролем. */
+  totp?: boolean
   csrf?: string
   expires?: number
   idle_timeout?: number

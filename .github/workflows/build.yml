@@ -34,12 +34,9 @@ jobs:
           npm test
           npm run build
 
-      - name: Fetch router engines
-        run: |
-          tools/lab/fetch-zapret.sh
-          curl --fail --silent --show-error --location --retry 3 --proto '=https' \
-            --output .tools/lab/dl/dnscrypt-proxy-linux_arm64-2.1.20.tar.gz \
-            https://github.com/DNSCrypt/dnscrypt-proxy/releases/download/2.1.20/dnscrypt-proxy-linux_arm64-2.1.20.tar.gz
+      # trusttunnel_client (aarch64, закреплён по SHA-256) скачивает сам tools/package.mjs
+      - name: Fetch Zapret
+        run: tools/lab/fetch-zapret.sh
 
       - name: Sign package
         env:
@@ -55,10 +52,12 @@ jobs:
 
       - name: Verify signature and checksum
         run: |
+          python3 -B tools/test-install.py
           (cd controller && cargo run --quiet --locked --bin mi-tt-admin -- release verify ../out/package/mi-trusttunnel)
           cd out/package
           sha256sum mi-trusttunnel-*.tar > SHA256SUMS
           cat SHA256SUMS >> "$GITHUB_STEP_SUMMARY"
+          cp ../../install.py .
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -66,5 +65,6 @@ jobs:
           path: |
             out/package/mi-trusttunnel-*.tar
             out/package/SHA256SUMS
+            out/package/install.py
           if-no-files-found: error
           compression-level: 0

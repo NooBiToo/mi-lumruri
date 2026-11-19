@@ -20,7 +20,7 @@ printf '#!/bin/sh\nexec %s -L %s %s/usr/bin/openssl "$@"\n' "$Q" "$F" "$F" >"$SB
 chmod +x "$SB"/*
 # ARM64-программы пакета — через qemu (обёртки вместо распакованных файлов, только при MITT_ROOT)
 LB="$W/labbin"; mkdir -p "$LB"
-for n in mi-tt-ctl mi-tt-admin mihomo dnscrypt-proxy nfqws2; do printf '#!/bin/sh\nexec %s "$0.arm64" "$@"\n' "$Q" >"$LB/$n"; done; chmod +x "$LB"/*
+for n in mi-tt-ctl mi-tt-admin trusttunnel_client nfqws2; do printf '#!/bin/sh\nexec %s "$0.arm64" "$@"\n' "$Q" >"$LB/$n"; done; chmod +x "$LB"/*
 
 newroot() { # newroot <каталог>: файловая система роутера из образа (только нужное)
   local r="$1"; rm -rf "$r"; mkdir -p "$r/data" "$r/tmp" "$r/etc/config" "$r/usr/share/xiaoqiang"
@@ -66,4 +66,25 @@ RR="$RM" inst I10-wrong-model "$PKGS/v1" install --no-start
 RS="$W/root-small"; newroot "$RS"; mount -t tmpfs -o size=4m tmpfs "$RS/data"
 RR="$RS" inst I11-no-space "$PKGS/v1" install --no-start
 ls -A "$RS/data" >"$OUT/no-space-data.txt"
+
+# внешнее хранилище релизов (--store): свежая установка, обновление, перенос из /data, накопитель не подключён
+storestate() { # storestate <id> <корень> <каталог хранилища>
+  "$PY" -c 'import json,os,sys;d=sys.argv[2]+"/data/mi-trusttunnel";s=sys.argv[3]
+ls=lambda p: sorted(os.listdir(p)) if os.path.isdir(p) else None
+rd=lambda n: open(d+"/"+n).read().strip() if os.path.exists(d+"/"+n) else None
+print(json.dumps({"id":sys.argv[1],"store":rd("store"),"current":rd("current.ver"),"previous":rd("previous.ver"),"data_releases":ls(d+"/releases"),"store_releases":ls(s+"/releases"),
+ "stub_waits":"MITT_STORE_WAIT" in open(d+"/mitt-boot.sh").read() if os.path.exists(d+"/mitt-boot.sh") else None}))' "$1" "$2" "$3" >>"$OUT/store.jsonl"
+}
+: >"$OUT/store.jsonl"
+RE="$W/root-ext"; newroot "$RE"; mkdir -p "$RE/mnt/usb"; ST="$RE/mnt/usb/mi-trusttunnel"
+RR="$RE" inst S1-store-fresh "$PKGS/v1" install --no-start "--store=$ST"; storestate S1-store-fresh "$RE" "$ST"
+RR="$RE" inst S2-store-update "$PKGS/v2" install --no-start; storestate S2-store-update "$RE" "$ST"
+RR="$RE" inst S3-store-rollback "$PKGS/v2" rollback --no-start; storestate S3-store-rollback "$RE" "$ST"
+RR="$RE" inst S4-store-uninstall "$PKGS/v2" uninstall; storestate S4-store-uninstall "$RE" "$ST"
+RV="$W/root-move"; newroot "$RV"; mkdir -p "$RV/mnt/usb"; SV="$RV/mnt/usb/mi-trusttunnel"
+RR="$RV" inst S5-move-base "$PKGS/v1" install --no-start
+RR="$RV" inst S6-move "$PKGS/v2" install --no-start "--store=$SV"; storestate S6-move "$RV" "$SV"
+RN="$W/root-nousb"; newroot "$RN"
+RR="$RN" inst S7-store-absent "$PKGS/v1" install --no-start "--store=$RN/mnt/usb/mi-trusttunnel"; storestate S7-store-absent "$RN" "$RN/mnt/usb/mi-trusttunnel"
+ls -A "$RN/data" >"$OUT/store-absent-data.txt"
 log "готово"

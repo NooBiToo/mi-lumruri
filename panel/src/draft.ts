@@ -73,7 +73,8 @@ export function sampleHost(d: Destination | undefined): string {
 
 /** Черновик по умолчанию — сценарий TrustTunnel для первого устройства и первой группы. */
 export function defaultForm(cfg: Config): DraftForm {
-  const tt = cfg.profiles.find((p) => p.kind === 'trusttunnel') ?? cfg.profiles.find(profileReady) ?? cfg.profiles[0]
+  // профиль TrustTunnel один; готовый к применению — в приоритете
+  const tt = cfg.profiles.find(profileReady) ?? cfg.profiles[0]
   const dev = cfg.devices[0]
   const group = cfg.groups[0]
   const host = sampleHost(group?.destinations[0])
@@ -116,8 +117,8 @@ export function saveOutcome(r: ApiResult<SaveResponse>): SaveOutcome {
   return { kind: 'error', message: b.error?.message ?? `ошибка ${r.status}` }
 }
 
-/** Виды профилей, которые контроллер формирует для Mihomo (render.rs: renderable). */
-export const RENDERABLE_KINDS: readonly Profile['kind'][] = ['trusttunnel', 'hysteria2', 'vless', 'wireguard']
+/** Виды профилей, для которых контроллер формирует настройки клиента: только TrustTunnel. */
+export const RENDERABLE_KINDS: readonly Profile['kind'][] = ['trusttunnel']
 
 /** Профиль можно применить: вид поддерживается и задана точка подключения. Иначе правило сохранится, но не применится. */
 export function profileReady(p: Profile): boolean {

@@ -50,7 +50,7 @@ function call(st, { method = 'GET', path = '/cgi-bin/api/config', headers = {}, 
 function enroll(st) {
   const password = 'pw-' + randomBytes(18).toString('base64url')
   const env = { MI_TT_AUTH_DIR: st.s.opts.authDir, MI_TT_SESSION_DIR: st.s.opts.sessionDir, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}) }
-  const init = JSON.parse(execFileSync(st.s.opts.admin, ['auth', 'init', '--stdin'], { input: `${password}\n${password}\n`, env }).toString())
+  const init = JSON.parse(execFileSync(st.s.opts.admin, ['auth', 'init', '--stdin', '--with-totp'], { input: `${password}\n${password}\n`, env }).toString())
   execFileSync(st.s.opts.admin, ['auth', 'confirm', '--stdin'], { input: totp(init.totp_secret_base32) + '\n', env })
   return { password, secret: init.totp_secret_base32, recovery: init.recovery_codes }
 }

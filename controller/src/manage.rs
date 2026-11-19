@@ -338,7 +338,7 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
                 let Some(pr) = cfg.profiles.iter().find(|x| x.id == q.profile_id) else {
                     return Some(Response::error(404, "unknown_profile", format!("профиль «{}» не найден", q.profile_id)));
                 };
-                if let Err(m) = check_secret(pr.kind, &q.secret) {
+                if let Err(m) = check_secret(&q.secret) {
                     return Some(Response::error(422, "bad_secret", format!("секреты профиля «{}»: {m}", pr.id)));
                 }
                 let sp = secrets_path(config_path);

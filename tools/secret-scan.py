@@ -31,7 +31,7 @@ ASSIGN = re.compile(
 SHELL = re.compile(r"""(?i)(?:^|[\s;])(?P<key>[A-Z_]*""" + KEYS + r"""[A-Z_]*)=(?P<val>[^\s"'$`;|&()]{4,200})""")
 GENERATED = re.compile(r"(?i)\$|\{\{|secrets\.|randomBytes|rand_hex|token_urlsafe|crypto\.|random|uuid4|Math\.|getrandom|format!|\{[a-z_]*\}|%s")
 PLACEHOLDER = re.compile(r"(?i)^(<[^>]*>|x+|\*+|redacted|changeme-not-used|none|null|true|false|-+|\.\.\.|…|[a-z_]+\(\)|[\w.]+\.[a-z_]+)$")
-# ключ X25519/WireGuard/REALITY в base64 (32 байта) или URL-safe без дополнения — постоянный ключевой материал в исходниках
+# ключ X25519 (и любой другой 32-байтный ключ) в base64 (32 байта) или URL-safe без дополнения — постоянный ключевой материал в исходниках
 KEYLIT = re.compile(r"""["'`]([A-Za-z0-9+/]{43}=|[A-Za-z0-9_-]{43})["'`]""")
 ENVNAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
 ALLOW = "secret-scan: allow"

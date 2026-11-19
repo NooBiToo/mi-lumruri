@@ -58,8 +58,9 @@ struct SecondBody {
 
 fn configured(p: &Paths) -> Result<AuthState, Response> {
     match auth::load_state(p) {
-        Ok(Some(s)) if s.totp_enrolled => Ok(s),
-        Ok(_) => Err(Response::error(503, "auth_not_configured", "вход не настроен: выполните на роутере mi-tt-admin auth init и auth confirm")),
+        Ok(Some(s)) if s.login_ready() => Ok(s),
+        Ok(Some(_)) => Err(Response::error(503, "auth_not_configured", "TOTP не подтверждён: выполните на роутере mi-tt-admin auth confirm")),
+        Ok(None) => Err(Response::error(503, "auth_not_configured", "вход не настроен: выполните на роутере mi-tt-admin auth init")),
         Err(m) => Err(Response::error(500, "auth_state_corrupt", m)),
     }
 }
@@ -74,7 +75,7 @@ fn too_many(until: u64, now: u64) -> Reply {
 }
 
 fn session_info(s: &Session, st: &AuthState, now: u64) -> Value {
-    json!({ "authenticated": true, "csrf": s.csrf, "expires": s.expires, "idle_timeout": SESSION_IDLE,
+    json!({ "authenticated": true, "totp": !st.totp_off(), "csrf": s.csrf, "expires": s.expires, "idle_timeout": SESSION_IDLE,
         "recovery_codes_left": st.recovery.iter().filter(|r| !r.used).count(), "clock_trusted": clock_trusted(now, st.last_good_time) })
 }
 
@@ -157,6 +158,18 @@ fn login(p: &Paths, req: &Request, now: u64) -> Reply {
         }
         return Response::error(401, "invalid_credentials", "неверный пароль").into();
     }
+    if st.totp_off() {
+        // вход только паролем: сразу полная сессия
+        auth::reset_attempts(p);
+        let (full, s) = match auth::create_session(p, Stage::Full, st.sessions_epoch, now) {
+            Ok(t) => t,
+            Err(m) => return Response::error(500, "session_failed", m).into(),
+        };
+        let mut info = session_info(&s, &st, now);
+        info["ok"] = json!(true);
+        info["stage"] = json!("done");
+        return Reply { resp: ok(info), headers: vec![set_cookie(COOKIE_SESSION, &full, SESSION_MAX), clear_cookie(COOKIE_PENDING)] };
+    }
     let (token, _) = match auth::create_session(p, Stage::Pending, st.sessions_epoch, now) {
         Ok(t) => t,
         Err(m) => return Response::error(500, "session_failed", m).into(),
@@ -192,6 +205,9 @@ fn second(p: &Paths, req: &Request, now: u64) -> Reply {
         Ok(s) => s,
         Err(r) => return r.into(),
     };
+    if st.totp_off() {
+        return Response::error(409, "totp_off", "второй фактор не включён; войдите паролем").into();
+    }
     let Some(token) = req.cookie.and_then(|c| cookie_value(c, COOKIE_PENDING)) else {
         return Response::error(401, "login_required", "сначала введите пароль").into();
     };
@@ -271,6 +287,7 @@ fn session(p: &Paths, req: &Request, now: u64) -> Reply {
         .and_then(|c| cookie_value(c, COOKIE_PENDING))
         .and_then(|t| auth::load_session(p, &t, Stage::Pending, st.sessions_epoch, now))
         .is_some();
+    let pending = pending && !st.totp_off();
     ok(json!({ "ok": true, "authenticated": false, "stage": if pending { "second_factor" } else { "password" },
         "clock_trusted": clock_trusted(now, st.last_good_time) }))
     .into()

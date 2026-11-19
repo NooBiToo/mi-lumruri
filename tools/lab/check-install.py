@@ -23,7 +23,7 @@ def st(i):
 
 V1, V2, V5 = "0.1.0-stage12", "0.1.1-stage12", "0.1.2-stage12"
 check("свежая установка: код 0, current = v1, автозапуск зарегистрирован в firewall (uci стока)", st("I1-fresh")[:2] == (0, V1) and st("I1-fresh")[4], st("I1-fresh"))
-check("пробный запуск ARM64-программ пакета (mi-tt-ctl, mi-tt-admin, mihomo, dnscrypt-proxy, nfqws2) под qemu прошёл при установке",
+check("пробный запуск ARM64-программ пакета (mi-tt-ctl, mi-tt-admin, trusttunnel_client, nfqws2) под qemu прошёл при установке",
       S.get("I1-fresh", {}).get("exit") == 0, S.get("I1-fresh", {}).get("out", "")[-200:])
 check("повторная установка того же релиза: код 0, «уже установлен», current без изменений",
       st("I2-repeat")[:2] == (0, V1) and "уже установлен" in S.get("I2-repeat", {}).get("out", ""), st("I2-repeat"))
@@ -52,6 +52,32 @@ check("другая модель (RA70): отказ до изменений", st
 ns = (OUT / "no-space-data.txt").read_text(encoding="utf-8").strip() if (OUT / "no-space-data.txt").exists() else "?"
 check("мало места на /data (tmpfs 4 МиБ): отказ с указанием свободного и нужного объёма, /data не изменён",
       st("I11-no-space")[0] == 3 and "свободно" in S.get("I11-no-space", {}).get("out", "") and ns == "", [S.get("I11-no-space", {}).get("out", "")[-200:], ns])
+X = {}
+if (OUT / "store.jsonl").exists():
+    for line in (OUT / "store.jsonl").read_text(encoding="utf-8").splitlines():
+        d = json.loads(line)
+        X[d["id"]] = d
+
+
+def xs(i):
+    d = X.get(i, {})
+    # пустой каталог releases в /data равнозначен его отсутствию
+    return (S.get(i, {}).get("exit"), d.get("current"), d.get("previous"), d.get("data_releases") or None, d.get("store_releases"))
+
+
+check("внешнее хранилище (--store): релиз лежит на накопителе, в /data только указатели; точка входа ждёт накопитель",
+      xs("S1-store-fresh") == (0, V1, None, None, [V1]) and (X.get("S1-store-fresh", {}).get("store") or "").endswith("/mnt/usb/mi-trusttunnel")
+      and X.get("S1-store-fresh", {}).get("stub_waits"), [xs("S1-store-fresh"), X.get("S1-store-fresh", {}).get("store")])
+check("обновление без --store: хранилище запомнено, current = v2, previous = v1, оба на накопителе",
+      xs("S2-store-update") == (0, V2, V1, None, [V1, V2]), xs("S2-store-update"))
+check("откат при внешнем хранилище: current = v1, previous = v2", xs("S3-store-rollback")[:3] == (0, V1, V2), xs("S3-store-rollback"))
+check("удаление при внешнем хранилище: релизы убраны с накопителя, указатель store снят",
+      xs("S4-store-uninstall")[0] == 0 and xs("S4-store-uninstall")[4] is None and X.get("S4-store-uninstall", {}).get("store") is None, xs("S4-store-uninstall"))
+check("перенос из /data на накопитель при обновлении: /data освобождён, current = v2, откат на прежний релиз снят",
+      xs("S6-move") == (0, V2, None, None, [V2]), xs("S6-move"))
+sa = (OUT / "store-absent-data.txt").read_text(encoding="utf-8").strip() if (OUT / "store-absent-data.txt").exists() else "?"
+check("накопитель не подключён: отказ до изменений, /data не тронут",
+      S.get("S7-store-absent", {}).get("exit") == 3 and "накопитель" in S.get("S7-store-absent", {}).get("out", "") and sa == "", [S.get("S7-store-absent", {}).get("out", "")[-200:], sa])
 ok = all(c["ok"] for c in checks)
 json.dump({"ok": ok, "checks": checks, "steps": S}, open(OUT / "summary.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 md = ["| Проверка | Детали | Итог |", "|---|---|---|"] + [f"| {c['check']} | {c['detail'].replace('|', '/')} | {'да' if c['ok'] else 'НЕТ'} |" for c in checks]

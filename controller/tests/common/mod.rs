@@ -104,7 +104,7 @@ impl Auth {
     pub fn new(name: &str) -> Auth {
         let mut a = Auth::empty(name);
         let pw = a.password.clone();
-        let (code, v) = admin_auth(&a, &["init", "--stdin", "--kdf-m", "8192", "--kdf-t", "1"], &format!("{pw}\n{pw}\n"), T0);
+        let (code, v) = admin_auth(&a, &["init", "--stdin", "--with-totp", "--kdf-m", "8192", "--kdf-t", "1"], &format!("{pw}\n{pw}\n"), T0);
         assert_eq!(code, 0, "{v}");
         a.secret = v["totp_secret_base32"].as_str().unwrap().to_string();
         a.recovery = v["recovery_codes"].as_array().unwrap().iter().map(|c| c.as_str().unwrap().to_string()).collect();

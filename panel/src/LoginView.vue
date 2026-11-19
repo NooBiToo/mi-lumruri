@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import Button from 'primevue/button'
+import InputText from 'primevue/inputtext'
+import Message from 'primevue/message'
+import Password from 'primevue/password'
 import { api, setCsrf, type SessionResponse } from './api'
 import { loginMessage, nextStage, secondFactor, type LoginStage } from './auth'
 
@@ -21,7 +25,12 @@ async function submitPassword() {
   try {
     const r = await api.login(password.value)
     error.value = loginMessage(r)
-    if (nextStage('password', r) === 'second_factor') {
+    const next = nextStage('password', r)
+    if (next === 'done') {
+      password.value = ''
+      setCsrf(r.body.csrf ?? null)
+      emit('done', r.body)
+    } else if (next === 'second_factor') {
       // пароль в памяти страницы не держим дольше необходимого
       password.value = ''
       clockTrusted.value = r.body.clock_trusted !== false
@@ -70,29 +79,36 @@ function switchMode() {
 </script>
 
 <template>
-  <section class="login" aria-labelledby="login-title">
-    <h2 id="login-title">Вход в панель</h2>
+  <section class="gate__card login" aria-labelledby="login-title">
+    <h1 id="login-title" class="login__title">{{ stage === 'password' ? 'Пароль администратора' : 'Второй шаг входа' }}</h1>
+
     <form v-if="stage === 'password'" class="login__form" @submit.prevent="submitPassword">
-      <label for="login-password">Пароль</label>
-      <input id="login-password" v-model="password" type="password" autocomplete="current-password" required autofocus :disabled="busy" />
-      <button type="submit" :disabled="busy || !password">{{ busy ? 'Проверяю…' : 'Далее' }}</button>
+      <label for="login-password" class="field__label">Пароль</label>
+      <Password v-model="password" input-id="login-password" :feedback="false" toggle-mask fluid :disabled="busy"
+        :input-props="{ autocomplete: 'current-password', required: true, autofocus: true }" :invalid="!!error" />
+      <Button type="submit" :label="busy ? 'Проверяю…' : 'Войти'" :loading="busy" :disabled="busy || !password" fluid />
     </form>
+
     <form v-else class="login__form" @submit.prevent="submitCode">
       <template v-if="mode === 'totp'">
-        <label for="login-code">Код из приложения-аутентификатора</label>
-        <input id="login-code" v-model="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" pattern="[0-9 ]*" required autofocus :disabled="busy" />
+        <label for="login-code" class="field__label">Код из приложения-аутентификатора</label>
+        <InputText id="login-code" v-model="code" class="num login__code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" pattern="[0-9 ]*"
+          required autofocus fluid :disabled="busy" :invalid="!!error" />
       </template>
       <template v-else>
-        <label for="login-recovery">Одноразовый recovery-код</label>
-        <input id="login-recovery" v-model="code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="24" required autofocus :disabled="busy" />
+        <label for="login-recovery" class="field__label">Одноразовый recovery-код</label>
+        <InputText id="login-recovery" v-model="code" class="num" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="24"
+          required autofocus fluid :disabled="busy" :invalid="!!error" />
       </template>
-      <button type="submit" :disabled="busy || !code">{{ busy ? 'Проверяю…' : 'Войти' }}</button>
-      <button type="button" class="login__alt" :disabled="busy" @click="switchMode">
-        {{ mode === 'totp' ? 'Войти recovery-кодом' : 'Войти кодом из приложения' }}
-      </button>
-      <p v-if="!clockTrusted" class="login__note">Часы роутера не синхронизированы: код из приложения сейчас не принимается.</p>
+      <Button type="submit" :label="busy ? 'Проверяю…' : 'Подтвердить код'" :loading="busy" :disabled="busy || !code" fluid />
+      <Button type="button" variant="link" class="login__alt" :disabled="busy" :label="mode === 'totp' ? 'Войти recovery-кодом' : 'Войти кодом из приложения'"
+        @click="switchMode" />
+      <Message v-if="!clockTrusted" severity="warn" size="small" :closable="false">Часы роутера не синхронизированы: код из приложения сейчас не принимается.</Message>
     </form>
-    <p v-if="error" class="login__error" role="alert">{{ error }}</p>
-    <p class="login__hint">Учётные данные задаются только на самом роутере: <code>mi-tt-admin auth init</code>. Восстановление — там же.</p>
+
+    <div aria-live="assertive">
+      <Message v-if="error" severity="error" :closable="false" class="login__error">{{ error }}</Message>
+    </div>
+    <p class="login__hint">Пароль задаётся только на самом роутере командой <code>mi-tt-admin auth init</code>. Там же его можно сбросить.</p>
   </section>
 </template>

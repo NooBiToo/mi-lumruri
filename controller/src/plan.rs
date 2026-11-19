@@ -1,73 +1,48 @@
 //! План собственных правил маршрутизации и сверка с текущим состоянием ядра. Только чистая логика:
-//! построение плана по спецификации захвата, разбор вывода `ip rule/route show`, `tc qdisc/filter show`,
-//! `ip -6 addr`, поиск чужих записей и коллизий, порядок шагов. Исполняет — mi-tt-admin.
+//! построение плана по спецификации политики, разбор вывода `ip rule/route show`, `iptables -S`, `ipset list -t`,
+//! поиск чужих записей и коллизий, порядок шагов. Исполняет — mi-tt-admin.
 //!
-//! Источник защищённого трафика определяется на входе, а не по адресу:
-//!  - устройство — MAC на входе моста (tc flower src_mac → метка устройства);
-//!  - сеть (SSID) — порт моста (tc matchall на интерфейсе SSID → метка сети);
-//!  - вся LAN — интерфейс моста (ip rule iif).
-//! Метка без совпадающего адреса (новый DHCP, статический адрес, новый IPv6) → unreachable, а не прямой выход.
+//! Как выбирается маршрут (сток RC06 1.1.38: iptables 1.6.2, ipset, без tc-actions):
+//!  - mangle PREROUTING → цепочка классификации: правила по порядку, первое совпадение. Источник — MAC на входе моста
+//!    (устройство), порт моста через physdev или мост целиком (сеть), мост (вся LAN); назначение — набор ipset
+//!    (адреса доменов заносит dnsmasq, IP-префиксы — статический набор). «Через TrustTunnel» ставит бит 0x4000,
+//!    `ip rule fwmark 0x4000 lookup 3100` ведёт в TUN клиента; при отказе туннеля — unreachable (или обход).
+//!  - filter FORWARD → та же классификация: «блокировать» — REJECT; выход в TUN разрешается явно.
+//!  - mangle FORWARD → та же классификация: «напрямую с Zapret» — NFQUEUE для nfqws2.
+//!  - mangle OUTPUT: DNS-вопросы роутера к резолверу туннеля тоже идут в туннель.
+//!  - IPv6 защищаемых источников наружу запрещён (IPv6 не туннелируется, а домены сопоставляются только по IPv4).
 //!
-//! Зона владения: приоритеты правил 3000–3199 (IPv4 и IPv6), таблица 3100, метки 0x0a??0000/0x0fff0000,
-//! фильтры tc с pref 1000–1399 на входе наших мостов и портов. Чужое в зоне → отказ без изменений.
+//! Цепочки называются по хэшу содержимого: изменение порядка или состава правил — новая цепочка, затем переход на неё,
+//! затем снятие прежней. Зона владения: приоритеты правил 3000–3199, таблица 3100, цепочки MITT_*, наборы mitt*,
+//! бит метки 0x4000. Чужое в зоне → отказ без изменений.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 pub const TABLE: u32 = 3100;
 pub const PRIO_MIN: u32 = 3000;
 pub const PRIO_MAX: u32 = 3199;
 pub const PRIO_LAN: u32 = 3000;
-pub const PRIO_LOCAL: u32 = 3010;
-pub const PRIO_DEV: u32 = 3100;
-pub const PRIO_DEV_CATCH: u32 = 3105;
-pub const PRIO_NET: u32 = 3110;
-pub const PRIO_NET_CATCH: u32 = 3115;
-pub const PRIO_V6_BLOCK: u32 = 3120;
-pub const PRIO_LANWIDE: u32 = 3130;
-pub const PRIO_LANWIDE_CATCH: u32 = 3135;
+pub const PRIO_MARK: u32 = 3005;
 pub const METRIC_TUN: u32 = 1;
 pub const METRIC_GUARD: u32 = 4096;
 
-/// Маска одной метки и классы: 0x0a?????? — наши; бит 0x00800000 — метка сети, иначе устройства.
-pub const MARK_MASK: u32 = 0x0fff_0000;
-pub const MARK_OURS: u32 = 0x0a00_0000;
-pub const MARK_OURS_MASK: u32 = 0x0f00_0000;
-pub const MARK_CLASS_MASK: u32 = 0x0f80_0000;
-pub const MARK_NET_FLAG: u32 = 0x0080_0000;
-pub const MAX_MARKS: u32 = 127;
-pub const TC_PREF_MIN: u32 = 1000;
-pub const TC_PREF_MAX: u32 = 1399;
-pub const TC_PREF_DEV: u32 = 1000;
-pub const TC_PREF_NET: u32 = 1200;
-
-/// Путь для стока BE7000 (нет NET_CLS_ACT/flower/matchall): iptables/ip6tables.
 /// Биты skb mark стока заняты (по miqosd_init.sh: QoS 0xffff8000, mwan3 0x3f00, родконтроль 0xf, uu 0xf0) —
-/// свободен только 0x4000; он нужен лишь для политики сети на части моста (physdev) и проверяется на коллизии.
+/// свободен только 0x4000: им помечается трафик «через TrustTunnel». Коллизии проверяются при каждом применении.
 pub const NF_MARK: u32 = 0x4000;
-pub const NF_FWD_CHAIN: &str = "MITT_FWD";
-pub const NF_MARK_CHAIN: &str = "MITT_MARK";
 pub const NF_COMMENT: &str = "mi-trusttunnel";
+pub const CHAIN_PREFIX: &str = "MITT_";
+pub const SET_PREFIX: &str = "mitt";
+/// Наборы, которые заполняет dnsmasq: запись живёт сутки после последнего ответа.
+pub const SET_DNS_TIMEOUT: u32 = 86400;
+pub const ZAPRET_QNUM: u16 = 200;
+/// Метка пакетов, которые генерирует nfqws2 (`--fwmark`): вне бита `NF_MARK`.
+pub const ZAPRET_DESYNC_MARK: u32 = 0x4000_0000;
 
-/// Механизм определения источника на входе.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Marker {
-    /// tc clsact + flower/matchall + skbedit (этап 4; на стоке RC06 1.1.38 недоступен).
-    Tc,
-    /// iptables/ip6tables: привязка MAC↔IP в FORWARD, iif для сети на своём мосту, physdev+MARK для части моста.
-    Netfilter,
-}
-
-pub fn device_mark(k: u32) -> u32 {
-    MARK_OURS | (k << 16)
-}
-pub fn network_mark(k: u32) -> u32 {
-    MARK_OURS | MARK_NET_FLAG | (k << 16)
-}
-/// Как печатает `ip rule`: 0xa010000/0xfff0000.
+/// Как печатает `ip rule`: 0x4000/0x4000.
 pub fn fmt_mark(v: u32, m: u32) -> String {
     format!("{v:#x}/{m:#x}")
 }
@@ -79,16 +54,124 @@ fn parse_hex_or_dec(s: &str) -> Option<u32> {
 }
 /// Нормализует «значение[/маска]» (десятичное или 0x) в вид fmt_mark.
 pub fn norm_mark(s: &str) -> Option<String> {
-    let (v, m) = s.split_once('/').unwrap_or((s, "0xffffffff"));
-    Some(fmt_mark(parse_hex_or_dec(v)?, parse_hex_or_dec(m)?))
+    let (v, m) = mark_parts(s)?;
+    Some(fmt_mark(v, m))
 }
 fn mark_parts(s: &str) -> Option<(u32, u32)> {
-    let (v, m) = s.split_once('/')?;
-    Some((parse_hex_or_dec(v)?, parse_hex_or_dec(m)?))
+    match s.split_once('/') {
+        Some((v, m)) => Some((parse_hex_or_dec(v)?, parse_hex_or_dec(m)?)),
+        None => Some((parse_hex_or_dec(s)?, 0xffff_ffff)),
+    }
 }
 
+// ---------- спецификация политики ----------
+
+/// Источник правила, как он виден на входе.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SrcMatch {
+    /// Устройство: MAC на входе моста.
+    Mac { bridge: String, mac: String },
+    /// Сеть (SSID): её порты моста. Если сеть занимает мост целиком — достаточно моста.
+    Network { bridge: String, ports: Vec<String> },
+    /// Вся LAN: мост.
+    Bridge { bridge: String },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Act {
+    Tunnel,
+    Direct,
+    Zapret,
+    Block,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PolicyRule {
+    /// Откуда правило (id правила или default_action) — для обзора.
+    pub from: String,
+    pub src: SrcMatch,
+    /// Набор назначения; None — любое назначение.
+    pub set: Option<String>,
+    pub act: Act,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SetKind {
+    /// Адреса доменов, заносит dnsmasq.
+    Dns,
+    /// IP-префиксы из настроек и категорий.
+    Static,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetSpec {
+    pub name: String,
+    pub kind: SetKind,
+    /// Префиксы статического набора (в журнал не пишутся: могут быть большими).
+    #[serde(default, skip_serializing)]
+    pub entries: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PolicySpec {
+    pub rules: Vec<PolicyRule>,
+    pub sets: Vec<SetSpec>,
+    /// IPv4-подсети LAN: трафик к ним не классифицируется.
+    pub lan_subnets: Vec<String>,
+    pub tun: String,
+    /// При отказе туннеля трафик «через TrustTunnel» идёт напрямую (иначе блокируется).
+    pub fail_open: bool,
+    /// Порты TCP для Zapret; пусто — Zapret не используется.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub zapret_ports: Vec<u16>,
+    /// Резолвер туннеля: DNS-вопросы роутера к нему идут в туннель.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dns_resolver: Option<String>,
+    /// Источники, внешний IPv6 которых запрещён.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub v6_block: Vec<SrcMatch>,
+}
+
+impl PolicySpec {
+    pub fn is_empty(&self) -> bool {
+        self.rules.is_empty() && self.v6_block.is_empty() && self.dns_resolver.is_none()
+    }
+    pub fn uses(&self, a: Act) -> bool {
+        self.rules.iter().any(|r| r.act == a)
+    }
+    /// Мосты и порты, которые должны существовать до применения: (интерфейс, мост, если это порт).
+    pub fn interfaces(&self) -> Vec<(String, Option<String>)> {
+        let mut v: BTreeSet<(String, Option<String>)> = BTreeSet::new();
+        for s in self.rules.iter().map(|r| &r.src).chain(self.v6_block.iter()) {
+            match s {
+                SrcMatch::Mac { bridge, .. } | SrcMatch::Bridge { bridge } => {
+                    v.insert((bridge.clone(), None));
+                }
+                SrcMatch::Network { bridge, ports } => {
+                    v.insert((bridge.clone(), None));
+                    for p in ports {
+                        v.insert((p.clone(), Some(bridge.clone())));
+                    }
+                }
+            }
+        }
+        v.into_iter().collect()
+    }
+    pub fn bridges(&self) -> BTreeSet<String> {
+        self.interfaces().into_iter().filter(|(_, m)| m.is_none()).map(|(i, _)| i).collect()
+    }
+}
+
+// ---------- записи плана ----------
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(tag = "entry", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Entry {
     /// Маршрут по умолчанию в таблице 3100: через устройство (TUN) или unreachable (dev = None).
     Route { v6: bool, dev: Option<String>, metric: u32 },
@@ -103,14 +186,12 @@ pub enum Entry {
         fwmark: Option<String>,
         lookup: Option<String>,
     },
-    /// Дисциплина clsact, созданная нами (существующую чужую ingress/clsact используем, но не владеем ею).
-    Qdisc { dev: String },
-    /// Фильтр на входе: mac = Some — flower src_mac (устройство), None — matchall (порт/SSID).
-    Filter { dev: String, pref: u32, mac: Option<String>, mark: String },
-    /// Наша цепочка iptables/ip6tables (MITT_FWD в filter, MITT_MARK в mangle).
-    IptChain { v6: bool, table: String, chain: String },
-    /// Правило iptables/ip6tables в каноническом виде `iptables -S` (без `-A CHAIN`).
-    Ipt { v6: bool, table: String, chain: String, spec: Vec<String> },
+    /// Набор ipset (IPv4). timeout — у наборов, которые заполняет dnsmasq.
+    Ipset { name: String, kind: String, timeout: Option<u32> },
+    /// Наша цепочка целиком: правила по порядку (порядок значим — первое совпадение).
+    Chain { v6: bool, table: String, chain: String, rows: Vec<Vec<String>> },
+    /// Переход из встроенной цепочки в нашу (в начало встроенной).
+    Jump { v6: bool, table: String, from: String, chain: String },
 }
 
 /// Адрес или подсеть в том виде, как их печатает `ip`: хост без /32 и /128.
@@ -131,100 +212,55 @@ pub fn norm_prefix(s: &str) -> String {
     }
 }
 
-fn rule(v6: bool, prio: u32) -> Entry {
-    Entry::Rule { v6, prio, from: None, to: None, iif: None, fwmark: None, lookup: None }
+/// Префикс в том виде, как его печатает `iptables -S`: всегда с длиной.
+fn ipt_prefix(s: &str) -> String {
+    let p = norm_prefix(s);
+    if p.contains('/') { p } else if p.contains(':') { format!("{p}/128") } else { format!("{p}/32") }
 }
-fn with(mut e: Entry, f: impl FnOnce(&mut Option<String>, &mut Option<String>, &mut Option<String>, &mut Option<String>, &mut Option<String>)) -> Entry {
-    if let Entry::Rule { from, to, iif, fwmark, lookup, .. } = &mut e {
-        f(from, to, iif, fwmark, lookup);
-    }
-    e
+
+fn ipt_prog(v6: bool) -> &'static str {
+    if v6 { "ip6tables" } else { "iptables" }
+}
+
+fn jump_spec(chain: &str) -> Vec<String> {
+    ["-m", "comment", "--comment", NF_COMMENT, "-j", chain].iter().map(|s| s.to_string()).collect()
 }
 
 impl Entry {
-    pub fn guard_route(v6: bool) -> Self {
-        Entry::Route { v6, dev: None, metric: METRIC_GUARD }
+    pub fn guard_route() -> Self {
+        Entry::Route { v6: false, dev: None, metric: METRIC_GUARD }
     }
-    pub fn tun_route(v6: bool, dev: &str) -> Self {
-        Entry::Route { v6, dev: Some(dev.into()), metric: METRIC_TUN }
+    pub fn tun_route(dev: &str) -> Self {
+        Entry::Route { v6: false, dev: Some(dev.into()), metric: METRIC_TUN }
     }
     pub fn lan_bypass(prefix: &str) -> Self {
-        with(rule(prefix.contains(':'), PRIO_LAN), |_, to, _, _, l| {
-            *to = Some(norm_prefix(prefix));
-            *l = Some("main".into())
-        })
+        Entry::Rule { v6: false, prio: PRIO_LAN, from: None, to: Some(norm_prefix(prefix)), iif: None, fwmark: None, lookup: Some("main".into()) }
     }
-    pub fn local_bypass(v6: bool) -> Self {
-        with(rule(v6, PRIO_LOCAL), |_, _, iif, _, l| {
-            *iif = Some("lo".into());
-            *l = Some("main".into())
-        })
-    }
-    pub fn dev_capture(ip: &str, mark: u32) -> Self {
-        with(rule(false, PRIO_DEV), |f, _, _, m, l| {
-            *f = Some(norm_prefix(ip));
-            *m = Some(fmt_mark(mark, MARK_MASK));
-            *l = Some(TABLE.to_string())
-        })
-    }
-    pub fn dev_catch() -> Self {
-        with(rule(false, PRIO_DEV_CATCH), |_, _, _, m, _| *m = Some(fmt_mark(MARK_OURS, MARK_CLASS_MASK)))
-    }
-    pub fn net_capture(subnet: &str, mark: u32) -> Self {
-        with(rule(false, PRIO_NET), |f, _, _, m, l| {
-            *f = Some(norm_prefix(subnet));
-            *m = Some(fmt_mark(mark, MARK_MASK));
-            *l = Some(TABLE.to_string())
-        })
-    }
-    pub fn net_catch() -> Self {
-        with(rule(false, PRIO_NET_CATCH), |_, _, _, m, _| *m = Some(fmt_mark(MARK_OURS | MARK_NET_FLAG, MARK_CLASS_MASK)))
-    }
-    /// Внешний IPv6 всех помеченных источников (устройства и сети) — запрет: IPv6 пока не туннелируется.
-    pub fn v6_block_marked() -> Self {
-        with(rule(true, PRIO_V6_BLOCK), |_, _, _, m, _| *m = Some(fmt_mark(MARK_OURS, MARK_OURS_MASK)))
-    }
-    pub fn lanwide_capture(bridge: &str, subnet: &str) -> Self {
-        with(rule(false, PRIO_LANWIDE), |f, _, iif, _, l| {
-            *f = Some(norm_prefix(subnet));
-            *iif = Some(bridge.into());
-            *l = Some(TABLE.to_string())
-        })
-    }
-    pub fn lanwide_catch(bridge: &str, v6: bool) -> Self {
-        with(rule(v6, PRIO_LANWIDE_CATCH), |_, _, iif, _, _| *iif = Some(bridge.into()))
-    }
-    pub fn filter_mac(dev: &str, pref: u32, mac: &str, mark: u32) -> Self {
-        Entry::Filter { dev: dev.into(), pref, mac: Some(mac.to_ascii_lowercase()), mark: fmt_mark(mark, MARK_MASK) }
-    }
-    pub fn filter_port(dev: &str, pref: u32, mark: u32) -> Self {
-        Entry::Filter { dev: dev.into(), pref, mac: None, mark: fmt_mark(mark, MARK_MASK) }
+    pub fn mark_rule() -> Self {
+        Entry::Rule { v6: false, prio: PRIO_MARK, from: None, to: None, iif: None, fwmark: Some(fmt_mark(NF_MARK, NF_MARK)), lookup: Some(TABLE.to_string()) }
     }
     pub fn is_tun_route(&self) -> bool {
         matches!(self, Entry::Route { dev: Some(_), .. })
     }
 
-    /// Порядок добавления: запасной unreachable, TUN, обходы (роутер, LAN), запреты, захват, и только потом
-    /// дисциплина и фильтры, которые ставят метки: когда метка появляется, правила для неё уже есть.
-    /// Удаление — в обратном порядке: сначала перестают ставиться метки, последним уходит запасной unreachable.
+    /// Порядок добавления: наборы, маршруты, правила выбора таблицы, цепочки-листья (метка, очередь), цепочки
+    /// классификации и только потом переходы в них: когда трафик попадает в цепочку, всё, на что она ссылается, уже есть.
+    /// Удаление — в обратном порядке.
     pub fn rank(&self) -> u8 {
         match self {
-            Entry::Route { dev: None, .. } => 0,
-            Entry::Route { dev: Some(_), .. } => 1,
-            Entry::Rule { iif: Some(i), lookup: Some(_), .. } if i == "lo" => 2,
-            Entry::Rule { to: Some(_), .. } => 3,
-            Entry::Rule { lookup: None, .. } => 4,
-            Entry::Rule { lookup: Some(_), .. } => 5,
-            Entry::Qdisc { .. } => 6,
-            Entry::Filter { .. } => 7,
-            Entry::IptChain { .. } => 6,
-            Entry::Ipt { spec, .. } if is_jump(spec) => 8,
-            Entry::Ipt { .. } => 7,
+            Entry::Ipset { .. } => 0,
+            Entry::Route { dev: None, .. } => 1,
+            Entry::Route { dev: Some(_), .. } => 2,
+            Entry::Rule { lookup: Some(l), .. } if l == "main" => 3,
+            Entry::Rule { .. } => 4,
+            Entry::Chain { rows, .. } if rows.iter().all(|r| !r.iter().any(|w| w.starts_with(CHAIN_PREFIX))) => 5,
+            Entry::Chain { .. } => 6,
+            Entry::Jump { .. } => 7,
         }
     }
 
-    /// Программа и аргументы для add/del.
-    pub fn cmd(&self, op: &str) -> (&'static str, Vec<String>) {
+    /// Команды для add/del (программа и аргументы), по порядку.
+    pub fn cmds(&self, op: &str) -> Vec<(&'static str, Vec<String>)> {
         let s = |x: &str| x.to_string();
         match self {
             Entry::Route { v6, dev, metric } => {
@@ -238,7 +274,7 @@ impl Entry {
                     Some(d) => a.extend([s("default"), s("dev"), d.clone()]),
                 }
                 a.extend([s("metric"), metric.to_string(), s("table"), TABLE.to_string()]);
-                ("ip", a)
+                vec![("ip", a)]
             }
             Entry::Rule { v6, prio, from, to, iif, fwmark, lookup } => {
                 let mut a = Vec::new();
@@ -255,415 +291,206 @@ impl Entry {
                     Some(t) => a.extend([s("lookup"), t.clone()]),
                     None => a.push(s("unreachable")),
                 }
-                ("ip", a)
+                vec![("ip", a)]
             }
-            Entry::Qdisc { dev } => ("tc", vec![s("qdisc"), s(op), s("dev"), dev.clone(), s("clsact")]),
-            Entry::Filter { dev, pref, mac, mark } => {
-                let mut a = vec![s("filter"), s(op), s("dev"), dev.clone(), s("ingress"), s("pref"), pref.to_string()];
+            Entry::Ipset { name, kind, timeout } => {
                 if op == "add" {
-                    a.extend([s("protocol"), s("all")]);
-                    match mac {
-                        Some(m) => a.extend([s("flower"), s("src_mac"), m.clone()]),
-                        None => a.push(s("matchall")),
+                    let mut a = vec![s("create"), name.clone(), kind.clone(), s("family"), s("inet")];
+                    if let Some(t) = timeout {
+                        a.extend([s("timeout"), t.to_string()]);
                     }
-                    // continue: после нашей метки классификация продолжается — чужие фильтры дальше работают
-                    a.extend([s("action"), s("skbedit"), s("mark"), mark.clone(), s("continue")]);
+                    vec![("ipset", a)]
+                } else {
+                    vec![("ipset", vec![s("destroy"), name.clone()])]
                 }
-                ("tc", a)
             }
-            Entry::IptChain { v6, table, chain } => {
-                (if *v6 { "ip6tables" } else { "iptables" }, vec![s("-w"), s("-t"), table.clone(), s(if op == "add" { "-N" } else { "-X" }), chain.clone()])
+            Entry::Chain { v6, table, chain, rows } => {
+                let base = |c: &str| vec![s("-w"), s("-t"), table.clone(), s(c), chain.clone()];
+                if op == "add" {
+                    let mut v = vec![(ipt_prog(*v6), base("-N"))];
+                    for r in rows {
+                        let mut a = base("-A");
+                        a.extend(r.iter().cloned());
+                        v.push((ipt_prog(*v6), a));
+                    }
+                    v
+                } else {
+                    vec![(ipt_prog(*v6), base("-F")), (ipt_prog(*v6), base("-X"))]
+                }
             }
-            Entry::Ipt { v6, table, chain, spec } => {
+            Entry::Jump { v6, table, from, chain } => {
                 let mut a = vec![s("-w"), s("-t"), table.clone()];
-                match op {
-                    // RETURN для LAN и переходы — в начало цепочки, остальное — в конец
-                    "add" if is_top(spec) => a.extend([s("-I"), chain.clone(), s("1")]),
-                    "add" => a.extend([s("-A"), chain.clone()]),
-                    _ => a.extend([s("-D"), chain.clone()]),
+                if op == "add" {
+                    a.extend([s("-I"), from.clone(), s("1")]);
+                } else {
+                    a.extend([s("-D"), from.clone()]);
                 }
-                a.extend(spec.iter().cloned());
-                (if *v6 { "ip6tables" } else { "iptables" }, a)
+                a.extend(jump_spec(chain));
+                vec![(ipt_prog(*v6), a)]
             }
         }
     }
 
     pub fn label(&self) -> String {
-        let (prog, args) = self.cmd("add");
-        format!("{prog} {}", args.into_iter().filter(|x| x != "add").collect::<Vec<_>>().join(" "))
-    }
-
-    pub fn ipt(v6: bool, table: &str, chain: &str, spec: &[&str]) -> Self {
-        Entry::Ipt { v6, table: table.into(), chain: chain.into(), spec: norm_spec(&spec.iter().map(|x| x.to_string()).collect::<Vec<_>>()) }
-    }
-    pub fn ipt_chain(v6: bool, table: &str, chain: &str) -> Self {
-        Entry::IptChain { v6, table: table.into(), chain: chain.into() }
-    }
-    /// Захват по IPv4 источника (путь стока: привязку MAC и IP обеспечивает FORWARD).
-    pub fn ip_capture(ip: &str) -> Self {
-        with(rule(false, PRIO_DEV), |f, _, _, _, l| {
-            *f = Some(norm_prefix(ip));
-            *l = Some(TABLE.to_string())
-        })
-    }
-    pub fn iif_capture(bridge: &str, subnet: &str, prio: u32) -> Self {
-        with(rule(false, prio), |f, _, iif, _, l| {
-            *f = Some(norm_prefix(subnet));
-            *iif = Some(bridge.into());
-            *l = Some(TABLE.to_string())
-        })
-    }
-    pub fn iif_block(bridge: &str, v6: bool, prio: u32) -> Self {
-        with(rule(v6, prio), |_, _, iif, _, _| *iif = Some(bridge.into()))
-    }
-    pub fn mark_rule(v6: bool, prio: u32, from: Option<&str>, mark: u32, mask: u32, lookup: bool) -> Self {
-        with(rule(v6, prio), |f, _, _, m, l| {
-            *f = from.map(norm_prefix);
-            *m = Some(fmt_mark(mark, mask));
-            *l = lookup.then(|| TABLE.to_string())
-        })
-    }
-
-    fn tc_dev(&self) -> Option<&str> {
         match self {
-            Entry::Qdisc { dev } | Entry::Filter { dev, .. } => Some(dev),
-            _ => None,
-        }
-    }
-}
-
-// ---------- iptables: канонический вид правил ----------
-
-/// Переход в нашу цепочку из встроенной (цель MITT_*).
-pub fn is_jump(spec: &[String]) -> bool {
-    spec.windows(2).any(|w| w[0] == "-j" && w[1].starts_with("MITT_"))
-}
-fn is_top(spec: &[String]) -> bool {
-    is_jump(spec) || spec.ends_with(&["-j".to_string(), "RETURN".to_string()])
-}
-/// Нормализация для сравнения с выводом `iptables -S`: MAC в нижнем регистре, без кавычек.
-pub fn norm_spec(spec: &[String]) -> Vec<String> {
-    let mut out: Vec<String> = Vec::with_capacity(spec.len());
-    for t in spec {
-        let t = t.trim_matches('"').to_string();
-        let lower = out.last().is_some_and(|p| p == "--mac-source");
-        out.push(if lower { t.to_ascii_lowercase() } else { t });
-    }
-    out
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct IptLive {
-    pub v6: bool,
-    pub table: String,
-    pub chains: BTreeSet<String>,
-    /// (цепочка, спецификация) для всех правил таблицы.
-    pub rules: Vec<(String, Vec<String>)>,
-}
-
-/// Разбор `iptables -S` (одна таблица).
-pub fn parse_ipt(text: &str, v6: bool, table: &str) -> IptLive {
-    let mut l = IptLive { v6, table: table.into(), ..Default::default() };
-    for line in text.lines() {
-        let t: Vec<String> = line.split_whitespace().map(String::from).collect();
-        match t.first().map(String::as_str) {
-            Some("-N") if t.len() >= 2 => {
-                l.chains.insert(t[1].clone());
+            Entry::Chain { v6, table, chain, rows } => {
+                let body = rows.iter().map(|r| r.join(" ")).collect::<Vec<_>>().join(" | ");
+                format!("{} -t {table} {chain}: {body}", ipt_prog(*v6))
             }
-            Some("-A") if t.len() >= 2 => l.rules.push((t[1].clone(), norm_spec(&t[2..]))),
-            _ => {}
-        }
-    }
-    l
-}
-
-/// Маски меток в спецификации правила iptables (MARK и mark): значение не важно, важны затрагиваемые биты.
-pub fn spec_mark_masks(spec: &[String]) -> Vec<u32> {
-    let mut v = Vec::new();
-    for (i, w) in spec.iter().enumerate() {
-        if matches!(w.as_str(), "--set-xmark" | "--set-mark" | "--or-mark" | "--and-mark" | "--xor-mark" | "--mark") {
-            if let Some(val) = spec.get(i + 1) {
-                let mask = match val.split_once('/') {
-                    Some((_, m)) => parse_hex_or_dec(m).unwrap_or(0xffff_ffff),
-                    None => 0xffff_ffff,
-                };
-                v.push(mask);
+            _ => {
+                let (prog, args) = self.cmds("add").into_iter().next().unwrap_or(("", Vec::new()));
+                format!("{prog} {}", args.into_iter().filter(|x| x != "add").collect::<Vec<_>>().join(" "))
             }
         }
     }
-    v
 }
 
-/// Маска всех меток, которые использует план (fwmark в правилах, MARK в iptables, метки tc).
-pub fn our_mark_mask<'a>(entries: impl IntoIterator<Item = &'a Entry>) -> u32 {
-    let mut m = 0;
-    for e in entries {
-        match e {
-            Entry::Rule { fwmark: Some(f), .. } | Entry::Filter { mark: f, .. } => m |= mark_parts(f).map(|(_, mask)| mask).unwrap_or(0),
-            Entry::Ipt { spec, .. } => m |= spec_mark_masks(spec).into_iter().fold(0, |a, b| a | b),
-            _ => {}
+// ---------- построение плана ----------
+
+fn hash8(v: &impl Serialize) -> String {
+    let h = Sha256::digest(serde_json::to_vec(v).unwrap_or_default());
+    h.iter().take(4).map(|b| format!("{b:02x}")).collect()
+}
+
+/// Цепочка с именем по содержимому: MITT_<буква><8 hex>.
+fn chain(v6: bool, table: &str, letter: char, rows: Vec<Vec<String>>) -> Entry {
+    let name = format!("{CHAIN_PREFIX}{letter}{}", hash8(&(v6, table, &rows)));
+    Entry::Chain { v6, table: table.into(), chain: name, rows }
+}
+
+fn chain_name(e: &Entry) -> String {
+    match e {
+        Entry::Chain { chain, .. } => chain.clone(),
+        _ => String::new(),
+    }
+}
+
+/// Отбор источника в правиле iptables. Сеть: мост целиком (`-i`) или по порту (physdev).
+fn src_variants(s: &SrcMatch, bridge_ports: &BTreeMap<String, BTreeSet<String>>) -> Vec<Vec<String>> {
+    let v = |x: &[&str]| x.iter().map(|w| w.to_string()).collect::<Vec<String>>();
+    match s {
+        SrcMatch::Mac { bridge, mac } => vec![v(&["-i", bridge, "-m", "mac", "--mac-source", &mac.to_ascii_uppercase()])],
+        SrcMatch::Bridge { bridge } => vec![v(&["-i", bridge])],
+        SrcMatch::Network { bridge, ports } => {
+            let mine: BTreeSet<String> = ports.iter().cloned().collect();
+            if bridge_ports.get(bridge).is_some_and(|live| !live.is_empty() && live.is_subset(&mine)) {
+                vec![v(&["-i", bridge])]
+            } else {
+                ports.iter().map(|p| v(&["-m", "physdev", "--physdev-in", p])).collect()
+            }
         }
     }
-    m
 }
 
-/// Что нужно netfilter-плану от ядра и окружения.
-#[derive(Debug, Default, Clone, Serialize, PartialEq, Eq)]
-pub struct NfNeeds {
-    /// physdev + MARK (политика сети на части моста).
-    pub mark: bool,
-    pub v6: bool,
-    /// NFQUEUE для Zapret (mangle OUTPUT, метка сокета движка).
-    pub queue: bool,
+/// Нужен ли physdev (сеть на части моста).
+pub fn needs_physdev(spec: &PolicySpec, bridge_ports: &BTreeMap<String, BTreeSet<String>>) -> bool {
+    spec.rules.iter().map(|r| &r.src).chain(spec.v6_block.iter()).any(|s| src_variants(s, bridge_ports).iter().any(|v| v.iter().any(|w| w == "physdev")))
 }
 
-/// План для стока, без tc. Устройство: `from <IPv4> lookup 3100` и привязка MAC к IP в FORWARD (MAC с чужим IPv4
-/// или любой внешний IPv6 этого MAC → REJECT; трафик к самому роутеру FORWARD не проходит). Сеть на своём мосту:
-/// `iif`. Сеть на части моста: physdev + MARK 0x4000 + fwmark. `bridge_ports` — живой состав мостов.
-pub fn build_plan_netfilter(
-    spec: &CaptureSpec,
-    v6_lan_prefixes: &[String],
-    bridge_ports: &BTreeMap<String, BTreeSet<String>>,
-    guard_only: bool,
-) -> (BTreeSet<Entry>, NfNeeds) {
-    let mut p = BTreeSet::new();
-    let mut needs = NfNeeds::default();
-    if spec.is_empty() {
-        return (p, needs);
-    }
-    p.insert(Entry::guard_route(false));
-    if !guard_only {
-        p.insert(Entry::tun_route(false, &spec.tun));
-    }
-    p.insert(Entry::local_bypass(false));
-    p.insert(Entry::local_bypass(true));
+/// Классификация: правила по порядку, у каждого — цель в этой цепочке или RETURN (совпадение без действия здесь
+/// останавливает разбор: первое совпадение). Хвост из одних RETURN отбрасывается; нет действий — цепочки нет.
+fn classify(spec: &PolicySpec, bridge_ports: &BTreeMap<String, BTreeSet<String>>, target: impl Fn(Act) -> Option<Vec<String>>) -> Option<Vec<Vec<String>>> {
+    let mut rows: Vec<(Vec<String>, bool)> = Vec::new();
     for s in &spec.lan_subnets {
-        p.insert(Entry::lan_bypass(s));
+        rows.push((vec!["-d".into(), ipt_prefix(s), "-j".into(), "RETURN".into()], false));
     }
-    for s in v6_lan_prefixes.iter().map(String::as_str).chain(["fe80::/10", "ff00::/8"]) {
-        p.insert(Entry::lan_bypass(s));
-    }
-    let (f, m) = ("filter", "mangle");
-    let (mut fwd4, mut fwd6) = (false, false);
-    for d in &spec.devices {
-        if let Some(ip) = &d.ipv4 {
-            p.insert(Entry::ip_capture(ip));
-            let src = format!("{}/32", norm_prefix(ip));
-            p.insert(Entry::ipt(false, f, NF_FWD_CHAIN, &["!", "-s", &src, "-i", &d.bridge, "-m", "mac", "--mac-source", &d.mac, "-j", "REJECT", "--reject-with", "icmp-port-unreachable"]));
-        } else {
-            p.insert(Entry::ipt(false, f, NF_FWD_CHAIN, &["-i", &d.bridge, "-m", "mac", "--mac-source", &d.mac, "-j", "REJECT", "--reject-with", "icmp-port-unreachable"]));
-        }
-        p.insert(Entry::ipt(true, f, NF_FWD_CHAIN, &["-i", &d.bridge, "-m", "mac", "--mac-source", &d.mac, "-j", "REJECT", "--reject-with", "icmp6-port-unreachable"]));
-        fwd4 = true;
-        fwd6 = true;
-    }
-    for n in &spec.networks {
-        let ports: BTreeSet<String> = n.ports.iter().cloned().collect();
-        let whole = bridge_ports.get(&n.bridge).is_some_and(|live| !live.is_empty() && live.is_subset(&ports));
-        if whole {
-            // сеть занимает мост целиком: источник — интерфейс моста, метки не нужны
-            p.insert(Entry::iif_capture(&n.bridge, &n.subnet, PRIO_NET));
-            p.insert(Entry::iif_block(&n.bridge, false, PRIO_NET_CATCH));
-            p.insert(Entry::iif_block(&n.bridge, true, PRIO_V6_BLOCK));
-        } else {
-            needs.mark = true;
-            for port in &n.ports {
-                for v6 in [false, true] {
-                    p.insert(Entry::ipt(v6, m, NF_MARK_CHAIN, &["-m", "physdev", "--physdev-in", port, "-j", "MARK", "--set-xmark", &fmt_mark(NF_MARK, NF_MARK)]));
-                }
+    for r in &spec.rules {
+        let t = target(r.act);
+        for src in src_variants(&r.src, bridge_ports) {
+            let mut row = src;
+            if let Some(set) = &r.set {
+                row.extend(["-m", "set", "--match-set", set, "dst"].iter().map(|w| w.to_string()));
             }
-            p.insert(Entry::mark_rule(false, PRIO_NET, Some(&n.subnet), NF_MARK, NF_MARK, true));
-            p.insert(Entry::mark_rule(false, PRIO_NET_CATCH, None, NF_MARK, NF_MARK, false));
-            p.insert(Entry::mark_rule(true, PRIO_V6_BLOCK, None, NF_MARK, NF_MARK, false));
+            let effective = t.is_some();
+            row.extend(t.clone().unwrap_or_else(|| vec!["-j".into(), "RETURN".into()]));
+            rows.push((row, effective));
         }
     }
-    for l in &spec.lanwide {
-        p.insert(Entry::lanwide_capture(&l.bridge, &l.subnet));
-        p.insert(Entry::lanwide_catch(&l.bridge, false));
-        p.insert(Entry::lanwide_catch(&l.bridge, true));
-    }
-    let jump = |chain: &str| vec!["-m".to_string(), "comment".into(), "--comment".into(), NF_COMMENT.into(), "-j".into(), chain.into()];
-    if fwd4 {
-        p.insert(Entry::ipt_chain(false, f, NF_FWD_CHAIN));
-        for s in &spec.lan_subnets {
-            p.insert(Entry::ipt(false, f, NF_FWD_CHAIN, &["-d", s, "-j", "RETURN"]));
-        }
-        // fw3 стока может отклонять пересылку на интерфейс вне зон: захваченный трафик к TUN разрешаем явно
-        p.insert(Entry::ipt(false, f, NF_FWD_CHAIN, &["-o", &spec.tun, "-j", "ACCEPT"]));
-        p.insert(Entry::Ipt { v6: false, table: f.into(), chain: "FORWARD".into(), spec: jump(NF_FWD_CHAIN) });
-    }
-    if fwd6 {
-        needs.v6 = true;
-        p.insert(Entry::ipt_chain(true, f, NF_FWD_CHAIN));
-        for s in v6_lan_prefixes {
-            p.insert(Entry::ipt(true, f, NF_FWD_CHAIN, &["-d", s, "-j", "RETURN"]));
-        }
-        p.insert(Entry::Ipt { v6: true, table: f.into(), chain: "FORWARD".into(), spec: jump(NF_FWD_CHAIN) });
-    }
-    if needs.mark {
-        needs.v6 = true;
-        for v6 in [false, true] {
-            p.insert(Entry::ipt_chain(v6, m, NF_MARK_CHAIN));
-            p.insert(Entry::Ipt { v6, table: m.into(), chain: "PREROUTING".into(), spec: jump(NF_MARK_CHAIN) });
-        }
-    }
-    if let (Some(z), false) = (&spec.zapret, guard_only) {
-        // только IPv4: Mihomo работает с ipv6: false; при guard-only движок не запущен и очередь не нужна
-        needs.queue = true;
-        let ports = z.tcp_ports.iter().map(u16::to_string).collect::<Vec<_>>().join(",");
-        let qnum = z.qnum.to_string();
-        p.insert(Entry::ipt_chain(false, m, NF_ZAPRET_CHAIN));
-        p.insert(Entry::ipt(false, m, NF_ZAPRET_CHAIN, &["-p", "tcp", "-m", "multiport", "--dports", &ports, "-m", "mark", "--mark", &fmt_mark(z.mark, z.mark),
-            "-j", "NFQUEUE", "--queue-num", &qnum, "--queue-bypass"]));
-        p.insert(Entry::Ipt { v6: false, table: m.into(), chain: "OUTPUT".into(), spec: jump(NF_ZAPRET_CHAIN) });
-    }
-    (p, needs)
+    let last = rows.iter().rposition(|(_, e)| *e)?;
+    Some(rows.into_iter().take(last + 1).map(|(r, _)| r).collect())
 }
 
-/// Таблицы iptables, состояние которых нужно прочитать.
-pub fn ipt_tables<'a>(entries: impl IntoIterator<Item = &'a Entry>) -> BTreeSet<(bool, String)> {
-    entries
-        .into_iter()
-        .filter_map(|e| match e {
-            Entry::Ipt { v6, table, .. } | Entry::IptChain { v6, table, .. } => Some((*v6, table.clone())),
-            _ => None,
-        })
-        .collect()
-}
-
-// ---------- спецификация захвата и построение плана ----------
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct DevCap {
-    pub id: String,
-    pub mac: String,
-    pub ipv4: Option<String>,
-    pub bridge: String,
-    pub mark: u32,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct NetCap {
-    pub id: String,
-    pub bridge: String,
-    pub ports: Vec<String>,
-    pub subnet: String,
-    pub mark: u32,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct LanCap {
-    pub bridge: String,
-    pub subnet: String,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CaptureSpec {
-    pub devices: Vec<DevCap>,
-    pub networks: Vec<NetCap>,
-    pub lanwide: Vec<LanCap>,
-    pub lan_subnets: Vec<String>,
-    pub tun: String,
-    /// Очередь Zapret для прямых соединений движка с меткой сокета (действие «напрямую с Zapret»).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub zapret: Option<ZapretSpec>,
-}
-
-/// Исходящие соединения Mihomo через выход `mitt-zapret` несут метку сокета `mark`; их TCP-пакеты к `tcp_ports`
-/// уходят в NFQUEUE `qnum` (с `--queue-bypass`: без nfqws2 пакеты идут дальше без обработки, это прямой выход).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ZapretSpec {
-    pub qnum: u16,
-    pub mark: u32,
-    pub tcp_ports: Vec<u16>,
-}
-
-pub const ZAPRET_QNUM: u16 = 200;
-pub const NF_ZAPRET_CHAIN: &str = "MITT_ZQ";
-/// Метка пакетов, которые генерирует nfqws2 (`--fwmark`): без бита `NF_MARK`, чтобы они не попадали в очередь повторно.
-pub const ZAPRET_DESYNC_MARK: u32 = 0x4000_0000;
-
-impl CaptureSpec {
-    pub fn is_empty(&self) -> bool {
-        self.devices.is_empty() && self.networks.is_empty() && self.lanwide.is_empty()
-    }
-    /// Мосты и порты, которые должны существовать до применения: (интерфейс, мост, если это порт).
-    pub fn interfaces(&self) -> Vec<(String, Option<String>)> {
-        let mut v: BTreeSet<(String, Option<String>)> = BTreeSet::new();
-        for d in &self.devices {
-            v.insert((d.bridge.clone(), None));
-        }
-        for n in &self.networks {
-            v.insert((n.bridge.clone(), None));
-            for p in &n.ports {
-                v.insert((p.clone(), Some(n.bridge.clone())));
-            }
-        }
-        for l in &self.lanwide {
-            v.insert((l.bridge.clone(), None));
-        }
-        v.into_iter().collect()
-    }
-}
-
-/// Строит желаемый набор записей. `v6_lan_prefixes` — живые глобальные/ULA префиксы мостов;
-/// `foreign_hooks` — интерфейсы, где уже есть чужая ingress/clsact (её используем, но не создаём и не удаляем).
-pub fn build_plan(spec: &CaptureSpec, v6_lan_prefixes: &[String], foreign_hooks: &BTreeSet<String>, owned: &BTreeSet<Entry>, guard_only: bool) -> BTreeSet<Entry> {
+/// Желаемый набор записей. `v6_lan_prefixes` — живые глобальные/ULA префиксы мостов; `bridge_ports` — живой состав мостов.
+pub fn build_plan(spec: &PolicySpec, v6_lan_prefixes: &[String], bridge_ports: &BTreeMap<String, BTreeSet<String>>, guard_only: bool) -> BTreeSet<Entry> {
     let mut p = BTreeSet::new();
     if spec.is_empty() {
         return p;
     }
-    p.insert(Entry::guard_route(false));
-    if !guard_only {
-        p.insert(Entry::tun_route(false, &spec.tun));
+    let (f, m) = ("filter", "mangle");
+    let s = |x: &str| x.to_string();
+    for set in &spec.sets {
+        let (kind, timeout) = match set.kind {
+            SetKind::Dns => ("hash:ip", Some(SET_DNS_TIMEOUT)),
+            SetKind::Static => ("hash:net", None),
+        };
+        p.insert(Entry::Ipset { name: set.name.clone(), kind: kind.into(), timeout });
     }
-    p.insert(Entry::local_bypass(false));
-    p.insert(Entry::local_bypass(true));
-    for s in &spec.lan_subnets {
-        p.insert(Entry::lan_bypass(s));
-    }
-    // IPv6: локальные адреса роутера (NDP, DHCPv6, управление) обслуживает таблица local; сюда — префиксы LAN,
-    // link-local и multicast, чтобы прямой обмен внутри сети не попадал под запрет
-    for s in v6_lan_prefixes.iter().map(String::as_str).chain(["fe80::/10", "ff00::/8"]) {
-        p.insert(Entry::lan_bypass(s));
-    }
-    let mut tc_devs: BTreeSet<String> = BTreeSet::new();
-    let mut marked = false;
-    for (k, d) in spec.devices.iter().enumerate() {
-        if let Some(ip) = &d.ipv4 {
-            p.insert(Entry::dev_capture(ip, d.mark));
+    let tunnel = spec.uses(Act::Tunnel) || spec.dns_resolver.is_some();
+    if tunnel {
+        if !spec.fail_open {
+            p.insert(Entry::guard_route());
         }
-        p.insert(Entry::filter_mac(&d.bridge, TC_PREF_DEV + k as u32 + 1, &d.mac, d.mark));
-        tc_devs.insert(d.bridge.clone());
-        marked = true;
-    }
-    if !spec.devices.is_empty() {
-        p.insert(Entry::dev_catch());
-    }
-    for (k, n) in spec.networks.iter().enumerate() {
-        p.insert(Entry::net_capture(&n.subnet, n.mark));
-        for port in &n.ports {
-            p.insert(Entry::filter_port(port, TC_PREF_NET + k as u32 + 1, n.mark));
-            tc_devs.insert(port.clone());
+        if !guard_only {
+            p.insert(Entry::tun_route(&spec.tun));
         }
-        marked = true;
-    }
-    if !spec.networks.is_empty() {
-        p.insert(Entry::net_catch());
-    }
-    if marked {
-        p.insert(Entry::v6_block_marked());
-    }
-    for l in &spec.lanwide {
-        p.insert(Entry::lanwide_capture(&l.bridge, &l.subnet));
-        p.insert(Entry::lanwide_catch(&l.bridge, false));
-        p.insert(Entry::lanwide_catch(&l.bridge, true));
-    }
-    for dev in tc_devs {
-        let q = Entry::Qdisc { dev: dev.clone() };
-        if owned.contains(&q) || !foreign_hooks.contains(&dev) {
-            p.insert(q);
+        for sub in &spec.lan_subnets {
+            p.insert(Entry::lan_bypass(sub));
         }
+        p.insert(Entry::mark_rule());
+        let leaf = chain(false, m, 'T', vec![vec![s("-j"), s("MARK"), s("--set-xmark"), fmt_mark(NF_MARK, NF_MARK)]]);
+        let tt = chain_name(&leaf);
+        p.insert(leaf);
+        if let Some(rows) = classify(spec, bridge_ports, |a| (a == Act::Tunnel).then(|| vec![s("-g"), tt.clone()])) {
+            let c = chain(false, m, 'C', rows);
+            p.insert(Entry::Jump { v6: false, table: m.into(), from: "PREROUTING".into(), chain: chain_name(&c) });
+            p.insert(c);
+        }
+        if let Some(r) = &spec.dns_resolver {
+            let rows = ["udp", "tcp"]
+                .iter()
+                .map(|proto| vec![s("-d"), ipt_prefix(r), s("-p"), s(proto), s("-m"), s(proto), s("--dport"), s("53"), s("-j"), s("MARK"), s("--set-xmark"), fmt_mark(NF_MARK, NF_MARK)])
+                .collect();
+            let c = chain(false, m, 'O', rows);
+            p.insert(Entry::Jump { v6: false, table: m.into(), from: "OUTPUT".into(), chain: chain_name(&c) });
+            p.insert(c);
+        }
+    }
+    // filter FORWARD: выход в TUN разрешён явно (fw3 стока отклоняет пересылку на интерфейс вне зон), затем запреты
+    let block = classify(spec, bridge_ports, |a| (a == Act::Block).then(|| vec![s("-j"), s("REJECT"), s("--reject-with"), s("icmp-port-unreachable")]));
+    if tunnel || block.is_some() {
+        let mut rows = Vec::new();
+        if tunnel {
+            rows.push(vec![s("-o"), spec.tun.clone(), s("-j"), s("ACCEPT")]);
+        }
+        rows.extend(block.unwrap_or_default());
+        let c = chain(false, f, 'F', rows);
+        p.insert(Entry::Jump { v6: false, table: f.into(), from: "FORWARD".into(), chain: chain_name(&c) });
+        p.insert(c);
+    }
+    if !spec.zapret_ports.is_empty() && !guard_only {
+        let ports = spec.zapret_ports.iter().map(u16::to_string).collect::<Vec<_>>().join(",");
+        let leaf = chain(false, m, 'Q', vec![vec![
+            s("-p"), s("tcp"), s("-m"), s("multiport"), s("--dports"), ports, s("-j"), s("NFQUEUE"), s("--queue-num"), ZAPRET_QNUM.to_string(), s("--queue-bypass"),
+        ]]);
+        let q = chain_name(&leaf);
+        if let Some(rows) = classify(spec, bridge_ports, |a| (a == Act::Zapret).then(|| vec![s("-g"), q.clone()])) {
+            p.insert(leaf);
+            let c = chain(false, m, 'Z', rows);
+            p.insert(Entry::Jump { v6: false, table: m.into(), from: "FORWARD".into(), chain: chain_name(&c) });
+            p.insert(c);
+        }
+    }
+    if !spec.v6_block.is_empty() {
+        let mut rows: Vec<Vec<String>> = v6_lan_prefixes.iter().map(|x| vec![s("-d"), ipt_prefix(x), s("-j"), s("RETURN")]).collect();
+        for src in &spec.v6_block {
+            for mut v in src_variants(src, bridge_ports) {
+                v.extend([s("-j"), s("REJECT"), s("--reject-with"), s("icmp6-port-unreachable")]);
+                rows.push(v);
+            }
+        }
+        let c = chain(true, f, '6', rows);
+        p.insert(Entry::Jump { v6: true, table: f.into(), from: "FORWARD".into(), chain: chain_name(&c) });
+        p.insert(c);
     }
     p
 }
@@ -712,11 +539,7 @@ pub fn parse_rules(text: &str, v6: bool) -> Vec<(u32, Result<Entry, String>)> {
                 }
             }
         }
-        let e = if extra || (lookup.is_some() == unreach) {
-            Err(line.trim().to_string())
-        } else {
-            Ok(Entry::Rule { v6, prio, from, to, iif, fwmark, lookup })
-        };
+        let e = if extra || (lookup.is_some() == unreach) { Err(line.trim().to_string()) } else { Ok(Entry::Rule { v6, prio, from, to, iif, fwmark, lookup }) };
         out.push((prio, e));
     }
     out
@@ -767,73 +590,7 @@ pub fn parse_routes(text: &str, v6: bool) -> Vec<Result<Entry, String>> {
     out
 }
 
-/// Есть ли на интерфейсе входной хук (clsact или ingress) — по выводу `tc qdisc show dev X`.
-pub fn parse_tc_hook(text: &str) -> bool {
-    text.lines().any(|l| l.starts_with("qdisc clsact") || l.starts_with("qdisc ingress"))
-}
-
-/// Разбор `tc filter show dev X ingress`: (pref, наш вид фильтра или исходный текст блока).
-pub fn parse_tc_filters(text: &str, dev: &str) -> Vec<(u32, Result<Entry, String>)> {
-    let mut blocks: Vec<Vec<&str>> = Vec::new();
-    for line in text.lines() {
-        if line.starts_with("filter ") {
-            if line.contains(" handle ") {
-                blocks.push(vec![line]);
-            }
-            continue; // заголовок цепочки/приоритета без handle
-        }
-        if let Some(b) = blocks.last_mut() {
-            b.push(line);
-        }
-    }
-    let mut out = Vec::new();
-    for b in blocks {
-        let head: Vec<&str> = b[0].split_whitespace().collect();
-        let pos = |k: &str| head.iter().position(|x| *x == k);
-        let pref = pos("pref").and_then(|i| head.get(i + 1)).and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
-        let kind = pos("pref").and_then(|i| head.get(i + 2)).copied().unwrap_or("");
-        let proto_all = pos("protocol").and_then(|i| head.get(i + 1)) == Some(&"all");
-        let (mut mac, mut mark, mut control, mut actions, mut extra) = (None, None, None, 0, false);
-        for l in &b[1..] {
-            let t: Vec<&str> = l.split_whitespace().collect();
-            match t.first().copied() {
-                Some("src_mac") => mac = t.get(1).map(|m| m.to_ascii_lowercase()),
-                Some("not_in_hw") | Some("in_hw") | Some("index") | Some("Action") | Some("Sent") | Some("backlog") | Some("eth_type") | None => {
-                    if t.first() == Some(&"eth_type") && t.get(1) != Some(&"all") {
-                        extra = true;
-                    }
-                }
-                Some("action") => {
-                    actions += 1;
-                    if let Some(i) = t.iter().position(|x| *x == "skbedit") {
-                        if let (Some("mark"), Some(v)) = (t.get(i + 1).copied(), t.get(i + 2)) {
-                            mark = norm_mark(v);
-                            control = t.get(i + 3).map(|s| s.to_string());
-                        } else {
-                            extra = true;
-                        }
-                    } else {
-                        extra = true;
-                    }
-                }
-                _ => extra = true,
-            }
-        }
-        let ours = !extra
-            && proto_all
-            && actions == 1
-            && control.as_deref() == Some("continue")
-            && mark.is_some()
-            && ((kind == "flower" && mac.is_some()) || (kind == "matchall" && mac.is_none()));
-        out.push((
-            pref,
-            if ours { Ok(Entry::Filter { dev: dev.into(), pref, mac, mark: mark.unwrap() }) } else { Err(b.join(" | ").split_whitespace().collect::<Vec<_>>().join(" ")) },
-        ));
-    }
-    out
-}
-
-/// Глобальные и ULA префиксы из `ip -6 addr show dev X` (link-local не нужен: он покрыт fe80::/10).
+/// Глобальные и ULA префиксы из `ip -6 addr show dev X` (link-local не нужен: он не маршрутизируется).
 pub fn parse_v6_prefixes(text: &str) -> Vec<String> {
     let mut out = BTreeSet::new();
     for line in text.lines() {
@@ -860,45 +617,110 @@ pub fn parse_link(text: &str) -> (bool, Option<String>) {
     (is_bridge, master)
 }
 
-/// Метки MARK в выводе iptables-save/ip6tables-save, пересекающиеся с нашей маской.
-pub fn iptables_mark_collisions(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    for line in text.lines().filter(|l| l.starts_with("-A ")) {
-        let t: Vec<&str> = line.split_whitespace().collect();
-        for (i, w) in t.iter().enumerate() {
-            let val = match *w {
-                "--set-xmark" | "--set-mark" | "--or-mark" | "--and-mark" | "--xor-mark" | "--mark" => t.get(i + 1),
-                _ => None,
-            };
-            if let Some(v) = val {
-                let (m, mask) = match v.split_once('/') {
-                    Some((a, b)) => (parse_hex_or_dec(a), parse_hex_or_dec(b)),
-                    None => (parse_hex_or_dec(v), Some(0xffff_ffff)),
-                };
-                // маска без указания — все биты: правило читает или пишет и наши биты
-                if m.is_some() && mask.unwrap_or(0xffff_ffff) & MARK_MASK != 0 {
-                    out.push(line.to_string());
-                    break;
-                }
-            }
-        }
+/// Нормализация для сравнения с выводом `iptables -S`: без кавычек, MAC в верхнем регистре (так печатает iptables).
+pub fn norm_spec(spec: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(spec.len());
+    for t in spec {
+        let t = t.trim_matches('"').to_string();
+        let upper = out.last().is_some_and(|p| p == "--mac-source");
+        out.push(if upper { t.to_ascii_uppercase() } else { t });
     }
     out
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct TcDev {
-    pub dev: String,
-    pub hook: bool,
-    pub filters: Vec<(u32, Result<Entry, String>)>,
+pub struct IptLive {
+    pub v6: bool,
+    pub table: String,
+    pub chains: BTreeSet<String>,
+    /// (цепочка, спецификация) для всех правил таблицы, по порядку.
+    pub rules: Vec<(String, Vec<String>)>,
+}
+
+/// Разбор `iptables -S` (одна таблица).
+pub fn parse_ipt(text: &str, v6: bool, table: &str) -> IptLive {
+    let mut l = IptLive { v6, table: table.into(), ..Default::default() };
+    for line in text.lines() {
+        let t: Vec<String> = line.split_whitespace().map(String::from).collect();
+        match t.first().map(String::as_str) {
+            Some("-N") if t.len() >= 2 => {
+                l.chains.insert(t[1].clone());
+            }
+            Some("-A") if t.len() >= 2 => l.rules.push((t[1].clone(), norm_spec(&t[2..]))),
+            _ => {}
+        }
+    }
+    l
+}
+
+/// Разбор `ipset list -t`: наши наборы (имя mitt*) как записи; набор с незнакомыми свойствами — исходный текст.
+pub fn parse_ipsets(text: &str) -> Vec<(String, Result<Entry, String>)> {
+    let mut out = Vec::new();
+    for block in text.split("Name: ").skip(1) {
+        let name = block.lines().next().unwrap_or_default().trim().to_string();
+        if !name.starts_with(SET_PREFIX) {
+            continue;
+        }
+        let field = |k: &str| block.lines().find_map(|l| l.strip_prefix(k)).map(|v| v.trim().to_string()).unwrap_or_default();
+        let kind = field("Type:");
+        let header: Vec<String> = field("Header:").split_whitespace().map(String::from).collect();
+        let pos = |k: &str| header.iter().position(|w| w == k);
+        let family = pos("family").and_then(|i| header.get(i + 1)).cloned();
+        let timeout = pos("timeout").and_then(|i| header.get(i + 1)).and_then(|v| v.parse::<u32>().ok());
+        let e = if family.as_deref() == Some("inet") && (kind == "hash:ip" || kind == "hash:net") {
+            Ok(Entry::Ipset { name: name.clone(), kind, timeout })
+        } else {
+            Err(format!("{name}: {kind} {}", header.join(" ")))
+        };
+        out.push((name, e));
+    }
+    out
+}
+
+/// Маски меток в спецификации правила iptables (MARK и mark): значение не важно, важны затрагиваемые биты.
+pub fn spec_mark_masks(spec: &[String]) -> Vec<u32> {
+    let mut v = Vec::new();
+    for (i, w) in spec.iter().enumerate() {
+        if matches!(w.as_str(), "--set-xmark" | "--set-mark" | "--or-mark" | "--and-mark" | "--xor-mark" | "--mark") {
+            if let Some(val) = spec.get(i + 1) {
+                v.push(mark_parts(val).map(|(_, m)| m).unwrap_or(0xffff_ffff));
+            }
+        }
+    }
+    v
+}
+
+/// Маска всех меток, которые использует план (fwmark в правилах, MARK в цепочках).
+pub fn our_mark_mask<'a>(entries: impl IntoIterator<Item = &'a Entry>) -> u32 {
+    let mut m = 0;
+    for e in entries {
+        match e {
+            Entry::Rule { fwmark: Some(f), .. } => m |= mark_parts(f).map(|(_, mask)| mask).unwrap_or(0),
+            Entry::Chain { rows, .. } => m |= rows.iter().flat_map(|r| spec_mark_masks(r)).fold(0, |a, b| a | b),
+            _ => {}
+        }
+    }
+    m
+}
+
+/// Метки MARK в выводе iptables-save, пересекающиеся с нашей маской.
+pub fn iptables_mark_collisions(text: &str, ours: u32) -> Vec<String> {
+    text.lines()
+        .filter(|l| l.starts_with("-A ") && !l.contains(CHAIN_PREFIX))
+        .filter(|l| {
+            let t: Vec<String> = l.split_whitespace().map(String::from).collect();
+            spec_mark_masks(&t).iter().any(|m| m & ours != 0)
+        })
+        .map(String::from)
+        .collect()
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct Live {
     pub rules: Vec<(u32, Result<Entry, String>)>,
     pub routes: Vec<Result<Entry, String>>,
-    pub tc: Vec<TcDev>,
     pub ipt: Vec<IptLive>,
+    pub ipsets: Vec<(String, Result<Entry, String>)>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -922,7 +744,6 @@ pub fn reconcile(desired: &BTreeSet<Entry>, owned: &BTreeSet<Entry>, live: &Live
     let mut d = Diff::default();
     let mut live_set: BTreeSet<Entry> = BTreeSet::new();
     let table = TABLE.to_string();
-    // биты меток, которые реально использует план (tc: 0x0fff0000; netfilter: 0x4000 только для части моста; иначе 0)
     let ours_mask = our_mark_mask(known.iter().copied());
     let mark_overlaps = |m: &Option<String>| m.as_deref().and_then(mark_parts).is_some_and(|(_, mask)| mask & ours_mask != 0);
     for (prio, r) in &live.rules {
@@ -944,7 +765,10 @@ pub fn reconcile(desired: &BTreeSet<Entry>, owned: &BTreeSet<Entry>, live: &Live
                 }
             }
             Err(line) if in_zone || line.split_whitespace().any(|w| w == table) => d.conflicts.push(format!("чужое правило: {line}")),
-            Err(line) if line.contains("fwmark") && line.split_whitespace().skip_while(|w| *w != "fwmark").nth(1).and_then(|v| norm_mark(v)).as_deref().and_then(mark_parts).is_some_and(|(_, m)| m & ours_mask != 0) => {
+            Err(line)
+                if line.contains("fwmark")
+                    && line.split_whitespace().skip_while(|w| *w != "fwmark").nth(1).and_then(mark_parts).is_some_and(|(_, m)| m & ours_mask != 0) =>
+            {
                 d.conflicts.push(format!("чужое правило использует биты наших меток: {line}"))
             }
             Err(_) => {}
@@ -960,20 +784,21 @@ pub fn reconcile(desired: &BTreeSet<Entry>, owned: &BTreeSet<Entry>, live: &Live
         }
     }
     for t in &live.ipt {
-        let tool = if t.v6 { "ip6tables" } else { "iptables" };
-        for c in t.chains.iter().filter(|c| c.starts_with("MITT_")) {
-            let e = Entry::IptChain { v6: t.v6, table: t.table.clone(), chain: c.clone() };
+        let tool = ipt_prog(t.v6);
+        for c in t.chains.iter().filter(|c| c.starts_with(CHAIN_PREFIX)) {
+            let rows: Vec<Vec<String>> = t.rules.iter().filter(|(ch, _)| ch == c).map(|(_, s)| s.clone()).collect();
+            let e = Entry::Chain { v6: t.v6, table: t.table.clone(), chain: c.clone(), rows };
             if known.contains(&e) {
                 live_set.insert(e);
             } else {
-                d.conflicts.push(format!("неучтённая цепочка {tool} -t {} {c} (не в плане и не в журнале)", t.table));
+                d.conflicts.push(format!("неучтённая или изменённая цепочка {tool} -t {} {c}", t.table));
             }
         }
-        for (chain, spec) in &t.rules {
-            let e = Entry::Ipt { v6: t.v6, table: t.table.clone(), chain: chain.clone(), spec: spec.clone() };
-            let ours_chain = chain.starts_with("MITT_");
-            if ours_chain || is_jump(spec) {
-                if known.contains(&e) {
+        for (chain, spec) in t.rules.iter().filter(|(ch, _)| !ch.starts_with(CHAIN_PREFIX)) {
+            let target = spec.windows(2).find(|w| (w[0] == "-j" || w[0] == "-g") && w[1].starts_with(CHAIN_PREFIX)).map(|w| w[1].clone());
+            if let Some(target) = target {
+                let e = Entry::Jump { v6: t.v6, table: t.table.clone(), from: chain.clone(), chain: target };
+                if *spec == jump_spec(&chain_name_of(&e)) && known.contains(&e) {
                     live_set.insert(e);
                 } else {
                     d.conflicts.push(format!("чужое или неучтённое правило {tool} -t {}: -A {chain} {}", t.table, spec.join(" ")));
@@ -983,40 +808,18 @@ pub fn reconcile(desired: &BTreeSet<Entry>, owned: &BTreeSet<Entry>, live: &Live
             }
         }
     }
-    let mut min_pref: BTreeMap<&str, u32> = BTreeMap::new();
-    for e in desired.iter().chain(owned.iter()) {
-        if let Entry::Filter { dev, pref, .. } = e {
-            let m = min_pref.entry(dev.as_str()).or_insert(*pref);
-            *m = (*m).min(*pref);
-        }
-    }
-    for t in &live.tc {
-        let q = Entry::Qdisc { dev: t.dev.clone() };
-        if t.hook && known.contains(&q) {
-            live_set.insert(q);
-        }
-        for (pref, f) in &t.filters {
-            let in_zone = (TC_PREF_MIN..=TC_PREF_MAX).contains(pref);
-            match f {
-                Ok(e) if in_zone && known.contains(e) => {
-                    live_set.insert(e.clone());
-                }
-                _ if in_zone => d.conflicts.push(format!("чужой фильтр tc в зоне mi-trusttunnel на {} (pref {pref})", t.dev)),
-                _ if min_pref.get(t.dev.as_str()).is_some_and(|m| pref < m) => d.conflicts.push(format!(
-                    "чужой фильтр tc на {} (pref {pref}) выполняется раньше наших: он может прервать классификацию до установки метки",
-                    t.dev
-                )),
-                _ => {}
+    for (name, s) in &live.ipsets {
+        match s {
+            Ok(e) if known.contains(e) => {
+                live_set.insert(e.clone());
             }
+            _ => d.conflicts.push(format!("неучтённый или изменённый набор ipset {name}")),
         }
     }
     let mut add: Vec<Entry> = desired.difference(&live_set).cloned().collect();
     add.sort_by_key(|e| (e.rank(), e.clone()));
     let mut del: Vec<Entry> = owned.intersection(&live_set).filter(|e| !desired.contains(*e)).cloned().collect();
     del.sort_by_key(|e| (std::cmp::Reverse(e.rank()), e.clone()));
-    // наш фильтр на дисциплине, которую мы удаляем, уходит вместе с ней — отдельная команда не нужна
-    let dropped_qdiscs: BTreeSet<String> = del.iter().filter_map(|e| if let Entry::Qdisc { dev } = e { Some(dev.clone()) } else { None }).collect();
-    del.retain(|e| !matches!(e, Entry::Filter { dev, .. } if dropped_qdiscs.contains(dev)));
     d.missing = owned.difference(&live_set).cloned().collect();
     d.live_in_zone = live_set.into_iter().collect();
     d.add = add;
@@ -1024,123 +827,195 @@ pub fn reconcile(desired: &BTreeSet<Entry>, owned: &BTreeSet<Entry>, live: &Live
     d
 }
 
-/// Интерфейсы tc, состояние которых нужно прочитать: из плана и журнала.
-pub fn tc_devices<'a>(sets: impl IntoIterator<Item = &'a Entry>) -> BTreeSet<String> {
-    sets.into_iter().filter_map(|e| e.tc_dev().map(String::from)).collect()
+fn chain_name_of(e: &Entry) -> String {
+    match e {
+        Entry::Jump { chain, .. } | Entry::Chain { chain, .. } => chain.clone(),
+        _ => String::new(),
+    }
+}
+
+/// Таблицы iptables, состояние которых нужно прочитать (наши цепочки и переходы бывают только в них).
+pub fn ipt_tables() -> BTreeSet<(bool, String)> {
+    [(false, "filter"), (false, "mangle"), (true, "filter")].iter().map(|(v6, t)| (*v6, t.to_string())).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const FLOWER: &str = "filter protocol all pref 1001 flower chain 0 \nfilter protocol all pref 1001 flower chain 0 handle 0x1 \n  src_mac 02:00:00:00:0A:02\n  not_in_hw\n\taction order 1: skbedit  mark 167837696/0xfff0000 continue\n\t index 1 ref 1 bind 1\n";
-    const MATCHALL: &str = "filter protocol all pref 1201 matchall chain 0 \nfilter protocol all pref 1201 matchall chain 0 handle 0x1 \n  not_in_hw\n\taction order 1: skbedit  mark 176226304/0xfff0000 continue\n\t index 1 ref 1 bind 1\n";
-
-    fn spec() -> CaptureSpec {
-        CaptureSpec {
-            devices: vec![DevCap { id: "tv".into(), mac: "02:00:00:00:0a:02".into(), ipv4: Some("10.10.1.2".into()), bridge: "br-lan".into(), mark: device_mark(1) }],
-            networks: vec![NetCap { id: "guest".into(), bridge: "br-guest".into(), ports: vec!["r-gst".into()], subnet: "10.10.2.0/24".into(), mark: network_mark(1) }],
-            lanwide: vec![],
+    fn spec() -> PolicySpec {
+        PolicySpec {
+            rules: vec![
+                PolicyRule { from: "tv-video".into(), src: SrcMatch::Mac { bridge: "br-lan".into(), mac: "02:00:00:00:0a:02".into() }, set: Some("mitt0001d".into()), act: Act::Tunnel },
+                PolicyRule { from: "guest-block".into(), src: SrcMatch::Network { bridge: "br-guest".into(), ports: vec!["r-gst".into()] }, set: Some("mitt0002n".into()), act: Act::Block },
+                PolicyRule { from: "lan-zapret".into(), src: SrcMatch::Bridge { bridge: "br-lan".into() }, set: Some("mitt0003d".into()), act: Act::Zapret },
+                PolicyRule { from: "lan-direct".into(), src: SrcMatch::Bridge { bridge: "br-lan".into() }, set: Some("mitt0004d".into()), act: Act::Direct },
+            ],
+            sets: vec![
+                SetSpec { name: "mitt0001d".into(), kind: SetKind::Dns, entries: vec![] },
+                SetSpec { name: "mitt0002n".into(), kind: SetKind::Static, entries: vec!["203.0.113.0/24".into()] },
+                SetSpec { name: "mitt0003d".into(), kind: SetKind::Dns, entries: vec![] },
+                SetSpec { name: "mitt0004d".into(), kind: SetKind::Dns, entries: vec![] },
+            ],
             lan_subnets: vec!["10.10.1.0/24".into(), "10.10.2.0/24".into()],
             tun: "mitt0".into(),
-            zapret: None,
+            fail_open: false,
+            zapret_ports: vec![80, 443],
+            dns_resolver: Some("1.1.1.1".into()),
+            v6_block: vec![SrcMatch::Mac { bridge: "br-lan".into(), mac: "02:00:00:00:0a:02".into() }],
         }
     }
 
-    #[test]
-    fn marks_and_formats() {
-        assert_eq!(device_mark(1), 0x0a01_0000);
-        assert_eq!(network_mark(1), 0x0a81_0000);
-        assert_eq!(norm_mark("167837696/0xfff0000").unwrap(), "0xa010000/0xfff0000");
-        assert_eq!(norm_mark("0xa010000/0xfff0000").unwrap(), fmt_mark(device_mark(1), MARK_MASK));
+    fn whole() -> BTreeMap<String, BTreeSet<String>> {
+        [("br-lan".to_string(), ["r-tv".to_string()].into()), ("br-guest".to_string(), ["r-gst".to_string()].into())].into()
+    }
+
+    fn chain_rows<'a>(p: &'a BTreeSet<Entry>, table: &str, letter: char) -> &'a Vec<Vec<String>> {
+        p.iter()
+            .find_map(|e| match e {
+                Entry::Chain { table: t, chain, rows, .. } if t == table && chain.starts_with(&format!("{CHAIN_PREFIX}{letter}")) => Some(rows),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("нет цепочки {letter} в {table}"))
     }
 
     #[test]
-    fn tc_output_parses_into_our_filters() {
-        let f = parse_tc_filters(FLOWER, "br-lan");
-        assert_eq!(f, vec![(1001, Ok(Entry::filter_mac("br-lan", 1001, "02:00:00:00:0a:02", device_mark(1))))]);
-        let m = parse_tc_filters(MATCHALL, "r-gst");
-        assert_eq!(m, vec![(1201, Ok(Entry::filter_port("r-gst", 1201, network_mark(1))))]);
-        let foreign = parse_tc_filters("filter protocol ip pref 1 u32 chain 0 handle 800::800 order 2048 key ht 800 bkt 0 \n  match 00000000/00000000 at 0\n\taction order 1: gact action pass\n", "br-lan");
-        assert!(foreign[0].1.is_err());
-        assert!(parse_tc_hook("qdisc noqueue 0: root refcnt 2 \nqdisc clsact ffff: parent ffff:fff1 \n"));
-    }
-
-    #[test]
-    fn plan_is_mark_based_with_catch_alls() {
-        let p = build_plan(&spec(), &["fd00:10::/64".into()], &BTreeSet::new(), &BTreeSet::new(), false);
+    fn plan_marks_tunnel_blocks_and_queues_in_rule_order() {
+        let p = build_plan(&spec(), &["fd00:10::/64".into()], &whole(), false);
         let labels: BTreeSet<String> = p.iter().map(Entry::label).collect();
         for want in [
-            "ip rule priority 3100 from 10.10.1.2 fwmark 0xa010000/0xfff0000 lookup 3100",
-            "ip rule priority 3105 fwmark 0xa000000/0xf800000 unreachable",
-            "ip rule priority 3110 from 10.10.2.0/24 fwmark 0xa810000/0xfff0000 lookup 3100",
-            "ip rule priority 3115 fwmark 0xa800000/0xf800000 unreachable",
-            "ip -6 rule priority 3120 fwmark 0xa000000/0xf000000 unreachable",
-            "ip -6 rule priority 3000 to fd00:10::/64 lookup main",
-            "ip -6 rule priority 3000 to fe80::/10 lookup main",
-            "tc qdisc dev br-lan clsact",
-            "tc filter dev br-lan ingress pref 1001 protocol all flower src_mac 02:00:00:00:0a:02 action skbedit mark 0xa010000/0xfff0000 continue",
-            "tc filter dev r-gst ingress pref 1201 protocol all matchall action skbedit mark 0xa810000/0xfff0000 continue",
+            "ip rule priority 3005 fwmark 0x4000/0x4000 lookup 3100",
+            "ip rule priority 3000 to 10.10.1.0/24 lookup main",
+            "ip route default dev mitt0 metric 1 table 3100",
+            "ip route unreachable default metric 4096 table 3100",
+            "ipset create mitt0001d hash:ip family inet timeout 86400",
+            "ipset create mitt0002n hash:net family inet",
         ] {
             assert!(labels.contains(want), "нет {want}\n{labels:#?}");
         }
-        // устройство без аренды: метка и запрет есть, захвата по адресу нет
+        let c = chain_rows(&p, "mangle", 'C');
+        assert_eq!(c[0].join(" "), "-d 10.10.1.0/24 -j RETURN");
+        assert!(c[2].join(" ").starts_with("-i br-lan -m mac --mac-source 02:00:00:00:0A:02 -m set --match-set mitt0001d dst -g MITT_T"), "{c:#?}");
+        // хвост из RETURN после последнего туннельного правила отброшен
+        assert_eq!(c.len(), 3, "{c:#?}");
+        let f = chain_rows(&p, "filter", 'F');
+        assert_eq!(f[0].join(" "), "-o mitt0 -j ACCEPT");
+        assert!(f.iter().any(|r| r.join(" ") == "-i br-guest -m set --match-set mitt0002n dst -j REJECT --reject-with icmp-port-unreachable"), "{f:#?}");
+        let z = chain_rows(&p, "mangle", 'Z');
+        // туннельное и блокирующее правила стоят раньше и останавливают разбор (RETURN), Zapret — goto в очередь
+        assert!(z.iter().any(|r| r.join(" ").starts_with("-i br-lan -m set --match-set mitt0003d dst -g MITT_Q")), "{z:#?}");
+        assert!(z.iter().any(|r| r.join(" ").ends_with("mitt0001d dst -j RETURN")), "{z:#?}");
+        let o = chain_rows(&p, "mangle", 'O');
+        assert_eq!(o[0].join(" "), "-d 1.1.1.1/32 -p udp -m udp --dport 53 -j MARK --set-xmark 0x4000/0x4000");
+        let v6 = chain_rows(&p, "filter", '6');
+        assert_eq!(v6[0].join(" "), "-d fd00:10::/64 -j RETURN");
+        assert!(p.iter().any(|e| matches!(e, Entry::Jump { v6: true, from, .. } if from == "FORWARD")));
+        assert_eq!(our_mark_mask(&p), NF_MARK);
+    }
+
+    #[test]
+    fn guard_only_and_fail_open() {
+        let p = build_plan(&spec(), &[], &whole(), true);
+        assert!(!p.iter().any(Entry::is_tun_route) && p.contains(&Entry::guard_route()));
+        assert!(!p.iter().any(|e| e.label().contains("MITT_Q") || e.label().contains("MITT_Z")), "при загрузке очереди нет");
         let mut s = spec();
-        s.devices[0].ipv4 = None;
-        let p2 = build_plan(&s, &[], &BTreeSet::new(), &BTreeSet::new(), true);
-        assert!(!p2.iter().any(|e| matches!(e, Entry::Rule { prio: PRIO_DEV, .. })));
-        assert!(p2.contains(&Entry::dev_catch()) && !p2.iter().any(Entry::is_tun_route));
-        // чужой хук: дисциплину не создаём
-        let p3 = build_plan(&spec(), &[], &["br-lan".to_string()].into(), &BTreeSet::new(), false);
-        assert!(!p3.contains(&Entry::Qdisc { dev: "br-lan".into() }));
+        s.fail_open = true;
+        let p = build_plan(&s, &[], &whole(), false);
+        assert!(!p.contains(&Entry::guard_route()), "обход при отказе: без unreachable");
     }
 
     #[test]
-    fn rules_with_fwmark_parse_back() {
-        let r = parse_rules("3100:\tfrom 10.10.1.2 fwmark 0xa010000/0xfff0000 lookup 3100\n3105:\tfrom all fwmark 0xa000000/0xf800000 unreachable\n", false);
-        assert_eq!(r[0].1.as_ref().unwrap(), &Entry::dev_capture("10.10.1.2", device_mark(1)));
-        assert_eq!(r[1].1.as_ref().unwrap(), &Entry::dev_catch());
+    fn partial_bridge_network_uses_physdev() {
+        let bp: BTreeMap<String, BTreeSet<String>> = [("br-guest".to_string(), ["r-gst".to_string(), "r-kid".to_string()].into())].into();
+        assert!(needs_physdev(&spec(), &bp));
+        let p = build_plan(&spec(), &[], &bp, false);
+        let f = chain_rows(&p, "filter", 'F');
+        assert!(f.iter().any(|r| r.join(" ").starts_with("-m physdev --physdev-in r-gst -m set --match-set mitt0002n dst -j REJECT")), "{f:#?}");
+        assert!(!needs_physdev(&spec(), &whole()));
     }
 
     #[test]
-    fn order_add_marks_last_remove_marks_first() {
-        let p = build_plan(&spec(), &[], &BTreeSet::new(), &BTreeSet::new(), false);
-        let d = reconcile(&p, &BTreeSet::new(), &Live::default());
+    fn chain_names_follow_content() {
+        let a = build_plan(&spec(), &[], &whole(), false);
+        let mut s = spec();
+        s.rules.swap(0, 1);
+        let b = build_plan(&s, &[], &whole(), false);
+        let names = |p: &BTreeSet<Entry>| p.iter().filter_map(|e| if let Entry::Chain { chain, .. } = e { Some(chain.clone()) } else { None }).collect::<BTreeSet<_>>();
+        assert_ne!(names(&a), names(&b), "другой порядок — другие цепочки классификации");
+        assert!(names(&a).intersection(&names(&b)).any(|n| n.starts_with("MITT_T")), "лист с меткой не меняется");
+        let d = reconcile(&b, &a, &Live::default());
         let ranks: Vec<u8> = d.add.iter().map(Entry::rank).collect();
         assert!(ranks.windows(2).all(|w| w[0] <= w[1]));
-        assert!(matches!(d.add.last().unwrap(), Entry::Filter { .. }));
-        assert_eq!(d.add[0], Entry::guard_route(false));
+        assert!(matches!(d.add[0], Entry::Ipset { .. }) && matches!(d.add.last().unwrap(), Entry::Jump { .. }));
     }
 
-    #[test]
-    fn collisions_are_conflicts() {
-        let p = build_plan(&spec(), &[], &BTreeSet::new(), &BTreeSet::new(), false);
+    /// Вывод iptables -S, как его печатает iptables.
+    fn live_from(p: &BTreeSet<Entry>) -> Live {
         let mut l = Live::default();
-        l.rules = parse_rules("2000:\tfrom all fwmark 0x10000/0xff0000 lookup 200\n5000:\tfrom all fwmark 0x1 lookup 201\n3150:\tfrom 10.9.9.9 lookup 300\n", false);
-        l.tc = vec![TcDev { dev: "br-lan".into(), hook: true, filters: vec![(1, Err("foreign".into())), (1001, Err("foreign".into()))] }];
-        let d = reconcile(&p, &BTreeSet::new(), &l);
-        // 2000 и 5000 (точное значение без маски тоже читает наши биты), 3150 в зоне, tc pref 1 раньше нашего, tc pref 1001 в зоне
-        assert_eq!(d.conflicts.len(), 5, "{:#?}", d.conflicts);
-        assert!(d.conflicts.iter().any(|c| c.contains("биты наших меток")));
-        assert!(d.conflicts.iter().any(|c| c.contains("раньше наших")));
-    }
-
-    #[test]
-    fn revert_drops_filters_with_owned_qdisc() {
-        let p = build_plan(&spec(), &[], &BTreeSet::new(), &BTreeSet::new(), false);
-        let mut l = Live::default();
+        for (v6, table) in ipt_tables() {
+            let mut text = String::new();
+            for e in p {
+                match e {
+                    Entry::Chain { v6: v, table: t, chain, .. } if *v == v6 && *t == table => text.push_str(&format!("-N {chain}\n")),
+                    _ => {}
+                }
+            }
+            for e in p {
+                match e {
+                    Entry::Jump { v6: v, table: t, from, chain } if *v == v6 && *t == table => text.push_str(&format!("-A {from} {}\n", jump_spec(chain).join(" "))),
+                    Entry::Chain { v6: v, table: t, chain, rows } if *v == v6 && *t == table => {
+                        for r in rows {
+                            text.push_str(&format!("-A {chain} {}\n", r.join(" ")));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            l.ipt.push(parse_ipt(&text, v6, &table));
+        }
         l.rules = p.iter().filter_map(|e| if let Entry::Rule { prio, .. } = e { Some((*prio, Ok(e.clone()))) } else { None }).collect();
         l.routes = p.iter().filter(|e| matches!(e, Entry::Route { .. })).map(|e| Ok(e.clone())).collect();
-        for dev in tc_devices(&p) {
-            let filters = p.iter().filter_map(|e| match e { Entry::Filter { dev: d, pref, .. } if *d == dev => Some((*pref, Ok(e.clone()))), _ => None }).collect();
-            l.tc.push(TcDev { dev, hook: true, filters });
-        }
-        let d = reconcile(&p, &p, &l);
+        l.ipsets = p.iter().filter_map(|e| if let Entry::Ipset { name, .. } = e { Some((name.clone(), Ok(e.clone()))) } else { None }).collect();
+        l
+    }
+
+    #[test]
+    fn live_round_trip_and_foreign_entries() {
+        let p = build_plan(&spec(), &["fd00:10::/64".into()], &whole(), false);
+        let d = reconcile(&p, &p, &live_from(&p));
         assert!(d.is_noop() && d.conflicts.is_empty(), "{d:#?}");
-        let r = reconcile(&BTreeSet::new(), &p, &l);
-        assert!(!r.del.iter().any(|e| matches!(e, Entry::Filter { .. })), "фильтры уходят вместе с нашей дисциплиной");
-        assert!(matches!(r.del[0], Entry::Qdisc { .. }));
-        assert_eq!(*r.del.last().unwrap(), Entry::guard_route(false));
+        let mut l = live_from(&p);
+        l.ipt[0].rules.push(("FORWARD".into(), jump_spec("MITT_OLD")));
+        l.ipt[0].chains.insert("MITT_X0".into());
+        l.ipsets.push(("mittold".into(), Err("mittold".into())));
+        l.rules.push((3150, parse_rules("3150:\tfrom 10.9.9.9 lookup 300\n", false).remove(0).1));
+        let d = reconcile(&p, &p, &l);
+        assert_eq!(d.conflicts.len(), 4, "{:#?}", d.conflicts);
+        // снятие: переходы первыми, наборы последними
+        let r = reconcile(&BTreeSet::new(), &p, &live_from(&p));
+        assert!(matches!(r.del[0], Entry::Jump { .. }) && matches!(r.del.last().unwrap(), Entry::Ipset { .. }), "{:#?}", r.del);
+    }
+
+    #[test]
+    fn ipset_listing_parses() {
+        let t = "Name: mitt0001d\nType: hash:ip\nRevision: 4\nHeader: family inet hashsize 1024 maxelem 65536 timeout 86400\nSize in memory: 120\nReferences: 1\nNumber of entries: 0\nMembers:\n\nName: other\nType: hash:ip\nHeader: family inet hashsize 1024 maxelem 65536\n\nName: mitt0002n\nType: hash:net\nRevision: 6\nHeader: family inet hashsize 1024 maxelem 65536\n";
+        let s = parse_ipsets(t);
+        assert_eq!(s.len(), 2);
+        assert_eq!(s[0].1, Ok(Entry::Ipset { name: "mitt0001d".into(), kind: "hash:ip".into(), timeout: Some(86400) }));
+        assert_eq!(s[1].1, Ok(Entry::Ipset { name: "mitt0002n".into(), kind: "hash:net".into(), timeout: None }));
+    }
+
+    #[test]
+    fn stock_firewall_marks_conflict_with_our_bit() {
+        // реальные правила стока: mwan3 sticky (0xfc00 задевает 0x4000), QoS (0xff000000, не задевает)
+        let fw = "-N mwan3_rule_x\n-A mwan3_rule_x -m mark ! --mark 0xfc00/0xfc00 -j SET --del-set mwan3_sticky_x src,src\n-A PREROUTING -m mac --mac-source 02:aa:bb:cc:dd:ee -j MARK --set-xmark 0x5000000/0xff000000\n";
+        let mut l = live_from(&BTreeSet::new());
+        l.ipt[1] = parse_ipt(fw, false, "mangle");
+        let p = build_plan(&spec(), &[], &whole(), false);
+        let d = reconcile(&p, &BTreeSet::new(), &l);
+        assert_eq!(d.conflicts.len(), 1, "{:#?}", d.conflicts);
+        assert!(d.conflicts[0].contains("0xfc00"));
+        assert_eq!(iptables_mark_collisions(fw, NF_MARK).len(), 1);
     }
 
     #[test]
@@ -1152,114 +1027,4 @@ mod tests {
         let br = "4: br-lan: <BROADCAST> mtu 1500\n    link/ether 02 brd ff\n    bridge forward_delay 1500 hello_time 200\n";
         assert_eq!(parse_link(br), (true, None));
     }
-
-    #[test]
-    fn iptables_marks_overlapping_ours() {
-        let t = "*mangle\n-A PREROUTING -i br-lan -j MARK --set-xmark 0x10000/0xff0000\n-A PREROUTING -j MARK --set-xmark 0x1/0xff\nCOMMIT\n";
-        assert_eq!(iptables_mark_collisions(t).len(), 1);
-    }
-
-    // ---------- netfilter (сток) ----------
-
-    fn ports(v: &[(&str, &[&str])]) -> BTreeMap<String, BTreeSet<String>> {
-        v.iter().map(|(b, ps)| (b.to_string(), ps.iter().map(|x| x.to_string()).collect())).collect()
-    }
-
-    #[test]
-    fn netfilter_plan_device_and_whole_bridge_network_needs_no_marks() {
-        let bp = ports(&[("br-lan", &["r-tv", "r-ph"]), ("br-guest", &["r-gst"])]);
-        let (p, needs) = build_plan_netfilter(&spec(), &["fd00:10::/64".into()], &bp, false);
-        assert!(!needs.mark && needs.v6);
-        assert_eq!(our_mark_mask(&p), 0, "меток нет: биты QoS/mwan3 стока не затрагиваются");
-        let labels: BTreeSet<String> = p.iter().map(Entry::label).collect();
-        for want in [
-            "ip rule priority 3100 from 10.10.1.2 lookup 3100",
-            "ip rule priority 3110 from 10.10.2.0/24 iif br-guest lookup 3100",
-            "ip rule priority 3115 iif br-guest unreachable",
-            "ip -6 rule priority 3120 iif br-guest unreachable",
-            "iptables -w -t filter -A MITT_FWD ! -s 10.10.1.2/32 -i br-lan -m mac --mac-source 02:00:00:00:0a:02 -j REJECT --reject-with icmp-port-unreachable",
-            "ip6tables -w -t filter -A MITT_FWD -i br-lan -m mac --mac-source 02:00:00:00:0a:02 -j REJECT --reject-with icmp6-port-unreachable",
-            "iptables -w -t filter -I MITT_FWD 1 -d 10.10.1.0/24 -j RETURN",
-            "ip6tables -w -t filter -I MITT_FWD 1 -d fd00:10::/64 -j RETURN",
-            "iptables -w -t filter -A MITT_FWD -o mitt0 -j ACCEPT",
-            "iptables -w -t filter -I FORWARD 1 -m comment --comment mi-trusttunnel -j MITT_FWD",
-            "iptables -w -t filter -N MITT_FWD",
-        ] {
-            assert!(labels.contains(want), "нет {want}\n{labels:#?}");
-        }
-        // порядок: цепочка до правил, переход последним; снятие — переход первым, цепочка последней
-        let d = reconcile(&p, &BTreeSet::new(), &Live::default());
-        let idx = |f: &dyn Fn(&Entry) -> bool| d.add.iter().position(|e| f(e)).unwrap();
-        assert!(idx(&|e| matches!(e, Entry::IptChain { .. })) < idx(&|e| matches!(e, Entry::Ipt { spec, .. } if !is_jump(spec))));
-        assert!(matches!(d.add.last().unwrap(), Entry::Ipt { spec, .. } if is_jump(spec)));
-    }
-
-    #[test]
-    fn netfilter_zapret_queue_only_for_marked_engine_sockets() {
-        let mut sp = spec();
-        sp.zapret = Some(ZapretSpec { qnum: ZAPRET_QNUM, mark: NF_MARK, tcp_ports: vec![80, 443] });
-        let ports: BTreeMap<String, BTreeSet<String>> = [("br-guest".to_string(), ["r-gst".to_string()].into())].into();
-        let (p, n) = build_plan_netfilter(&sp, &[], &ports, false);
-        assert!(n.queue && !n.mark);
-        let labels: Vec<String> = p.iter().map(Entry::label).collect();
-        assert!(labels.contains(&"iptables -w -t mangle -A MITT_ZQ -p tcp -m multiport --dports 80,443 -m mark --mark 0x4000/0x4000 -j NFQUEUE --queue-num 200 --queue-bypass".to_string()), "{labels:#?}");
-        assert!(labels.iter().any(|l| l.contains("-I OUTPUT 1") && l.contains("-j MITT_ZQ")), "{labels:#?}");
-        assert_eq!(our_mark_mask(&p) & NF_MARK, NF_MARK, "бит Zapret учитывается при поиске коллизий меток");
-        // при загрузке (guard-only) движок не запущен — очередь не создаётся
-        let (p, n) = build_plan_netfilter(&sp, &[], &ports, true);
-        assert!(!n.queue && !p.iter().any(|e| e.label().contains("MITT_ZQ")));
-    }
-
-    #[test]
-    fn netfilter_partial_bridge_network_uses_physdev_mark() {
-        let mut sp = spec();
-        sp.networks[0].bridge = "br-lan".into();
-        sp.networks[0].ports = vec!["r-kid".into()];
-        let bp = ports(&[("br-lan", &["r-tv", "r-ph", "r-kid"])]);
-        let (p, needs) = build_plan_netfilter(&sp, &[], &bp, false);
-        assert!(needs.mark);
-        assert_eq!(our_mark_mask(&p), NF_MARK);
-        let labels: BTreeSet<String> = p.iter().map(Entry::label).collect();
-        assert!(labels.contains("iptables -w -t mangle -A MITT_MARK -m physdev --physdev-in r-kid -j MARK --set-xmark 0x4000/0x4000"));
-        assert!(labels.contains("ip6tables -w -t mangle -I PREROUTING 1 -m comment --comment mi-trusttunnel -j MITT_MARK"));
-        assert!(labels.contains("ip rule priority 3110 from 10.10.2.0/24 fwmark 0x4000/0x4000 lookup 3100"));
-        assert!(labels.contains("ip -6 rule priority 3120 fwmark 0x4000/0x4000 unreachable"));
-    }
-
-    /// Вывод iptables -S, как его печатает iptables (легаси 1.8.11 в лаборатории; формат 1.6.2 стока тот же).
-    const IPT_S: &str = "-P INPUT ACCEPT\n-P FORWARD ACCEPT\n-P OUTPUT ACCEPT\n-N MITT_FWD\n-A FORWARD -m comment --comment mi-trusttunnel -j MITT_FWD\n-A MITT_FWD -d 10.10.1.0/24 -j RETURN\n-A MITT_FWD ! -s 10.10.1.2/32 -i br-lan -m mac --mac-source 02:00:00:00:0A:02 -j REJECT --reject-with icmp-port-unreachable\n-A MITT_FWD -o mitt0 -j ACCEPT\n";
-
-    #[test]
-    fn ipt_output_round_trip_and_foreign_rules() {
-        let mut sp = spec();
-        sp.networks.clear();
-        sp.lan_subnets = vec!["10.10.1.0/24".into()];
-        let (p, _) = build_plan_netfilter(&sp, &[], &BTreeMap::new(), false);
-        let v4: BTreeSet<Entry> = p.iter().filter(|e| matches!(e, Entry::Ipt { v6: false, .. } | Entry::IptChain { v6: false, .. })).cloned().collect();
-        let live = Live { ipt: vec![parse_ipt(IPT_S, false, "filter")], ..Default::default() };
-        let d = reconcile(&v4, &v4, &live);
-        assert!(d.conflicts.is_empty() && d.is_noop(), "{d:#?}");
-        // чужое правило в нашей цепочке и неучтённый переход — конфликты
-        let bad = format!("{IPT_S}-A MITT_FWD -j ACCEPT\n-A INPUT -j MITT_FWD\n-N MITT_OLD\n");
-        let d = reconcile(&v4, &v4, &Live { ipt: vec![parse_ipt(&bad, false, "filter")], ..Default::default() });
-        assert_eq!(d.conflicts.len(), 3, "{:#?}", d.conflicts);
-    }
-
-    #[test]
-    fn stock_firewall_marks_conflict_only_when_we_use_marks() {
-        // реальные правила стока: mwan3 sticky (0xfc00 задевает 0x4000), QoS (0xff000000, не задевает)
-        let fw = "-N mwan3_rule_x\n-A mwan3_rule_x -m mark ! --mark 0xfc00/0xfc00 -j SET --del-set mwan3_sticky_x src,src\n-A PREROUTING -m mac --mac-source 02:aa:bb:cc:dd:ee -j MARK --set-xmark 0x5000000/0xff000000\n";
-        let mangle = parse_ipt(fw, false, "mangle");
-        let (plain, _) = build_plan_netfilter(&spec(), &[], &ports(&[("br-guest", &["r-gst"])]), false);
-        let d = reconcile(&plain, &BTreeSet::new(), &Live { ipt: vec![mangle.clone()], ..Default::default() });
-        assert!(d.conflicts.is_empty(), "без меток коллизий нет: {:#?}", d.conflicts);
-        let mut sp = spec();
-        sp.networks[0].bridge = "br-lan".into();
-        sp.networks[0].ports = vec!["r-kid".into()];
-        let (marked, _) = build_plan_netfilter(&sp, &[], &ports(&[("br-lan", &["r-tv", "r-kid"])]), false);
-        let d = reconcile(&marked, &BTreeSet::new(), &Live { ipt: vec![mangle], ..Default::default() });
-        assert_eq!(d.conflicts.len(), 1, "mwan3 0xfc00 задевает 0x4000: {:#?}", d.conflicts);
-        assert!(d.conflicts[0].contains("0xfc00"));
-    }
 }
-

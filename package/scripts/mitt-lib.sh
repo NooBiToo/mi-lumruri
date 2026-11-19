@@ -8,9 +8,14 @@ ETC="$DATA/etc"
 # Текущий релиз — файл-указатель current.ver (замена обычного файла через mv атомарна; BusyBox 1.25 не умеет mv -T
 # для символических ссылок на каталоги). Релиз: releases/<версия>/{manifest.json,manifest.sig,payload/}.
 CURV="$(cat "$DATA/current.ver" 2>/dev/null)"
-REL="$DATA/releases/$CURV"
-SCR="$REL/payload/scripts"
+# Хранилище релизов: по умолчанию /data. Файл store (install.sh --store=<каталог>) переносит releases/ на внешний
+# накопитель; настройки, ключи и точка автозапуска остаются в /data. Пока идёт перенос, релиз ищется и в /data.
+STORE="$(cat "$DATA/store" 2>/dev/null)"; [ -n "$STORE" ] || STORE="$DATA"
+REL="$STORE/releases/$CURV"
+[ -d "$REL" ] || [ ! -d "$DATA/releases/$CURV" ] || REL="$DATA/releases/$CURV"
 RUN="$R/tmp/mi-trusttunnel"
+# Сценарии работают из копии в RAM: после холодного старта служба не зависит от накопителя с релизами.
+SCR="$RUN/scripts"
 BIN="$RUN/bin"
 RENDER="$RUN/render"
 STATE="$RUN/run"
@@ -59,7 +64,7 @@ unpack_payload() { # unpack_payload <каталог релиза> <куда>
 # Распаковка текущего релиза в RAM с проверкой хэшей по манифесту.
 unpack_runtime() {
   local rel tmp f
-  [ -n "$CURV" ] && [ -d "$REL/payload" ] || die "нет текущего релиза ($DATA/current.ver)"
+  [ -n "$CURV" ] && [ -d "$REL/payload" ] || die "нет текущего релиза '$CURV' в $STORE/releases (накопитель не подключён?)"
   rel="$REL"
   if [ -f "$RUN/.release" ] && [ "$(cat "$RUN/.release")" = "$rel" ] && [ -x "$BIN/mi-tt-admin" ]; then return 0; fi
   tmp="$RUN/bin.new"; rm -rf "$tmp"; mkdir -p "$tmp"
@@ -72,6 +77,8 @@ unpack_runtime() {
   "$v" release verify "$rel" --pinned "$DATA/keys/release.pub" --unpacked "$tmp" >"$LOG/unpack.json" 2>&1     || { cat "$LOG/unpack.json" >&2; rm -rf "$tmp"; die "распакованные файлы не совпали с манифестом"; }
   rm -f "$RUN/verify-admin" "$RUN/verify-admin.arm64"
   lab_override "$tmp"
+  rm -rf "$SCR.new"; cp -r "$rel/payload/scripts" "$SCR.new" || { rm -rf "$tmp" "$SCR.new"; die "копирование сценариев в RAM"; }
+  rm -rf "$SCR"; mv "$SCR.new" "$SCR"
   rm -rf "$BIN"; mv "$tmp" "$BIN"; echo "$rel" >"$RUN/.release"
   mlog "распакован релиз $(basename "$rel") в RAM"
 }
@@ -85,8 +92,9 @@ lab_override() {
 }
 
 render_now() {
-  mkdir -p "$RENDER.new"
-  if ctl render "$ETC/config.json" "$ETC/secrets.json" "$LEASES" "$RENDER.new" >"$STATE/render.json" 2>&1; then
+  # client.toml содержит пароль TrustTunnel: каталог рендера доступен только root
+  rm -rf "$RENDER.new"; mkdir -p "$RENDER.new"; chmod 700 "$RENDER.new"
+  if ctl render "$ETC/config.json" "$ETC/secrets.json" "$RENDER.new" >"$STATE/render.json" 2>&1; then
     rm -rf "$RENDER.prev"; [ -d "$RENDER" ] && mv "$RENDER" "$RENDER.prev"; mv "$RENDER.new" "$RENDER"; return 0
   fi
   rm -rf "$RENDER.new"; mlog "render не прошёл: $(head -c 300 "$STATE/render.json")"; return 1
@@ -94,7 +102,7 @@ render_now() {
 
 admin_apply() { # admin_apply <метка> [--guard-only]
   local tag="$1"; shift
-  adm apply --state-dir "$RUN/admin" --config "$ETC/config.json" --secrets "$ETC/secrets.json" --leases "$LEASES" --marker auto "$@" >"$STATE/apply.$tag.json" 2>&1
+  adm apply --state-dir "$RUN/admin" --config "$ETC/config.json" --secrets "$ETC/secrets.json" "$@" >"$STATE/apply.$tag.json" 2>&1
   local rc=$?; printf '{"tag":"%s","exit":%s,"at":%s}\n' "$tag" "$rc" "$(date +%s)" >"$STATE/last-apply.json"
   mlog "apply $tag $*: код $rc"; return $rc
 }
@@ -116,6 +124,11 @@ panel_origins() {
 
 start_panel() {
   mkdir -p "$RUN/cgi/cgi-bin" "$STATE"
+  # рабочие процессы nginx работают от nobody: статике панели нужно чтение для всех, каталогам выше — только проход
+  # (распаковка идёт под umask 077 установщика). Программы в $BIN остаются 700, сессии и состояние — в своих каталогах.
+  chmod 711 "$RUN" "$BIN"
+  chmod 755 "$BIN/www" "$BIN/www/assets"
+  chmod 644 "$BIN"/www/*.* "$BIN"/www/assets/*
   # CGI-обёртка: окружение контроллера; uhttpd слушает только 127.0.0.1 и доступен лишь локальному nginx (TLS)
   cat >"$RUN/cgi/cgi-bin/api" <<EOF
 #!/bin/sh
@@ -134,7 +147,7 @@ EOF
 
 status_write() {
   local e="" n
-  for n in mihomo dnscrypt nfqws2 nginx uhttpd service; do
+  for n in trusttunnel nfqws2 nginx uhttpd service; do
     if pid_alive "$n"; then e="$e\"$n\":true,"; elif [ -f "$STATE/$n.wanted" ]; then e="$e\"$n\":false,"; fi
   done
   printf '{"at":%s,"release":"%s","protection":"%s","engines":{%s},"last_apply":%s}\n' "$(date +%s)" "$(basename "$(cat "$RUN/.release" 2>/dev/null)")" \

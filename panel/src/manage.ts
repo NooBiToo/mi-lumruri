@@ -1,118 +1,52 @@
-// Логика экранов управления без DOM: форма профиля ↔ Profile, разбор строк ввода, описание правил.
+// Логика экранов управления без DOM: форма профиля TrustTunnel ↔ Profile, форма DNS, разбор строк ввода, описание правил.
 
-import type { Device, Lease, Network, Action, Config, Destination, DnsConfig, Profile, ProfileKind, ProfileSecret, Rule } from './api'
+import type { Device, Lease, Network, Action, Config, Destination, DnsConfig, Endpoint, Profile, ProfileSecret, Rule } from './api'
 
 export interface ProfileForm {
   id: string
   name: string
-  kind: ProfileKind
   onFailure: 'block' | 'direct'
   server: string
   port: string
   sni: string
-  certSha256: string
   username: string
   quic: boolean
-  obfs: boolean
-  security: 'tls' | 'reality'
-  vision: boolean
-  realityKey: string
-  realityShortId: string
-  publicKey: string
-  address: string
-  mtu: string
-  awg: boolean
-  awgText: string
-  // секреты: только ввод, наружу не отображаются
-  secret1: string
-  secret2: string
+  antiDpi: boolean
+  certificate: string
+  // пароль: только ввод, сохранённое значение панель не получает
+  password: string
 }
 
-export function emptyProfileForm(kind: ProfileKind = 'hysteria2'): ProfileForm {
-  return {
-    id: '', name: '', kind, onFailure: 'block', server: '', port: kind === 'wireguard' ? '51820' : '443', sni: '', certSha256: '', username: '',
-    quic: false, obfs: false, security: 'tls', vision: true, realityKey: '', realityShortId: '', publicKey: '', address: '', mtu: '', awg: false,
-    awgText: 'jc=4 jmin=40 jmax=70 s1=37 s2=61 h1=1361409513 h2=2016328541 h3=726101713 h4=1919296617', secret1: '', secret2: '',
-  }
+export function emptyProfileForm(): ProfileForm {
+  return { id: '', name: '', onFailure: 'block', server: '', port: '443', sni: '', username: '', quic: false, antiDpi: false, certificate: '', password: '' }
 }
 
 export function profileToForm(p: Profile): ProfileForm {
-  const f = emptyProfileForm(p.kind)
-  const e = p.endpoint
+  const f = emptyProfileForm()
   Object.assign(f, { id: p.id, name: p.name, onFailure: p.on_failure })
+  const e = p.endpoint
   if (!e) return f
   Object.assign(f, {
-    server: e.server, port: String(e.port), sni: e.sni ?? '', certSha256: e.cert_sha256 ?? '', username: e.username ?? '', quic: !!e.quic,
-    obfs: e.obfs === 'salamander', security: e.security ?? 'tls', vision: e.flow === 'xtls-rprx-vision', realityKey: e.reality?.public_key ?? '',
-    realityShortId: e.reality?.short_id ?? '', publicKey: e.public_key ?? '', address: e.address ?? '', mtu: e.mtu ? String(e.mtu) : '', awg: !!e.awg,
+    server: e.server, port: String(e.port), sni: e.sni ?? '', username: e.username ?? '', quic: !!e.quic, antiDpi: !!e.anti_dpi, certificate: e.certificate ?? '',
   })
-  if (e.awg) f.awgText = Object.entries(e.awg).map(([k, v]) => `${k}=${v}`).join(' ')
   return f
 }
 
-/** «jc=4 jmin=40 …» → объект; неизвестные ключи и нечисла — ошибка. */
-export function parseAwg(text: string): Record<string, number> | string {
-  const keys = ['jc', 'jmin', 'jmax', 's1', 's2', 'h1', 'h2', 'h3', 'h4']
-  const out: Record<string, number> = {}
-  for (const part of text.trim().split(/[\s,;]+/).filter(Boolean)) {
-    const [k, v] = part.split('=')
-    if (!k || !keys.includes(k) || v === undefined || !/^\d+$/.test(v)) return `неверный параметр AmneziaWG: ${part}`
-    out[k] = Number(v)
-  }
-  const missing = keys.filter((k) => !(k in out))
-  return missing.length ? `не хватает параметров AmneziaWG: ${missing.join(', ')}` : out
-}
-
-/** Профиль из формы; проверку значений выполняет контроллер. */
+/** Профиль TrustTunnel из формы. Здесь только сборка JSON и проверка порта; адрес, SNI, имя и сертификат проверяет контроллер. */
 export function formToProfile(f: ProfileForm): Profile | string {
-  const port = Number(f.port)
-  const e: Record<string, unknown> = { server: f.server.trim(), port }
-  const opt = (k: string, v: string) => { if (v.trim()) e[k] = v.trim() }
-  switch (f.kind) {
-    case 'trusttunnel':
-      e.username = f.username.trim(); opt('sni', f.sni); opt('cert_sha256', f.certSha256); if (f.quic) e.quic = true
-      break
-    case 'hysteria2':
-      opt('sni', f.sni); opt('cert_sha256', f.certSha256); if (f.obfs) e.obfs = 'salamander'
-      break
-    case 'vless':
-      e.security = f.security; opt('sni', f.sni); if (f.vision) e.flow = 'xtls-rprx-vision'
-      if (f.security === 'reality') e.reality = { public_key: f.realityKey.trim(), short_id: f.realityShortId.trim() }
-      else opt('cert_sha256', f.certSha256)
-      break
-    case 'wireguard': {
-      opt('public_key', f.publicKey); opt('address', f.address); if (f.mtu.trim()) e.mtu = Number(f.mtu)
-      if (f.awg) {
-        const a = parseAwg(f.awgText)
-        if (typeof a === 'string') return a
-        e.awg = a
-      }
-      break
-    }
-  }
-  return { id: f.id.trim(), name: f.name.trim(), kind: f.kind, on_failure: f.onFailure, endpoint: e as unknown as Profile['endpoint'] }
+  const port = Number(f.port.trim())
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return 'Порт — целое число от 1 до 65535.'
+  const endpoint: Endpoint = { server: f.server.trim(), port, username: f.username.trim(), quic: f.quic, anti_dpi: f.antiDpi }
+  if (f.sni.trim()) endpoint.sni = f.sni.trim()
+  // PEM из textarea: переводы строк приводим к \n, пустые строки по краям убираем
+  const cert = f.certificate.replace(/\r\n?/g, '\n').trim()
+  if (cert) endpoint.certificate = `${cert}\n`
+  return { id: f.id.trim(), name: f.name.trim(), kind: 'trusttunnel', on_failure: f.onFailure, endpoint }
 }
 
-/** Секрет для записи по виду профиля; пустой ввод — нечего записывать. */
+/** Пароль для записи; пустое поле — пароль не меняется. Пробелы не обрезаются: они могут быть частью пароля. */
 export function formToSecret(f: ProfileForm): ProfileSecret | null {
-  const a = f.secret1.trim()
-  const b = f.secret2.trim()
-  if (!a) return null
-  switch (f.kind) {
-    case 'trusttunnel': return { password: a }
-    case 'hysteria2': return f.obfs ? { password: a, obfs_password: b } : { password: a }
-    case 'vless': return { uuid: a }
-    case 'wireguard': return b ? { private_key: a, preshared_key: b } : { private_key: a }
-  }
-}
-
-export function secretLabels(f: ProfileForm): [string, string | null] {
-  switch (f.kind) {
-    case 'trusttunnel': return ['Пароль', null]
-    case 'hysteria2': return ['Пароль', f.obfs ? 'Пароль obfs' : null]
-    case 'vless': return ['UUID клиента', null]
-    case 'wireguard': return ['Закрытый ключ клиента', 'Общий ключ (необязательно)']
-  }
+  return f.password ? { password: f.password } : null
 }
 
 export function destinationText(d: Destination, c: Config): string {
@@ -141,8 +75,29 @@ export function sourceText(r: Rule, c: Config): string {
   return 'вся LAN'
 }
 
-export function dnsDefault(): DnsConfig {
-  return { transport: 'doh', servers: [{ host: '', ip: '' }], adblock: { enabled: false, exceptions: [] } }
+// ---- DNS ----
+/** Резолвер туннеля по умолчанию (controller/src/model.rs: DEFAULT_TUNNEL_RESOLVER). */
+export const DEFAULT_TUNNEL_RESOLVER = '1.1.1.1'
+
+export interface DnsForm { resolver: string; adblock: boolean; exceptions: string }
+
+export function dnsDefault(): DnsForm {
+  return { resolver: DEFAULT_TUNNEL_RESOLVER, adblock: false, exceptions: '' }
+}
+
+export function dnsToForm(d: DnsConfig | undefined): DnsForm {
+  if (!d) return dnsDefault()
+  return { resolver: d.tunnel_resolver ?? DEFAULT_TUNNEL_RESOLVER, adblock: !!d.adblock?.enabled, exceptions: (d.adblock?.exceptions ?? []).join('\n') }
+}
+
+/** Настройки DNS из формы; всё по умолчанию — null (контроллер возьмёт 1.1.1.1 и не блокирует рекламу). Адрес и домены проверяет контроллер. */
+export function formToDns(f: DnsForm): DnsConfig | null {
+  const resolver = f.resolver.trim()
+  const exceptions = f.exceptions.split(/[\s,]+/).filter(Boolean)
+  const d: DnsConfig = {}
+  if (resolver && resolver !== DEFAULT_TUNNEL_RESOLVER) d.tunnel_resolver = resolver
+  if (f.adblock || exceptions.length) d.adblock = { enabled: f.adblock, ...(exceptions.length ? { exceptions } : {}) }
+  return Object.keys(d).length ? d : null
 }
 
 // ---- сети (SSID) и устройства ----

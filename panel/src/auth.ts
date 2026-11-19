@@ -58,7 +58,8 @@ export function loginMessage(r: ApiResult<SessionResponse>): string | null {
 
 /** Куда перейти после ответа на шаге входа. */
 export function nextStage(current: LoginStage, r: ApiResult<SessionResponse>): LoginStage | 'done' {
-  if (r.status === 200 && r.body.ok) return current === 'password' ? 'second_factor' : 'done'
+  // вход только паролем (TOTP не включён): контроллер сразу выдаёт полную сессию
+  if (r.status === 200 && r.body.ok) return current === 'password' && !r.body.authenticated ? 'second_factor' : 'done'
   if (current === 'second_factor' && r.body.error?.code === 'login_required') return 'password'
   return current
 }

@@ -41,34 +41,34 @@ step "4. панель: тесты, проверка типов, сборка"
 step "5. стенд: HTTPS → CGI → контроллер, вход паролем и TOTP, запись с проверкой Origin/Host/CSRF, перезапуск"
 node --test stand/stand.test.mjs 2>&1 | grep -E '^ℹ (tests|pass|fail)|✖'
 
-step "6. комплект ARM64 и бюджет flash; подписанный установочный пакет (этап 12)"
-node tools/bundle.mjs
-node tools/package.mjs
-# архивы: закрытых ключей (PEM) быть не должно; прочие совпадения — в отчёт (без значений)
-python -I -X utf8 tools/secret-scan.py archive out/bundle/mi-trusttunnel-0.1.0-stage12.tar out/package/mi-trusttunnel-0.1.0-stage12.tar | tee out/secret-scan-archives.txt | tail -1
-! grep -q private_key_pem out/secret-scan-archives.txt
+step "6. подписанный установочный пакет ARM64 (контроллер, панель, trusttunnel_client, nfqws2) и бюджет flash"
+# release-сборка не должна содержать отладочную подмену времени для тестов входа
+# («! grep» под set -e не останавливает сценарий, поэтому явные if)
+if grep -q MI_TT_TEST_NOW controller/target/aarch64-unknown-linux-musl/release/mi-tt-ctl controller/target/aarch64-unknown-linux-musl/release/mi-tt-admin; then
+  echo "ОШИБКА: в release найдена отладочная подмена времени MI_TT_TEST_NOW"; exit 1
+fi
+echo "отладочная подмена времени (MI_TT_TEST_NOW) в release: отсутствует"
+node tools/package.mjs >out/package-build.txt
+head -3 out/package-build.txt
+node -e 'const r=JSON.parse(require("fs").readFileSync("out/package/report-0.2.0.json","utf8")); if (r.headroom < 0) { console.error("ОШИБКА: пакет не помещается в бюджет flash"); process.exit(1) }'
+# архив: закрытых ключей (PEM) быть не должно; прочие совпадения — в отчёт (без значений)
+python -I -X utf8 tools/secret-scan.py archive out/package/mi-trusttunnel-0.2.0.tar | tee out/secret-scan-archives.txt | tail -1
+if grep -q private_key_pem out/secret-scan-archives.txt; then echo "ОШИБКА: закрытый ключ в архиве пакета"; exit 1; fi
 tools/lab/install-packages.sh >/dev/null   # v1, v2, v5, подменённый, чужой ключ — для лаборатории установщика
+node tools/package.mjs >/dev/null           # вернуть в out/package пакет 0.2.0 (install-packages.sh собирает 0.1.0-stage12)
 
-step "7. изолированная лаборатория: механизмы tc (этап 4) и netfilter (сток), Hysteria2 по QUIC (этап 7), Zapret (этап 9) и категории (этап 11), VLESS и AmneziaWG одновременно (этап 8), DNS/ODoH/реклама (этап 10), установка/обновление/откат и автозагрузка без WAN (этап 12), возможности, preflight ARM64 BusyBox, TrustTunnel, смена адресов (Linux/WSL)"
-if [ -f .tools/lab/bin/mihomo ] && [ -f .tools/lab/bin/trusttunnel_endpoint ]; then
+step "7. изолированные лаборатории (Linux/WSL): установка/обновление/откат/внешнее хранилище и автозагрузка без WAN с настоящими TrustTunnel, dnsmasq и ipset"
+if [ -f .tools/lab/bin/trusttunnel_endpoint ]; then
   if command -v unshare >/dev/null && [ "$(uname -s)" = Linux ]; then
-    for m in tc netfilter; do MARKER=$m tools/lab/run-lab.sh | grep -E "ИТОГ|артефакты|НЕТ"; done
-    tools/lab/run-lab-hy2.sh | grep -E "ИТОГ|артефакты|НЕТ|проверок"
-    for v in tls reality; do VLESS_MODE=$v tools/lab/run-lab-multi.sh | grep -E "ИТОГ|артефакты|НЕТ|проверок"; done
-    tools/lab/run-lab-dns.sh | grep -E "ИТОГ|артефакты|НЕТ|проверок"
     tools/lab/run-lab-install.sh | grep -E "ИТОГ|артефакты|НЕТ|проверок"
     tools/lab/run-lab-boot.sh | grep -E "ИТОГ|артефакты|НЕТ|проверок"
   elif command -v wsl >/dev/null; then
     WROOT="/mnt/$(echo "${ROOT:1:1}" | tr 'A-Z' 'a-z')${ROOT:2}"
-    for m in tc netfilter; do MSYS_NO_PATHCONV=1 wsl -d Ubuntu -- env MARKER=$m bash "$WROOT/tools/lab/run-lab.sh" | grep -E "ИТОГ|артефакты|НЕТ"; done
-    MSYS_NO_PATHCONV=1 wsl -d Ubuntu -- bash "$WROOT/tools/lab/run-lab-hy2.sh" | grep -E "ИТОГ|артефакты|НЕТ|проверок"
-    for v in tls reality; do MSYS_NO_PATHCONV=1 wsl -d Ubuntu -- env VLESS_MODE=$v bash "$WROOT/tools/lab/run-lab-multi.sh" | grep -E "ИТОГ|артефакты|НЕТ|проверок"; done
-    MSYS_NO_PATHCONV=1 wsl -d Ubuntu -- bash "$WROOT/tools/lab/run-lab-dns.sh" | grep -E "ИТОГ|артефакты|НЕТ|проверок"
     MSYS_NO_PATHCONV=1 wsl -d Ubuntu -- bash "$WROOT/tools/lab/run-lab-install.sh" | grep -E "ИТОГ|артефакты|НЕТ|проверок"
     MSYS_NO_PATHCONV=1 wsl -d Ubuntu -- bash "$WROOT/tools/lab/run-lab-boot.sh" | grep -E "ИТОГ|артефакты|НЕТ|проверок"
   else
     echo "ПРОПУЩЕНО: нет Linux/WSL"
   fi
 else
-  echo "ПРОПУЩЕНО: нет движков (tools/lab/fetch.sh)"
+  echo "ПРОПУЩЕНО: нет сервера TrustTunnel (tools/lab/fetch.sh)"
 fi

@@ -23,6 +23,7 @@ describe('auth', () => {
 
   it('переходы этапов и сообщения', () => {
     expect(nextStage('password', res(200, { ok: true, stage: 'second_factor' }))).toBe('second_factor')
+    expect(nextStage('password', res(200, { ok: true, stage: 'done', authenticated: true, totp: false, csrf: 'x' }))).toBe('done')
     expect(nextStage('second_factor', res(200, { ok: true, csrf: 'x' }))).toBe('done')
     expect(nextStage('second_factor', res(401, { error: { code: 'login_required', message: '' } }))).toBe('password')
     expect(nextStage('second_factor', res(401, { error: { code: 'invalid_code', message: '' } }))).toBe('second_factor')

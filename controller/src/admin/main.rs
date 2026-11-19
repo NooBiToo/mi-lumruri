@@ -1,19 +1,19 @@
-//! mi-tt-admin — административный CLI: план, применение, статус и снятие собственных правил маршрутизации
-//! и правил определения источника. Требует CAP_NET_ADMIN, запускается оператором или службой загрузки; из CGI не работает.
+//! mi-tt-admin — административный CLI: план, применение, статус и снятие собственных правил выбора маршрута.
+//! Требует CAP_NET_ADMIN, запускается оператором или службой загрузки; из CGI не работает.
 //!
-//! Два механизма определения источника на входе (выбор — `--marker auto|tc|netfilter`, auto: tc, если доступен):
-//!  - tc: clsact + flower src_mac / matchall + skbedit (этап 4);
-//!  - netfilter (сток RC06 1.1.38: tc-actions в ядре нет): привязка MAC↔IP в FORWARD, iif для сети на своём мосту,
-//!    physdev + MARK 0x4000 для сети на части моста.
+//! Что применяется (сток RC06 1.1.38): наборы ipset, цепочки классификации iptables (метка «через TrustTunnel»,
+//! запрет, очередь Zapret, запрет IPv6), `ip rule fwmark 0x4000 lookup 3100` и маршруты таблицы 3100 (TUN клиента
+//! TrustTunnel и запасной unreachable). Статические наборы (IP-префиксы) заполняются после применения заменой целиком.
 //! До любых изменений: проверка возможностей ядра и утилит (только чтение), интерфейсов, коллизий; при отказе — ничего.
 //!
 //! Гарантии: блокировка <state>/apply.lock; журнал <state>/applied.json с pending до изменений; откат выполненных
-//! шагов при ошибке; чужие записи и чужие хуки не удаляются.
+//! шагов при ошибке; чужие записи не удаляются.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -25,33 +25,32 @@ use mi_tt::api::{MAX_CONFIG_BYTES, parse_json, read_limited};
 use mi_tt::caps::{self, Caps, Item, check_kernel, help_has, parse_kconfig};
 use mi_tt::model::Config;
 use mi_tt::plan::{
-    CaptureSpec, Entry, Live, Marker, NfNeeds, TABLE, TC_PREF_MAX, TC_PREF_MIN, TcDev, build_plan, build_plan_netfilter, iptables_mark_collisions,
-    ipt_tables, our_mark_mask, parse_ipt, parse_link, parse_routes, parse_rules, parse_tc_filters, parse_tc_hook, parse_v6_prefixes, reconcile,
-    tc_devices,
+    Entry, Live, PolicySpec, SetKind, TABLE, build_plan, ipt_tables, needs_physdev, parse_ipsets, parse_ipt, parse_link, parse_routes, parse_rules, parse_v6_prefixes, reconcile,
 };
 use mi_tt::render::{self, Secrets, TUN_DEVICE};
 use mi_tt::store::{lock, revision, write_atomic};
 
-const USAGE: &str = "mi-tt-admin — применение собственных правил маршрутизации и определения источника (нужен CAP_NET_ADMIN)
+const USAGE: &str = "mi-tt-admin — применение собственных правил выбора маршрута (нужен CAP_NET_ADMIN)
 
-  mi-tt-admin caps   [--marker auto|tc|netfilter]                     # только чтение: возможности ядра и утилит
-  mi-tt-admin plan   --state-dir D --config C --secrets S --leases L [--guard-only] [--marker M]
-  mi-tt-admin apply  --state-dir D --config C --secrets S --leases L [--guard-only] [--marker M]
+  mi-tt-admin caps                                                     # только чтение: возможности ядра и утилит
+  mi-tt-admin plan   --state-dir D --config C --secrets S [--guard-only]
+  mi-tt-admin apply  --state-dir D --config C --secrets S [--guard-only]
   mi-tt-admin status --state-dir D
   mi-tt-admin revert --state-dir D
   mi-tt-admin auth …                                                   # вход в панель: см. mi-tt-admin auth help
   mi-tt-admin release verify <пакет> [--pinned K] [--unpacked D]       # подпись и хэши пакета релиза
   mi-tt-admin sha256 <файл>…                                           # SHA-256 (на стоке нет sha256sum)
 
---guard-only: правила источника и запреты без маршрута через TUN — для старта до запуска Mihomo или при его отсутствии.
+--guard-only: правила и запреты без маршрута через TUN — для старта до запуска клиента TrustTunnel или при его отсутствии.
 Коды выхода: 0 — готово/согласовано, 1 — расхождение, 2 — ошибка входных данных, интерфейсов или возможностей,
 3 — чужие записи или коллизии, 4 — ошибка применения (выполненные шаги откатаны), 5 — откат не завершён,
 6 — занято другим процессом, 77 — запуск из CGI запрещён.
-Окружение: MI_TT_IP, MI_TT_TC, MI_TT_IPTABLES, MI_TT_IP6TABLES, MI_TT_IPTABLES_SAVE — пути утилит;
+Окружение: MI_TT_IP, MI_TT_IPTABLES, MI_TT_IP6TABLES, MI_TT_IPTABLES_SAVE, MI_TT_IPSET — пути утилит;
 MI_TT_KCONFIG — файл конфигурации ядра вместо /proc/config.gz; MI_TT_MODULES_DIR — каталог модулей.";
 
+const STATE_VERSION: u32 = 2;
+
 #[derive(Debug, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct State {
     version: u32,
     /// none | guard | applied | reverted | pending | dirty
@@ -61,9 +60,7 @@ struct State {
     owned: BTreeSet<Entry>,
     pending: BTreeSet<Entry>,
     #[serde(default)]
-    capture: Option<CaptureSpec>,
-    #[serde(default)]
-    marker: Option<Marker>,
+    policy: Option<PolicySpec>,
     updated_unix: u64,
     last_error: Option<String>,
 }
@@ -73,9 +70,7 @@ struct Args {
     state_dir: PathBuf,
     config: Option<String>,
     secrets: Option<String>,
-    leases: Option<String>,
     guard_only: bool,
-    marker: Option<Marker>,
 }
 
 fn now() -> u64 {
@@ -94,22 +89,17 @@ fn fail(code: u8, err: &str, msg: impl Into<String>) -> ExitCode {
 fn parse_args() -> Result<Args, String> {
     let mut it = std::env::args().skip(1);
     let cmd = it.next().ok_or("нет команды")?;
-    let mut a = Args { cmd, state_dir: PathBuf::new(), config: None, secrets: None, leases: None, guard_only: false, marker: None };
+    let mut a = Args { cmd, state_dir: PathBuf::new(), config: None, secrets: None, guard_only: false };
     while let Some(k) = it.next() {
         let mut val = || it.next().ok_or(format!("{k}: нужно значение"));
         match k.as_str() {
             "--state-dir" => a.state_dir = PathBuf::from(val()?),
             "--config" => a.config = Some(val()?),
             "--secrets" => a.secrets = Some(val()?),
-            "--leases" => a.leases = Some(val()?),
             "--guard-only" => a.guard_only = true,
-            "--marker" => {
-                a.marker = match val()?.as_str() {
-                    "auto" => None,
-                    "tc" => Some(Marker::Tc),
-                    "netfilter" => Some(Marker::Netfilter),
-                    x => return Err(format!("--marker: неизвестное значение {x}")),
-                }
+            // прежние аргументы службы: аренды DHCP больше не нужны, механизм один
+            "--leases" | "--marker" => {
+                val()?;
             }
             _ => return Err(format!("неизвестный аргумент {k}")),
         }
@@ -125,10 +115,10 @@ fn parse_args() -> Result<Args, String> {
 fn bin(prog: &str) -> String {
     let var = match prog {
         "ip" => "MI_TT_IP",
-        "tc" => "MI_TT_TC",
         "iptables" => "MI_TT_IPTABLES",
         "ip6tables" => "MI_TT_IP6TABLES",
         "iptables-save" => "MI_TT_IPTABLES_SAVE",
+        "ipset" => "MI_TT_IPSET",
         _ => "",
     };
     std::env::var(var).ok().filter(|s| !s.is_empty()).unwrap_or_else(|| prog.into())
@@ -145,6 +135,16 @@ fn run(prog: &str, args: &[String]) -> Result<String, String> {
 
 fn run_s(prog: &str, args: &[&str]) -> Result<String, String> {
     run(prog, &args.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+}
+
+/// Запуск с данными на stdin (ipset restore).
+fn run_stdin(prog: &str, args: &[&str], input: &str) -> Result<(), String> {
+    let mut c = Command::new(bin(prog)).args(args).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped()).spawn().map_err(|e| format!("не удалось запустить {}: {e}", bin(prog)))?;
+    if let Some(mut si) = c.stdin.take() {
+        si.write_all(input.as_bytes()).map_err(|e| e.to_string())?;
+    }
+    let o = c.wait_with_output().map_err(|e| e.to_string())?;
+    if o.status.success() { Ok(()) } else { Err(format!("{prog} {}: {}", args.join(" "), String::from_utf8_lossy(&o.stderr).trim())) }
 }
 
 /// Вывод справки (stdout+stderr) независимо от кода возврата.
@@ -165,7 +165,7 @@ fn table_routes(v6: bool) -> Result<String, String> {
     }
 }
 
-fn read_live(devs: &BTreeSet<String>, tables: &BTreeSet<(bool, String)>, warnings: &mut Vec<String>) -> Result<Live, String> {
+fn read_live(warnings: &mut Vec<String>) -> Result<Live, String> {
     let mut l = Live { rules: parse_rules(&run_s("ip", &["rule", "show"])?, false), routes: parse_routes(&table_routes(false)?, false), ..Default::default() };
     match (run_s("ip", &["-6", "rule", "show"]), table_routes(true)) {
         (Ok(r), Ok(rt)) => {
@@ -174,20 +174,14 @@ fn read_live(devs: &BTreeSet<String>, tables: &BTreeSet<(bool, String)>, warning
         }
         (Err(e), _) | (_, Err(e)) => warnings.push(format!("IPv6 в ядре недоступен или не читается: {e}")),
     }
-    for dev in devs {
-        match run_s("tc", &["qdisc", "show", "dev", dev]) {
-            Ok(q) => {
-                let hook = parse_tc_hook(&q);
-                let filters = if hook { parse_tc_filters(&run_s("tc", &["filter", "show", "dev", dev, "ingress"])?, dev) } else { Vec::new() };
-                l.tc.push(TcDev { dev: dev.clone(), hook, filters });
-            }
-            Err(e) => warnings.push(format!("tc на {dev} не читается (интерфейс исчез?): {e}")),
-        }
+    for (v6, table) in ipt_tables() {
+        let prog = if v6 { "ip6tables" } else { "iptables" };
+        let t = run_s(prog, &["-w", "-t", &table, "-S"])?;
+        l.ipt.push(parse_ipt(&t, v6, &table));
     }
-    for (v6, table) in tables {
-        let prog = if *v6 { "ip6tables" } else { "iptables" };
-        let t = run_s(prog, &["-w", "-t", table, "-S"])?;
-        l.ipt.push(parse_ipt(&t, *v6, table));
+    match run_s("ipset", &["list", "-t"]) {
+        Ok(t) => l.ipsets = parse_ipsets(&t),
+        Err(e) => warnings.push(format!("ipset не читается: {e}")),
     }
     Ok(l)
 }
@@ -234,30 +228,28 @@ fn gather_caps() -> Caps {
         kconfig_source: source,
         kernel_release: release,
         common: check_kernel(caps::COMMON, k.as_ref(), &mods),
-        tc: check_kernel(caps::TC, k.as_ref(), &mods),
         netfilter: check_kernel(caps::NF, k.as_ref(), &mods),
-        netfilter_mark: check_kernel(caps::NF_MARK, k.as_ref(), &mods),
+        netfilter_physdev: check_kernel(caps::NF_PHYSDEV, k.as_ref(), &mods),
         netfilter_queue: check_kernel(caps::NF_QUEUE, k.as_ref(), &mods),
         ..Default::default()
     };
-    let tcv = run_s("tc", &["-V"]);
-    c.tc.push(tool("утилита tc", tcv.is_ok(), tcv.unwrap_or_else(|e| e).trim().to_string()));
     for (prog, rej) in [("iptables", "icmp-port-unreachable"), ("ip6tables", "icmp6-port-unreachable")] {
         let v = run_s(prog, &["-V"]);
         c.netfilter.push(tool(&format!("утилита {prog}"), v.is_ok(), v.unwrap_or_else(|e| e).trim().to_string()));
         c.netfilter.push(tool(&format!("{prog} -m mac --mac-source"), help_has(&help(prog, &["-m", "mac", "-h"]), "--mac-source"), "расширение mac".into()));
         c.netfilter.push(tool(&format!("{prog} -m comment"), help_has(&help(prog, &["-m", "comment", "-h"]), "--comment"), "расширение comment".into()));
         c.netfilter.push(tool(&format!("{prog} -j REJECT"), help_has(&help(prog, &["-j", "REJECT", "-h"]), "--reject-with"), format!("цель REJECT ({rej})")));
-        c.netfilter_mark.push(tool(&format!("{prog} -m physdev"), help_has(&help(prog, &["-m", "physdev", "-h"]), "--physdev-in"), "расширение physdev".into()));
-        c.netfilter_mark
-            .push(tool(&format!("{prog} -j MARK --set-xmark"), help_has(&help(prog, &["-j", "MARK", "-h"]), "--set-xmark"), "MARK ревизии 2 (ядро отдаёт xt_mark)".into()));
+        c.netfilter_physdev.push(tool(&format!("{prog} -m physdev"), help_has(&help(prog, &["-m", "physdev", "-h"]), "--physdev-in"), "расширение physdev".into()));
     }
+    c.netfilter.push(tool("iptables -j MARK --set-xmark", help_has(&help("iptables", &["-j", "MARK", "-h"]), "--set-xmark"), "MARK ревизии 2 (ядро отдаёт xt_mark)".into()));
+    c.netfilter.push(tool("iptables -m set --match-set", help_has(&help("iptables", &["-m", "set", "-h"]), "--match-set"), "расширение set".into()));
+    let v = run_s("ipset", &["-v"]);
+    c.netfilter.push(tool("утилита ipset", v.is_ok(), v.unwrap_or_else(|e| e).trim().to_string()));
     c.netfilter_queue.push(tool("iptables -j NFQUEUE --queue-bypass", help_has(&help("iptables", &["-j", "NFQUEUE", "-h"]), "--queue-bypass"), "цель NFQUEUE".into()));
     c.netfilter_queue.push(tool("iptables -m multiport", help_has(&help("iptables", &["-m", "multiport", "-h"]), "--dports"), "расширение multiport".into()));
-    c.netfilter_queue.push(tool("iptables -m mark", help_has(&help("iptables", &["-m", "mark", "-h"]), "--mark"), "расширение mark".into()));
     for (f, name) in [("bridge-nf-call-iptables", "IPv4"), ("bridge-nf-call-ip6tables", "IPv6")] {
         let v = fs::read_to_string(format!("/proc/sys/net/bridge/{f}")).unwrap_or_default();
-        c.netfilter_mark.push(tool(&format!("net.bridge.{f}=1"), v.trim() == "1", format!("{name}: physdev на маршрутизируемом трафике моста видит порт только при 1 (сейчас «{}»)", v.trim())));
+        c.netfilter_physdev.push(tool(&format!("net.bridge.{f}=1"), v.trim() == "1", format!("{name}: physdev на маршрутизируемом трафике моста видит порт только при 1 (сейчас «{}»)", v.trim())));
     }
     c.finish()
 }
@@ -268,17 +260,29 @@ fn state_path(d: &Path) -> PathBuf {
     d.join("applied.json")
 }
 
-fn load_state(d: &Path) -> Result<State, String> {
+/// Журнал прежней версии (другой формат записей) не переносится: начинаем с чистого журнала, а сверка с ядром
+/// найдёт оставшиеся записи в зоне и откажет без изменений.
+fn load_state(d: &Path, warnings: &mut Vec<String>) -> Result<State, String> {
     let p = state_path(d);
+    let fresh = State { version: STATE_VERSION, phase: "none".into(), ..Default::default() };
     if !p.exists() {
-        return Ok(State { version: 1, phase: "none".into(), ..Default::default() });
+        return Ok(fresh);
     }
     let b = read_limited(&p.to_string_lossy(), MAX_CONFIG_BYTES)?;
-    parse_json::<State>(&b, "state").map_err(|i| format!("журнал {} повреждён: {}", p.display(), i.iter().map(|x| x.message.clone()).collect::<Vec<_>>().join("; ")))
+    match serde_json::from_slice::<State>(&b) {
+        Ok(s) if s.version == STATE_VERSION => Ok(s),
+        Ok(s) if s.owned.is_empty() && s.pending.is_empty() => Ok(fresh),
+        _ if serde_json::from_slice::<Value>(&b).is_ok_and(|v| v["version"] != json!(STATE_VERSION)) => {
+            warnings.push(format!("журнал {} прежней версии не используется", p.display()));
+            Ok(fresh)
+        }
+        Ok(_) => Err(format!("журнал {} другой версии", p.display())),
+        Err(e) => Err(format!("журнал {} повреждён: {e}", p.display())),
+    }
 }
 
 fn save_state(d: &Path, s: &mut State) -> Result<(), String> {
-    s.version = 1;
+    s.version = STATE_VERSION;
     s.updated_unix = now();
     let mut b = serde_json::to_vec_pretty(s).map_err(|e| e.to_string())?;
     b.push(b'\n');
@@ -288,25 +292,26 @@ fn save_state(d: &Path, s: &mut State) -> Result<(), String> {
 // ---------- желаемое состояние ----------
 
 struct Desired {
-    spec: CaptureSpec,
+    spec: PolicySpec,
     config_revision: String,
     warnings: Vec<String>,
 }
 
 fn render_spec(a: &Args) -> Result<Desired, ExitCode> {
     let need = |o: &Option<String>, k: &str| o.clone().ok_or_else(|| fail(2, "usage", format!("нужен {k}")));
-    let (c, s, l) = (need(&a.config, "--config")?, need(&a.secrets, "--secrets")?, need(&a.leases, "--leases")?);
+    let (c, s) = (need(&a.config, "--config")?, need(&a.secrets, "--secrets")?);
     let rd = |p: &str| read_limited(p, MAX_CONFIG_BYTES).map_err(|m| fail(2, "unreadable", m));
-    let (cb, sb, lb) = (rd(&c)?, rd(&s)?, rd(&l)?);
+    let (cb, sb) = (rd(&c)?, rd(&s)?);
     let cfg: Config = parse_json(&cb, "config").map_err(|i| out(2, json!({ "ok": false, "error": { "code": "config_invalid", "message": "настройки не разобраны" }, "issues": i })))?;
     let sec: Secrets = parse_json(&sb, "secrets").map_err(|i| out(2, json!({ "ok": false, "error": { "code": "secrets_invalid", "message": "secrets.json не разобран" }, "issues": i })))?;
-    let r = render::render(&cfg, &sec, &render::parse_leases(&String::from_utf8_lossy(&lb))).map_err(|i| {
+    let lists = render::load_lists(&cfg, Path::new(&c)).map_err(|m| fail(2, "list_invalid", m))?;
+    let r = render::render(&cfg, &sec, &lists).map_err(|i| {
         out(2, json!({ "ok": false, "error": { "code": "not_renderable", "message": "план нельзя построить точно; текущее состояние сети не меняется" }, "issues": i }))
     })?;
-    Ok(Desired { spec: r.capture, config_revision: revision(&cb), warnings: r.warnings })
+    Ok(Desired { spec: r.policy, config_revision: revision(&cb), warnings: r.warnings })
 }
 
-fn check_interfaces(spec: &CaptureSpec) -> Vec<String> {
+fn check_interfaces(spec: &PolicySpec) -> Vec<String> {
     let mut errs = Vec::new();
     for (ifname, master) in spec.interfaces() {
         match run_s("ip", &["-d", "link", "show", "dev", &ifname]) {
@@ -326,13 +331,9 @@ fn check_interfaces(spec: &CaptureSpec) -> Vec<String> {
     errs
 }
 
-fn bridges(spec: &CaptureSpec) -> BTreeSet<String> {
-    spec.devices.iter().map(|d| d.bridge.clone()).chain(spec.networks.iter().map(|n| n.bridge.clone())).chain(spec.lanwide.iter().map(|l| l.bridge.clone())).collect()
-}
-
-fn v6_prefixes(spec: &CaptureSpec) -> Vec<String> {
+fn v6_prefixes(spec: &PolicySpec) -> Vec<String> {
     let mut v: BTreeSet<String> = BTreeSet::new();
-    for b in bridges(spec) {
+    for b in spec.bridges() {
         if let Ok(t) = run_s("ip", &["-6", "addr", "show", "dev", &b, "scope", "global"]) {
             v.extend(parse_v6_prefixes(&t));
         }
@@ -341,8 +342,8 @@ fn v6_prefixes(spec: &CaptureSpec) -> Vec<String> {
 }
 
 /// Живой состав мостов (`ip -o link show master <мост>`).
-fn bridge_ports(spec: &CaptureSpec) -> BTreeMap<String, BTreeSet<String>> {
-    bridges(spec)
+fn bridge_ports(spec: &PolicySpec) -> BTreeMap<String, BTreeSet<String>> {
+    spec.bridges()
         .into_iter()
         .map(|b| {
             let ports = run_s("ip", &["-o", "link", "show", "master", &b])
@@ -356,98 +357,36 @@ fn bridge_ports(spec: &CaptureSpec) -> BTreeMap<String, BTreeSet<String>> {
         .collect()
 }
 
-/// Метки в firewall для tc-механизма (iptables-save -t mangle), если утилита есть.
-fn firewall_mark_check(mask: u32, warnings: &mut Vec<String>) -> Vec<String> {
-    if mask == 0 {
-        return Vec::new();
-    }
-    match Command::new(bin("iptables-save")).args(["-t", "mangle"]).output() {
-        Ok(o) if o.status.success() => iptables_mark_collisions(&String::from_utf8_lossy(&o.stdout))
-            .into_iter()
-            .map(|l| format!("iptables-save: правило firewall меняет/читает биты наших меток: {l}"))
-            .collect(),
-        _ => {
-            warnings.push("iptables-save не найден: пересечение меток с firewall (mangle) не проверено".into());
-            Vec::new()
-        }
-    }
-}
-
 struct Built {
     set: BTreeSet<Entry>,
-    marker: Marker,
     caps: Caps,
-    needs: NfNeeds,
-    pre_conflicts: Vec<String>,
 }
 
 /// Проверки до мутаций и построение желаемого набора. Ошибка — готовый ответ (ничего не изменено).
-fn build(a: &Args, d: &Desired, owned: &BTreeSet<Entry>, prev_marker: Option<Marker>, warnings: &mut Vec<String>) -> Result<Built, ExitCode> {
+fn build(a: &Args, d: &Desired) -> Result<Built, ExitCode> {
     let errs = check_interfaces(&d.spec);
     if !errs.is_empty() {
         return Err(out(2, json!({ "ok": false, "error": { "code": "interfaces", "message": "интерфейсы не соответствуют настройкам; ничего не изменено" }, "issues": errs })));
     }
     let caps = gather_caps();
-    let requested = a.marker.or(prev_marker);
-    let marker = match caps.choose(requested) {
-        Ok(m) => m,
-        Err(missing) if !d.spec.is_empty() => {
-            return Err(out(2, json!({ "ok": false, "error": { "code": "capabilities", "message": "нет нужных возможностей ядра или утилит; ничего не изменено" },
-                "requested": requested, "missing": missing, "caps": caps })));
-        }
-        Err(_) => requested.unwrap_or(Marker::Netfilter),
-    };
-    let mut needs = NfNeeds::default();
-    let mut pre_conflicts = Vec::new();
-    if marker == Marker::Tc && d.spec.zapret.is_some() && !a.guard_only {
+    if d.spec.is_empty() {
+        return Ok(Built { set: BTreeSet::new(), caps });
+    }
+    if !caps.netfilter_ok {
+        return Err(out(2, json!({ "ok": false, "error": { "code": "capabilities", "message": "нет нужных возможностей ядра или утилит; ничего не изменено" },
+            "missing": caps.missing_base(), "caps": caps })));
+    }
+    let bp = bridge_ports(&d.spec);
+    if needs_physdev(&d.spec, &bp) && !caps.netfilter_physdev_ok {
         return Err(out(2, json!({ "ok": false, "error": { "code": "capabilities",
-            "message": "Zapret (NFQUEUE по метке сокета движка) реализован только на netfilter-пути; ничего не изменено" } })));
+            "message": "сеть на части моста требует physdev и bridge-nf-call=1; ничего не изменено" },
+            "missing": Caps::missing(&caps.netfilter_physdev), "caps": caps })));
     }
-    let set = match marker {
-        Marker::Tc => {
-            let hook_devs = tc_devices(&build_plan(&d.spec, &[], &BTreeSet::new(), owned, a.guard_only));
-            let foreign_hooks: BTreeSet<String> = hook_devs
-                .iter()
-                .filter(|dev| run_s("tc", &["qdisc", "show", "dev", dev]).map(|q| parse_tc_hook(&q)).unwrap_or(false) && !owned.contains(&Entry::Qdisc { dev: (*dev).clone() }))
-                .cloned()
-                .collect();
-            let set = build_plan(&d.spec, &v6_prefixes(&d.spec), &foreign_hooks, owned, a.guard_only);
-            pre_conflicts = firewall_mark_check(our_mark_mask(&set), warnings);
-            set
-        }
-        Marker::Netfilter => {
-            let (set, n) = build_plan_netfilter(&d.spec, &v6_prefixes(&d.spec), &bridge_ports(&d.spec), a.guard_only);
-            if n.mark && !caps.netfilter_mark_ok {
-                return Err(out(2, json!({ "ok": false, "error": { "code": "capabilities",
-                    "message": "политика сети на части моста требует physdev + MARK и bridge-nf-call=1; ничего не изменено" },
-                    "missing": Caps::missing(&caps.netfilter_mark), "caps": caps })));
-            }
-            if n.queue && n.mark {
-                return Err(out(2, json!({ "ok": false, "error": { "code": "mark_conflict",
-                    "message": "Zapret и политика сети на части моста используют один свободный бит метки 0x4000; ничего не изменено" } })));
-            }
-            if n.queue && !caps.netfilter_queue_ok {
-                return Err(out(2, json!({ "ok": false, "error": { "code": "capabilities",
-                    "message": "Zapret требует NFQUEUE, multiport и mark в ядре и iptables; ничего не изменено" },
-                    "missing": Caps::missing(&caps.netfilter_queue), "caps": caps })));
-            }
-            needs = n;
-            set
-        }
-    };
-    Ok(Built { set, marker, caps, needs, pre_conflicts })
-}
-
-fn nf_tables_to_read(marker: Option<Marker>, set: &BTreeSet<Entry>, owned: &BTreeSet<Entry>) -> BTreeSet<(bool, String)> {
-    let mut t = ipt_tables(set.iter().chain(owned.iter()));
-    if marker == Some(Marker::Netfilter) {
-        for v6 in [false, true] {
-            for table in ["filter", "mangle"] {
-                t.insert((v6, table.to_string()));
-            }
-        }
+    if !d.spec.zapret_ports.is_empty() && !caps.netfilter_queue_ok {
+        return Err(out(2, json!({ "ok": false, "error": { "code": "capabilities", "message": "Zapret требует NFQUEUE и multiport в ядре и iptables; ничего не изменено" },
+            "missing": Caps::missing(&caps.netfilter_queue), "caps": caps })));
     }
-    t
+    Ok(Built { set: build_plan(&d.spec, &v6_prefixes(&d.spec), &bp, a.guard_only), caps })
 }
 
 // ---------- применение ----------
@@ -460,16 +399,38 @@ struct Step {
     error: Option<String>,
 }
 
+/// Все команды записи; при ошибке добавления — попытка убрать частично созданное.
 fn exec(e: &Entry, op: &'static str) -> Step {
-    let (prog, args) = e.cmd(op);
-    match run(prog, &args) {
-        Ok(_) => Step { op, entry: e.label(), ok: true, error: None },
-        Err(m) => Step { op, entry: e.label(), ok: false, error: Some(m) },
+    for (prog, args) in e.cmds(op) {
+        if let Err(m) = run(prog, &args) {
+            if op == "add" {
+                for (p, a) in e.cmds("del") {
+                    let _ = run(p, &a);
+                }
+            }
+            return Step { op, entry: e.label(), ok: false, error: Some(m) };
+        }
     }
+    Step { op, entry: e.label(), ok: true, error: None }
 }
 
-fn foreign_filters_on(live: &Live, dev: &str) -> usize {
-    live.tc.iter().filter(|t| t.dev == dev).flat_map(|t| t.filters.iter()).filter(|(p, _)| !(TC_PREF_MIN..=TC_PREF_MAX).contains(p)).count()
+/// Статические наборы: новый состав во временном наборе, затем `ipset swap` — правила не видят промежуточного состояния.
+fn sync_static_sets(spec: &PolicySpec) -> Vec<String> {
+    let mut errs = Vec::new();
+    for s in spec.sets.iter().filter(|s| s.kind == SetKind::Static) {
+        let tmp = format!("{}t", &s.name[..s.name.len().min(30)]);
+        let _ = run_s("ipset", &["destroy", &tmp]);
+        let mut input = format!("create {tmp} hash:net family inet maxelem {}\n", (s.entries.len() * 2).max(65536));
+        for e in &s.entries {
+            input.push_str(&format!("add {tmp} {e} -exist\n"));
+        }
+        let r = run_stdin("ipset", &["restore"], &input).and_then(|_| run_s("ipset", &["swap", &tmp, &s.name]).map(|_| ()));
+        let _ = run_s("ipset", &["destroy", &tmp]);
+        if let Err(m) = r {
+            errs.push(format!("набор {}: {m}", s.name));
+        }
+    }
+    errs
 }
 
 fn change(a: &Args, target: Option<Desired>) -> ExitCode {
@@ -480,57 +441,38 @@ fn change(a: &Args, target: Option<Desired>) -> ExitCode {
         Ok(g) => g,
         Err(m) => return fail(6, "busy", m),
     };
-    let mut st = match load_state(&a.state_dir) {
+    let mut warnings = Vec::new();
+    let mut st = match load_state(&a.state_dir, &mut warnings) {
         Ok(s) => s,
         Err(m) => return fail(2, "state_corrupt", m),
     };
     let owned: BTreeSet<Entry> = st.owned.union(&st.pending).cloned().collect();
     let reverting = target.is_none();
-    let mut warnings = Vec::new();
-    let (set, spec, rev, marker, pre_conflicts, needs) = match target {
+    let (set, spec, rev) = match target {
         Some(d) => {
             warnings.extend(d.warnings.clone());
-            let b = match build(a, &d, &owned, st.marker, &mut warnings) {
+            let b = match build(a, &d) {
                 Ok(b) => b,
                 Err(code) => return code,
             };
-            (b.set, Some(d.spec), Some(d.config_revision), Some(b.marker), b.pre_conflicts, b.needs)
+            let _ = b.caps;
+            (b.set, Some(d.spec), Some(d.config_revision))
         }
-        None => (BTreeSet::new(), st.capture.clone(), st.config_revision.clone(), st.marker, Vec::new(), NfNeeds::default()),
+        None => (BTreeSet::new(), st.policy.clone(), st.config_revision.clone()),
     };
-    let devs = tc_devices(set.iter().chain(owned.iter()));
-    let tables = nf_tables_to_read(marker, &set, &owned);
-    let live = match read_live(&devs, &tables, &mut warnings) {
+    let live = match read_live(&mut warnings) {
         Ok(l) => l,
         Err(m) => return fail(2, "read_failed", m),
     };
-    let mut d = reconcile(&set, &owned, &live);
-    d.conflicts.extend(pre_conflicts);
+    let d = reconcile(&set, &owned, &live);
     if reverting {
         warnings.extend(d.conflicts.iter().cloned());
     } else if !d.conflicts.is_empty() {
         return out(3, json!({ "ok": false, "error": { "code": "conflict", "message": "чужие записи или коллизии; ничего не изменено" },
-            "conflicts": d.conflicts, "phase": st.phase, "marker": marker, "warnings": warnings }));
+            "conflicts": d.conflicts, "phase": st.phase, "warnings": warnings }));
     }
-    let mut keep_qdisc: BTreeSet<String> = BTreeSet::new();
-    let mut del: Vec<Entry> = Vec::new();
-    for e in &d.del {
-        if let Entry::Qdisc { dev } = e {
-            if foreign_filters_on(&live, dev) > 0 {
-                warnings.push(format!("на {dev} появились чужие фильтры: дисциплина clsact оставлена, сняты только наши фильтры"));
-                keep_qdisc.insert(dev.clone());
-                for o in owned.iter().filter(|o| matches!(o, Entry::Filter { dev: fd, .. } if fd == dev)) {
-                    if live.tc.iter().any(|t| t.filters.iter().any(|(_, f)| f.as_ref() == Ok(o))) {
-                        del.insert(0, o.clone());
-                    }
-                }
-                continue;
-            }
-        }
-        del.push(e.clone());
-    }
-    let new_phase = if reverting { "reverted" } else if set.iter().any(Entry::is_tun_route) || set.is_empty() { "applied" } else { "guard" };
-    let steps: Vec<(&Entry, &'static str)> = d.add.iter().map(|e| (e, "add")).chain(del.iter().map(|e| (e, "del"))).collect();
+    let new_phase = if reverting { "reverted" } else if set.iter().any(Entry::is_tun_route) || !set.iter().any(|e| matches!(e, Entry::Route { .. })) { "applied" } else { "guard" };
+    let steps: Vec<(&Entry, &'static str)> = d.add.iter().map(|e| (e, "add")).chain(d.del.iter().map(|e| (e, "del"))).collect();
     let prev_phase = st.phase.clone();
     if !steps.is_empty() {
         st.phase = "pending".into();
@@ -568,94 +510,68 @@ fn change(a: &Args, target: Option<Desired>) -> ExitCode {
         let _ = save_state(&a.state_dir, &mut st);
         return out(if clean { 4 } else { 5 }, json!({ "ok": false,
             "error": { "code": if clean { "apply_failed" } else { "rollback_incomplete" }, "message": err },
-            "steps": done, "rollback": rollback, "phase": st.phase, "marker": marker, "warnings": warnings }));
+            "steps": done, "rollback": rollback, "phase": st.phase, "warnings": warnings }));
     }
-    st.owned = set.iter().filter(|e| !matches!(e, Entry::Qdisc { dev } if keep_qdisc.contains(dev))).cloned().collect();
+    let set_errors = match (&spec, reverting) {
+        (Some(sp), false) => sync_static_sets(sp),
+        _ => Vec::new(),
+    };
+    st.owned = set.clone();
     st.pending.clear();
     st.phase = new_phase.into();
     st.config_revision = rev;
     st.plan_sha256 = Some(revision(&serde_json::to_vec(&set).unwrap_or_default()));
-    st.capture = if reverting { None } else { spec };
-    st.marker = if reverting { st.marker } else { marker };
+    st.policy = if reverting { None } else { spec };
+    st.last_error = set_errors.first().cloned();
     if let Err(m) = save_state(&a.state_dir, &mut st) {
         return fail(2, "state_write", m);
     }
     let mut w2 = Vec::new();
-    let verified = read_live(&tc_devices(set.iter()), &ipt_tables(set.iter()), &mut w2).map(|l| {
+    let verified = read_live(&mut w2).map(|l| {
         let v = reconcile(&set, &set, &l);
         v.is_noop() && v.conflicts.is_empty()
     });
+    let ok = verified == Ok(true) && set_errors.is_empty();
     out(
-        if verified == Ok(true) { 0 } else { 1 },
-        json!({ "ok": verified == Ok(true), "noop": steps.is_empty(), "phase": st.phase, "marker": st.marker, "needs": needs,
+        if ok { 0 } else { 1 },
+        json!({ "ok": ok, "noop": steps.is_empty(), "phase": st.phase,
             "config_revision": st.config_revision, "plan_sha256": st.plan_sha256, "steps": done, "verified": verified.unwrap_or(false),
-            "tun_present": tun_present(), "owned": st.owned.iter().map(Entry::label).collect::<Vec<_>>(), "warnings": warnings }),
+            "set_errors": set_errors, "tun_present": tun_present(), "owned": st.owned.iter().map(Entry::label).collect::<Vec<_>>(), "warnings": warnings }),
     )
 }
 
-fn observed_addrs() -> BTreeMap<String, BTreeSet<String>> {
-    let mut m: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for fam in ["-4", "-6"] {
-        if let Ok(t) = run_s("ip", &[fam, "neigh", "show"]) {
-            for line in t.lines() {
-                let w: Vec<&str> = line.split_whitespace().collect();
-                let (Some(addr), Some(i)) = (w.first(), w.iter().position(|x| *x == "lladdr")) else { continue };
-                if addr.starts_with("fe80") {
-                    continue;
-                }
-                if let Some(mac) = w.get(i + 1) {
-                    m.entry(mac.to_ascii_lowercase()).or_default().insert(addr.to_string());
-                }
-            }
-        }
-    }
-    m
-}
-
 fn status(a: &Args) -> ExitCode {
-    let st = match load_state(&a.state_dir) {
+    let mut warnings = Vec::new();
+    let st = match load_state(&a.state_dir, &mut warnings) {
         Ok(s) => s,
         Err(m) => return fail(2, "state_corrupt", m),
     };
-    let mut warnings = Vec::new();
     let owned: BTreeSet<Entry> = st.owned.union(&st.pending).cloned().collect();
-    let live = match read_live(&tc_devices(owned.iter()), &nf_tables_to_read(st.marker, &BTreeSet::new(), &owned), &mut warnings) {
+    let live = match read_live(&mut warnings) {
         Ok(l) => l,
         Err(m) => return fail(2, "read_failed", m),
     };
     let d = reconcile(&st.owned, &owned, &live);
     let tun = tun_present();
     let tun_route_live = d.live_in_zone.iter().any(Entry::is_tun_route);
-    let source_rules = |e: &Entry| matches!(e, Entry::Filter { .. } | Entry::Ipt { .. });
-    let sources_owned = st.owned.iter().any(source_rules);
-    let sources_live = st.owned.iter().filter(|e| source_rules(e)).all(|e| d.live_in_zone.contains(e));
+    let tunnel_used = st.owned.iter().any(|e| matches!(e, Entry::Rule { fwmark: Some(_), .. }));
+    let fail_open = st.policy.as_ref().is_some_and(|p| p.fail_open);
     let protection = if st.owned.is_empty() {
-        "нет защиты"
-    } else if sources_owned && !sources_live {
-        "правила определения источника неполные: защита не действует полностью"
-    } else if tun && tun_route_live {
-        "захваченный трафик идёт в TUN Mihomo; адреса вне плана и внешний IPv6 блокируются"
+        "правил нет: весь трафик идёт напрямую"
+    } else if !d.missing.is_empty() {
+        "правила неполные: политика действует не полностью"
+    } else if !tunnel_used || (tun && tun_route_live) {
+        "правила действуют; трафик «через TrustTunnel» идёт в туннель"
+    } else if fail_open {
+        "туннель не работает: трафик «через TrustTunnel» идёт напрямую (обход при отказе)"
     } else {
-        "движок не работает: захваченный трафик блокируется (unreachable)"
+        "туннель не работает: трафик «через TrustTunnel» блокируется (unreachable)"
     };
-    let seen = observed_addrs();
-    let sources: Vec<Value> = st
-        .capture
-        .iter()
-        .flat_map(|c| c.devices.iter())
-        .map(|dv| {
-            let addrs = seen.get(&dv.mac).cloned().unwrap_or_default();
-            let unplanned: Vec<&String> = addrs.iter().filter(|x| Some(*x) != dv.ipv4.as_ref()).collect();
-            json!({ "device": dv.id, "mac": dv.mac, "planned_ipv4": dv.ipv4, "observed": addrs,
-                "note": if unplanned.is_empty() { "адреса совпадают с планом".to_string() }
-                        else { format!("адреса вне плана {unplanned:?}: их внешний трафик блокируется до apply") } })
-        })
-        .collect();
     let consistent = d.conflicts.is_empty() && d.missing.is_empty() && st.pending.is_empty() && st.phase != "dirty";
     out(
         if consistent { 0 } else { 1 },
-        json!({ "ok": consistent, "phase": st.phase, "marker": st.marker, "config_revision": st.config_revision, "plan_sha256": st.plan_sha256,
-            "protection": protection, "tun_present": tun, "sources": sources,
+        json!({ "ok": consistent, "phase": st.phase, "config_revision": st.config_revision, "plan_sha256": st.plan_sha256,
+            "protection": protection, "tun_present": tun,
             "owned": st.owned.iter().map(Entry::label).collect::<Vec<_>>(),
             "missing": d.missing.iter().map(Entry::label).collect::<Vec<_>>(),
             "pending": st.pending.iter().map(Entry::label).collect::<Vec<_>>(),
@@ -669,36 +585,31 @@ fn plan(a: &Args) -> ExitCode {
         Err(c) => return c,
     };
     let mut warnings = dsr.warnings.clone();
-    let st = load_state(&a.state_dir).unwrap_or_default();
+    let st = load_state(&a.state_dir, &mut warnings).unwrap_or_default();
     let owned: BTreeSet<Entry> = st.owned.union(&st.pending).cloned().collect();
-    let b = match build(a, &dsr, &owned, st.marker, &mut warnings) {
+    let b = match build(a, &dsr) {
         Ok(b) => b,
         Err(code) => return code,
     };
-    let live = match read_live(&tc_devices(b.set.iter().chain(owned.iter())), &nf_tables_to_read(Some(b.marker), &b.set, &owned), &mut warnings) {
+    let live = match read_live(&mut warnings) {
         Ok(l) => l,
         Err(m) => return fail(2, "read_failed", m),
     };
     let d = reconcile(&b.set, &owned, &live);
-    let mut conflicts = b.pre_conflicts.clone();
-    conflicts.extend(d.conflicts.clone());
     out(
-        if conflicts.is_empty() { 0 } else { 3 },
-        json!({ "ok": conflicts.is_empty(), "marker": b.marker, "needs": b.needs, "config_revision": dsr.config_revision, "capture": dsr.spec,
+        if d.conflicts.is_empty() { 0 } else { 3 },
+        json!({ "ok": d.conflicts.is_empty(), "config_revision": dsr.config_revision, "policy": dsr.spec,
             "desired": b.set.iter().map(Entry::label).collect::<Vec<_>>(),
             "add": d.add.iter().map(Entry::label).collect::<Vec<_>>(), "del": d.del.iter().map(Entry::label).collect::<Vec<_>>(),
-            "conflicts": conflicts, "caps": { "tc_ok": b.caps.tc_ok, "netfilter_ok": b.caps.netfilter_ok, "netfilter_mark_ok": b.caps.netfilter_mark_ok },
+            "conflicts": d.conflicts, "caps": { "netfilter_ok": b.caps.netfilter_ok, "netfilter_physdev_ok": b.caps.netfilter_physdev_ok, "netfilter_queue_ok": b.caps.netfilter_queue_ok },
             "warnings": warnings }),
     )
 }
 
-fn caps_cmd(a: &Args) -> ExitCode {
+fn caps_cmd(_a: &Args) -> ExitCode {
     let c = gather_caps();
-    let choice = c.choose(a.marker);
-    out(
-        if choice.is_ok() { 0 } else { 2 },
-        json!({ "ok": choice.is_ok(), "chosen": choice.as_ref().ok(), "missing": choice.err(), "caps": c }),
-    )
+    let missing = c.missing_base();
+    out(if c.netfilter_ok { 0 } else { 2 }, json!({ "ok": c.netfilter_ok, "missing": missing, "caps": c }))
 }
 
 /// `release verify <пакет> [--pinned <файл ключа>] [--unpacked <каталог>]` — подпись, файлы пакета и распакованные файлы.

@@ -1,13 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { Config } from './api'
-import { defaultForm, fieldForIssue, ruleKey, sampleHost, saveOutcome, toRequest } from './draft'
+import { defaultForm, fieldForIssue, profileReady, RENDERABLE_KINDS, ruleKey, sampleHost, saveOutcome, toRequest } from './draft'
 
 const cfg: Config = {
   version: 1,
-  profiles: [
-    { id: 'vless-main', name: 'VLESS', kind: 'vless', on_failure: 'block' },
-    { id: 'tt-home', name: 'TT', kind: 'trusttunnel', on_failure: 'block' },
-  ],
+  profiles: [{ id: 'tt-home', name: 'TT', kind: 'trusttunnel', on_failure: 'block' }],
   networks: [{ id: 'home', name: 'Дом', ssid: 'Home' }],
   devices: [{ id: 'tv', name: 'ТВ', mac: 'a4:77:33:10:20:30', network: 'home' }],
   groups: [{ id: 'video', name: 'Видео', destinations: [{ type: 'domain_suffix', value: 'youtube.com' }] }],
@@ -70,18 +67,20 @@ describe('сохранение', () => {
   })
 })
 
-describe('профили (этап 7)', () => {
-  it('профиль с точкой подключения готов к применению, без точки — нет', async () => {
-    const { profileReady } = await import('./draft')
-    expect(profileReady({ id: 'h', name: 'H', kind: 'hysteria2', on_failure: 'block', endpoint: { server: 'hy.example.com', port: 443, obfs: 'salamander' } })).toBe(true)
-    expect(profileReady({ id: 't', name: 'T', kind: 'trusttunnel', on_failure: 'block' })).toBe(false)
-    expect(profileReady({ id: 'v', name: 'V', kind: 'vless', on_failure: 'block' })).toBe(false)
-    // этап 8: VLESS и WireGuard/AmneziaWG с точкой подключения применимы
-    expect(profileReady({ id: 'v', name: 'V', kind: 'vless', on_failure: 'block', endpoint: { server: 'a.b', port: 1 } })).toBe(true)
-    expect(profileReady({ id: 'w', name: 'W', kind: 'wireguard', on_failure: 'block', endpoint: { server: 'a.b', port: 51820 } })).toBe(true)
+describe('профиль TrustTunnel', () => {
+  const endpoint = { server: '203.0.113.10', port: 443, username: 'alice', quic: false, anti_dpi: false }
+  it('профиль с точкой подключения готов к применению, без точки — нет', () => {
+    expect(RENDERABLE_KINDS).toEqual(['trusttunnel'])
+    expect(profileReady({ id: 't', name: 'T', kind: 'trusttunnel', on_failure: 'block', endpoint })).toBe(true)
+    expect(profileReady({ id: 't', name: 'T', kind: 'trusttunnel', on_failure: 'direct' })).toBe(false)
   })
-  it('без TrustTunnel по умолчанию выбирается готовый профиль Hysteria2', () => {
-    const c = { ...cfg, profiles: [cfg.profiles[0]!, { id: 'hy', name: 'HY', kind: 'hysteria2' as const, on_failure: 'block' as const, endpoint: { server: 'hy.example.com', port: 443 } }] }
-    expect(defaultForm(c).actionProfile).toBe('hy')
+  it('без профилей действие по умолчанию — напрямую', () => {
+    const f = defaultForm({ ...cfg, profiles: [] })
+    expect(f.actionType).toBe('direct')
+    expect(f.actionProfile).toBe('')
+  })
+  it('ненастроенный профиль всё равно выбирается по умолчанию', () => {
+    expect(defaultForm(cfg).actionProfile).toBe('tt-home')
+    expect(defaultForm({ ...cfg, profiles: [{ ...cfg.profiles[0]!, endpoint }] }).actionType).toBe('profile')
   })
 })

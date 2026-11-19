@@ -22,11 +22,11 @@ const CGI_TIMEOUT_MS = 5000
 const SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
-  'Content-Security-Policy': "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+  'Content-Security-Policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   'Referrer-Policy': 'no-referrer',
   'Strict-Transport-Security': 'max-age=31536000',
 }
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' }
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.woff2': 'font/woff2' }
 
 export function defaults() {
   const exe = process.platform === 'win32' ? 'mi-tt-ctl.exe' : 'mi-tt-ctl'
@@ -207,7 +207,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const port = await stand.listen()
   console.log(`стенд: https://127.0.0.1:${port}/  (сертификат=${stand.certFile}, настройки=${stand.opts.config}, вход=${stand.opts.authDir}, bin=${stand.opts.bin})`)
   if (!existsSync(join(stand.opts.authDir, 'auth.json'))) {
-    console.log(`вход не настроен: MI_TT_AUTH_DIR=${stand.opts.authDir} MI_TT_SESSION_DIR=${stand.opts.sessionDir} ${stand.opts.admin} auth init, затем auth confirm`)
+    console.log(`вход не настроен: MI_TT_AUTH_DIR=${stand.opts.authDir} MI_TT_SESSION_DIR=${stand.opts.sessionDir} ${stand.opts.admin} auth init`)
   }
   const stop = () => stand.close().then(() => process.exit(0))
   process.on('SIGINT', stop)
