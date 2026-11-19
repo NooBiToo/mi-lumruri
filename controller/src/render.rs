@@ -74,7 +74,7 @@ pub struct Rendered {
 /// Списки категорий: id → записи (домены или IP-префиксы), как их вернул `parse_category_list`.
 pub type Lists = BTreeMap<String, Vec<String>>;
 
-/// Список категории: по записи в строке, `#` — комментарий. Домены — суффиксы (допускаются `+.` и `*.`),
+/// Список категории: по записи в строке, `#` — комментарий. Домены — суффиксы (допускаются `+.`, `*.` и ведущая `.`),
 /// IP — префиксы IPv4/IPv6. Ошибочная строка — отказ всего списка.
 pub fn parse_category_list(kind: CategoryKind, text: &str) -> Result<Vec<String>, Vec<Issue>> {
     let mut out = BTreeSet::new();
@@ -85,7 +85,10 @@ pub fn parse_category_list(kind: CategoryKind, text: &str) -> Result<Vec<String>
             continue;
         }
         let r = match kind {
-            CategoryKind::Domain => normalize_domain(line.trim_start_matches("+.").trim_start_matches("*."), 1),
+            CategoryKind::Domain => {
+                let d = line.trim_start_matches("+.").trim_start_matches("*.");
+                normalize_domain(d.strip_prefix('.').unwrap_or(d), 1)
+            },
             CategoryKind::Ip => parse_cidr(line).map(|c| c.to_string()),
         };
         match r {
@@ -442,5 +445,8 @@ mod tests {
     fn category_lists_take_plain_and_prefixed_domains() {
         assert_eq!(parse_category_list(CategoryKind::Domain, "+.youtube.com\n*.ytimg.com\ngooglevideo.com # x\n").unwrap(), ["googlevideo.com", "youtube.com", "ytimg.com"]);
         assert!(parse_category_list(CategoryKind::Ip, "10.0.0.0/8\nbad\n").is_err());
+        assert_eq!(parse_category_list(CategoryKind::Domain, ".ua\n.example.com\n").unwrap(), ["example.com", "ua"]);
+        assert!(parse_category_list(CategoryKind::Domain, "..ua\n").is_err());
+        assert!(parse_category_list(CategoryKind::Domain, ".\n").is_err());
     }
 }

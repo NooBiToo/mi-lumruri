@@ -130,6 +130,13 @@
       "ipv4": null
     },
     {
+      "id": "block",
+      "name": "Заблокированное",
+      "group": "Категории",
+      "domains": "Categories/block.lst",
+      "ipv4": null
+    },
+    {
       "id": "geoblock",
       "name": "Геоблок",
       "group": "Категории",
@@ -141,6 +148,13 @@
       "name": "Ходячие",
       "group": "Категории",
       "domains": "Categories/hodca.lst",
+      "ipv4": null
+    },
+    {
+      "id": "russia_inside",
+      "name": "Заблокированное в России",
+      "group": "Россия",
+      "domains": "Russia/inside-raw.lst",
       "ipv4": null
     }
   ]
