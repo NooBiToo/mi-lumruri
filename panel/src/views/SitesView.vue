@@ -7,7 +7,7 @@ import Message from 'primevue/message'
 import Textarea from 'primevue/textarea'
 import { api, type ZapretTestState } from '../api'
 import { build, buildBlocker, catalog, config, knownDevicesNow, loadConfig, save, scrollTarget, serverReady, simple, simpleState } from '../store'
-import { lines, strategyLabel, testedAt, when, zapretProgress, zapretResult } from '../status'
+import { lines, strategyLabel, testedAt, when, zapretIdle, zapretProgress, zapretResult } from '../status'
 import { normalizeDomain, type Simple } from '../simple'
 import ManualBanner from './ManualBanner.vue'
 
@@ -103,6 +103,8 @@ async function startTest() {
 const running = computed(() => test.value?.state === 'running')
 const result = computed(() => (test.value && (test.value.state === 'done' || test.value.state === 'failed') ? zapretResult(test.value) : null))
 const zapretSaved = computed(() => simple.value?.rest === 'zapret')
+/** Сохранённые настройки не используют Zapret (VPN выключен или всё через VPN): кнопки подбора нет, есть объяснение. */
+const idle = computed(() => zapretIdle(simple.value))
 onMounted(async () => {
   void readTest()
   // переход с «Дополнительно» на подбор способа: сразу к блоку Zapret
@@ -213,6 +215,7 @@ onBeforeUnmount(() => { unmounted = true; clearInterval(poll); poll = undefined 
               <span class="spinner" aria-hidden="true" />
               <span>{{ test && zapretProgress(test) }}. Интернет при этом работает как обычно.</span>
             </div>
+            <p v-else-if="idle" class="hint">{{ idle }}</p>
             <div v-else class="zapret__row">
               <Button label="Подобрать способ" severity="secondary" variant="outlined" @click="startTest" />
               <span class="hint">Роутер сам проверит способы обхода на YouTube, Discord и других сайтах и выберет лучший. Займёт несколько минут.</span>

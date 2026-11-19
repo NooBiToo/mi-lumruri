@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Config, Lease, ListCatalog, ManageResponse } from './api'
 import { defaultSimple, toConfig } from './simple'
-import { applyFailure, deviceRows, failureText, knownDevices, lines, plural, readSimple, sitesSummary, strategyLabel, testedAt, tunnelState, when, zapretProgress, zapretResult } from './status'
+import { applyFailure, deviceRows, failureText, zapretIdle, knownDevices, lines, plural, readSimple, sitesSummary, strategyLabel, testedAt, tunnelState, when, zapretProgress, zapretResult } from './status'
 
 const fresh: Config = { version: 1, profiles: [], networks: [], devices: [], groups: [], rules: [], default_action: { type: 'direct' } }
 const profile = { id: 'tt', name: 'Мой сервер', kind: 'trusttunnel' as const, on_failure: 'block' as const,
@@ -127,6 +127,18 @@ describe('status', () => {
     for (const m of ['Найденный способ при повторной проверке оказался хуже, но вернуть прежний не удалось; действует найденный', undefined]) {
       expect(failureText(m)).not.toMatch(/\b(?:y?v\d+|general|youtube|auto)\b|прежнюю/)
     }
+  })
+
+  it('Zapret не действует: VPN выключен или всё через VPN для всех без исключений', () => {
+    const z = { ...defaultSimple(), rest: 'zapret' as const }
+    expect(zapretIdle(z)).toBeNull()
+    expect(zapretIdle({ ...z, rest: 'direct' })).toBeNull()
+    expect(zapretIdle({ ...z, enabled: false })).toMatch(/VPN выключен/)
+    expect(zapretIdle({ ...z, mode: 'all' })).toMatch(/все сайты всех устройств идут через VPN/)
+    // исключения или не все устройства — остальной трафик идёт с Zapret
+    expect(zapretIdle({ ...z, mode: 'all', exceptions: ['bank.ru'] })).toBeNull()
+    expect(zapretIdle({ ...z, mode: 'all', devices: ['aa:bb:cc:00:00:01'] })).toBeNull()
+    expect(zapretIdle(null)).toBeNull()
   })
 
   it('Zapret: применён только способ для YouTube — цифры прохода YouTube', () => {

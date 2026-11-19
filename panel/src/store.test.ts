@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Config, ListCatalog } from './api'
 import { defaultSimple } from './simple'
-import { build, catalog, config, lan, lists, notify, reset, revision, save } from './store'
+import { broken, build, catalog, config, configIssues, lan, lists, loadConfig, loadError, notify, recoveryBase, reset, revision, save, simpleState } from './store'
 
 const cfg: Config = { version: 1, profiles: [], networks: [], devices: [], groups: [], rules: [], default_action: { type: 'direct' } }
 const cat: ListCatalog = { source: 's', commit: 'c', date: '2026-11-09', services: [{ id: 'youtube', name: 'YouTube', group: 'Сервисы', domains: 'Services/youtube.lst', ipv4: null }] }
@@ -52,6 +52,51 @@ describe('store', () => {
     expect(r).toEqual({ ok: false, conflict: false, message: 'новые настройки не прошли проверку; ничего не записано: домен «a..b» записан с ошибкой' })
     expect(revision.value).toBe('rev-1')
     expect(shown).toEqual([['error', 'Не сохранено', r.ok ? '' : r.message]])
+  })
+
+  it('loadConfig: настройки с замечаниями загружаются, экраны предлагают привести к простому виду', async () => {
+    reset()
+    const withIssues = { ...cfg, zapret: { strategy: 'nope', youtube: 'auto' } }
+    vi.stubGlobal('fetch', async () => reply(200, { ok: false, schema_version: 1, revision: 'rev-9', config: withIssues,
+      issues: [{ path: 'zapret.strategy', code: 'unknown_strategy', message: 'стратегии «nope» нет в каталоге' }] }))
+    expect(await loadConfig()).toBe(true)
+    expect(config.value).toEqual(withIssues)
+    expect(revision.value).toBe('rev-9')
+    expect(broken.value).toBe(false)
+    expect(simpleState.value).toEqual({ canonical: false, reason: 'настройки не проходят проверку: стратегии «nope» нет в каталоге' })
+    // основа восстановления — без раздела с замечаниями; простые настройки собираются и проходят без zapret
+    expect(recoveryBase(config.value, configIssues.value).zapret).toBeUndefined()
+    expect(recoveryBase(config.value, [{ path: 'profiles[0].endpoint', code: 'x', message: 'x' }]).profiles).toEqual([])
+    expect(recoveryBase(config.value, []).zapret).toEqual(withIssues.zapret)
+    lists.value = { ok: true, catalog: cat, issues: [] }
+    lan.value = { bridge: 'br-lan', subnet: '192.168.31.0/24', address: '192.168.31.1' }
+    const next = build(defaultSimple(), [], recoveryBase(config.value, configIssues.value))
+    expect(typeof next === 'object' && next.zapret).toBeUndefined()
+  })
+
+  it('loadConfig: настройки не разобрать — ревизия есть, broken; замена с нуля снимает его', async () => {
+    reset()
+    vi.stubGlobal('fetch', async (_u: string, init?: RequestInit) =>
+      init?.method === 'POST' ? reply(200, { ok: true, revision: 'rev-new', config: JSON.parse(String(init.body)).config, queued: true, issues: [] })
+        : reply(200, { ok: false, schema_version: 1, revision: 'rev-bad', config: null,
+          issues: [{ path: 'zapret', code: 'parse', message: 'unknown field `pos`' }] }))
+    expect(await loadConfig()).toBe(false)
+    expect(config.value).toBeNull()
+    expect(revision.value).toBe('rev-bad')
+    expect(broken.value).toBe(true)
+    expect(loadError.value).toMatch(/не читаются: unknown field `pos`/)
+    // собрать простые настройки можно и без config: основа — пустые настройки
+    lists.value = { ok: true, catalog: cat, issues: [] }
+    lan.value = { bridge: 'br-lan', subnet: '192.168.31.0/24', address: '192.168.31.1' }
+    const next = build(defaultSimple(), [], recoveryBase(null, configIssues.value))
+    expect(typeof next).toBe('object')
+    if (typeof next === 'string') return
+    expect(next.profiles).toEqual([])
+    expect(next.networks[0]).toMatchObject({ id: 'home', bridge: 'br-lan', subnet: '192.168.31.0/24' })
+    expect(await save(next)).toEqual({ ok: true })
+    expect(revision.value).toBe('rev-new')
+    expect(broken.value).toBe(false)
+    expect(configIssues.value).toEqual([])
   })
 
   it('save: 200 — новая ревизия и тост «Сохранено, применяю на роутере»', async () => {

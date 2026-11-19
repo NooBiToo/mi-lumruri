@@ -10,12 +10,13 @@ import { useToast } from 'primevue/usetoast'
 import { api, onAuthLost, setCsrf, type SessionResponse } from './api'
 import type { LoginStage } from './auth'
 import LoginView from './LoginView.vue'
-import { config, loadAll, loadError, loadStatus, notify, reset, serverReady, tunnel } from './store'
+import { broken, config, configIssues, issuesText, loadAll, loadError, loadStatus, notify, reset, serverReady, tunnel } from './store'
 import StatusView from './views/StatusView.vue'
 import SitesView from './views/SitesView.vue'
 import DevicesView from './views/DevicesView.vue'
 import ServerView from './views/ServerView.vue'
 import MoreView from './views/MoreView.vue'
+import ManualBanner from './views/ManualBanner.vue'
 
 const toast = useToast()
 notify.show = (kind, text, detail) => toast.add({ severity: kind, summary: text, detail, life: kind === 'error' ? 8000 : 4000 })
@@ -168,6 +169,10 @@ onBeforeUnmount(() => { removeEventListener('hashchange', onHash); clearInterval
         <Skeleton height="6rem" />
         <Skeleton height="6rem" />
       </div>
+      <!-- настройки не разобрать (например, от другой версии): заменить простыми -->
+      <section v-else-if="broken" class="sect">
+        <ManualBanner broken :reason="issuesText(configIssues)" />
+      </section>
       <section v-else-if="!config" class="sect">
         <Message severity="error" :closable="false"><strong>Настройки не загружены.</strong> {{ loadError }}.</Message>
         <Button label="Загрузить снова" class="self-start" @click="enter()" />

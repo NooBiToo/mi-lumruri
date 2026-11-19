@@ -20,7 +20,11 @@ async function toggle() {
   busy.value = true
   error.value = null
   try {
-    await save(cfg, s.enabled ? 'VPN выключен' : 'VPN включён, применяю на роутере')
+    // выключенный VPN выключает и обход блокировок: правила с Zapret тоже выключаются, всё идёт напрямую
+    if ((await save(cfg, '')).ok) {
+      notify.show('success', s.enabled ? 'VPN выключен' : 'VPN включён, применяю на роутере',
+        s.enabled ? (s.rest === 'zapret' ? 'Обход блокировок (Zapret) тоже выключен: все сайты открываются напрямую.' : 'Все сайты открываются напрямую.') : undefined)
+    }
   } finally { busy.value = false }
 }
 

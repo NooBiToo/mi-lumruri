@@ -138,6 +138,21 @@ export function devicesSummary(s: Simple): string {
 
 export const AUTO = 'auto'
 
+/**
+ * Почему выбранный обход блокировок (Zapret) сейчас не действует, или null. Без правил «напрямую с Zapret» служба
+ * nfqws2 не запускает и подбирать способ не на чем: VPN выключен или всё (без исключений, для всех устройств) идёт
+ * через VPN.
+ */
+export function zapretIdle(s: Simple | null): string | null {
+  if (!s || s.rest !== 'zapret') return null
+  if (!s.enabled) return 'Сейчас VPN выключен, а с ним и обход блокировок: все сайты открываются напрямую. Подобрать способ можно, когда VPN включён.'
+  if (s.mode === 'all' && s.devices === 'all' && !s.exceptions.length) {
+    return 'Сейчас все сайты всех устройств идут через VPN, поэтому обход блокировок не используется и подбирать способ не на чем. '
+      + 'Он заработает для сайтов из «Не пускать через VPN» или для устройств, которые не идут через VPN.'
+  }
+  return null
+}
+
 /** Название стратегии Zapret для людей: id каталога («v4») не показываем никогда. */
 export function strategyLabel(z: ZapretConfig | undefined, tested?: number | null): string {
   if ((z?.strategy ?? AUTO) === AUTO && (z?.youtube ?? AUTO) === AUTO) return 'Автоматически (рекомендуется)'
