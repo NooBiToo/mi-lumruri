@@ -146,6 +146,30 @@ pub fn update_config(path: &Path, base_revision: &str, max_bytes: u64, f: impl F
     Ok(Saved { mode, previous_revision: current_rev, revision: revision(&out), config: cfg })
 }
 
+/// Замена настроек целиком (восстановление): блокировка и проверка ревизии текущих байтов (они могут не разбираться
+/// или не проходить проверку), полная проверка только НОВОЙ конфигурации, копия предыдущей версии, атомарная запись.
+/// Ошибки новой конфигурации — RuleInvalid с путями `config.*`.
+pub fn replace_config(path: &Path, base_revision: &str, max_bytes: u64, new: &Config) -> Result<Saved, SaveError> {
+    let _guard = lock(path).map_err(SaveError::Busy)?;
+    let current = crate::api::read_limited(&path.to_string_lossy(), max_bytes).map_err(SaveError::Io)?;
+    let current_rev = revision(&current);
+    if !base_revision.eq_ignore_ascii_case(&current_rev) {
+        return Err(SaveError::Conflict { current: current_rev });
+    }
+    let issues = validate_config(new);
+    if !issues.is_empty() {
+        return Err(SaveError::RuleInvalid(prefix(issues)));
+    }
+    let mut out = serde_json::to_vec_pretty(new).map_err(|e| SaveError::Io(e.to_string()))?;
+    out.push(b'\n');
+    if out.len() as u64 > max_bytes {
+        return Err(SaveError::RuleInvalid(vec![Issue::new("config", "too_large", "настройки превысят допустимый размер")]));
+    }
+    write_atomic(&sidecar(path, ".prev"), &current).map_err(SaveError::Io)?;
+    write_atomic(path, &out).map_err(SaveError::Io)?;
+    Ok(Saved { mode: "replace", previous_revision: current_rev, revision: revision(&out), config: new.clone() })
+}
+
 fn prefix(i: Vec<Issue>) -> Vec<Issue> {
     i.into_iter().map(|x| Issue { path: format!("config.{}", x.path), ..x }).collect()
 }

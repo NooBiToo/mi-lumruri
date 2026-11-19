@@ -268,10 +268,10 @@ pub fn replace_config(body: Option<&[u8]>, config_path: &str) -> Response {
         Ok(q) => q,
         Err(i) => return bad(i),
     };
-    let r = saved(update_config(Path::new(config_path), &q.base_revision, MAX_CONFIG_BYTES, |c| {
-        *c = q.config;
-        Ok("replace")
-    }), "config");
+    let r = match store::replace_config(Path::new(config_path), &q.base_revision, MAX_CONFIG_BYTES, &q.config) {
+        Err(SaveError::RuleInvalid(i)) => Response { status: 422, body: json!({ "ok": false, "error": { "code": "config_invalid", "message": "новые настройки не прошли проверку; ничего не записано" }, "issues": i }) },
+        r => saved(r, "config"),
+    };
     if r.status != 200 {
         return r;
     }
@@ -285,25 +285,35 @@ fn uci_network_path() -> PathBuf {
     std::env::var("MI_TT_UCI_NETWORK").ok().filter(|s| !s.is_empty()).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/etc/config/network"))
 }
 
-fn uci_value(s: &str) -> String {
-    s.trim().trim_matches(|c| c == '\'' || c == '"').trim().to_string()
+/// Значение uci: до конца строки, в кавычках ' или " (внутри кавычек `#` не комментарий), иначе до комментария.
+fn uci_value(rest: &str) -> String {
+    let r = rest.trim();
+    for q in ['\'', '"'] {
+        if let Some(t) = r.strip_prefix(q) {
+            return t.split(q).next().unwrap_or("").to_string();
+        }
+    }
+    r.split('#').next().unwrap_or("").trim().to_string()
 }
 
-/// Параметры секции `config interface 'lan'` из файла uci: (ipaddr, netmask, device|ifname, type).
+/// Параметры секции `config interface 'lan'` из файла uci; при повторе опции побеждает последняя.
 fn parse_uci_lan(text: &str) -> Option<BTreeMap<String, String>> {
     let mut in_lan = false;
     let mut found = false;
     let mut m = BTreeMap::new();
     for line in text.lines() {
-        let t = line.split('#').next().unwrap_or("").trim();
-        let mut w = t.splitn(3, char::is_whitespace);
-        match (w.next(), w.next(), w.next()) {
-            (Some("config"), Some(kind), name) => {
-                in_lan = kind == "interface" && name.map(uci_value).as_deref() == Some("lan");
+        let t = line.trim_start();
+        let (kw, rest) = t.split_once(char::is_whitespace).unwrap_or((t, ""));
+        let rest = rest.trim_start();
+        match kw {
+            "config" => {
+                let (kind, name) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+                in_lan = kind == "interface" && uci_value(name) == "lan";
                 found |= in_lan;
             }
-            (Some("option"), Some(k), Some(v)) if in_lan => {
-                m.entry(k.to_string()).or_insert_with(|| uci_value(v));
+            "option" if in_lan => {
+                let (k, v) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+                m.insert(k.to_string(), uci_value(v));
             }
             _ => {}
         }

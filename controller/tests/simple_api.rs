@@ -83,10 +83,39 @@ fn config_replace_validates_and_queues_apply() {
     cfg["rules"] = json!([{ "id": "bad", "source": { "type": "device", "id": "no-such" }, "destination": { "type": "group", "id": "video" }, "action": { "type": "direct" } }]);
     let before = std::fs::read(p.dir.join("config.json")).unwrap();
     let o = p.replace(json!({ "base_revision": rev, "config": cfg }));
-    assert_eq!(o.status, 422, "{}", o.body);
+    assert_eq!((o.status, o.code()), (422, "config_invalid"), "{}", o.body);
+    assert!(o.body["issues"][0]["path"].as_str().unwrap().starts_with("config."), "{}", o.body);
     assert!(!o.body["issues"].as_array().unwrap().is_empty());
     assert_eq!(std::fs::read(p.dir.join("config.json")).unwrap(), before);
     assert!(!p.dir.join("run/apply.request").exists());
+}
+
+#[test]
+fn config_replace_recovers_invalid_stored_config() {
+    let p = Panel::new("recover");
+    let (_, good) = p.rev_cfg();
+    let broken = b"{ not json".to_vec();
+    std::fs::write(p.dir.join("config.json"), &broken).unwrap();
+    let rev = mi_tt::store::revision(&broken);
+    let o = p.replace(json!({ "base_revision": rev, "config": good }));
+    assert_eq!(o.status, 200, "{}", o.body);
+    assert!(p.dir.join("run/apply.request").exists());
+    assert_eq!(std::fs::read(p.dir.join("config.json.prev")).unwrap(), broken);
+    assert_eq!(p.rev_cfg().1, good);
+}
+
+#[test]
+fn router_uci_parser_edge_cases() {
+    let p = Panel::new("uci-edge");
+    let f = p.dir.join("network");
+    std::fs::write(&f, "config  interface  'lan'
+	option  ipaddr  '1.1.1.1'
+	option ipaddr	'10.1.2.3' # c
+	option netmask '255.255.0.0'
+	option ifname 'x#y'
+").unwrap();
+    let o = p.get("/router", &[("MI_TT_UCI_NETWORK", f.to_str().unwrap())]);
+    assert_eq!(o.body["lan"], json!({ "bridge": "br-lan", "subnet": "10.1.0.0/16", "address": "10.1.2.3" }), "{}", o.body);
 }
 
 #[test]
@@ -109,6 +138,6 @@ fn config_replace_requires_session_and_csrf() {
     let o = p.a.cgi("POST", "/config", Some(body.as_bytes()), p.t, &[("HTTP_ORIGIN", ORIGIN), ("HTTP_COOKIE", &p.s.cookie)]);
     assert_eq!(o.code(), "csrf_failed");
     let o = p.a.cgi("POST", "/config", Some(body.as_bytes()), p.t, &[("HTTP_ORIGIN", "https://evil.example"), ("HTTP_COOKIE", &p.s.cookie), ("HTTP_X_MITT_CSRF", &p.s.csrf)]);
-    assert_ne!(o.status, 200);
+    assert_eq!((o.status, o.code()), (403, "origin_forbidden"), "{}", o.body);
     assert!(!p.dir.join("run/apply.request").exists());
 }
