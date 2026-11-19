@@ -44,7 +44,10 @@ pub const ZAPRET_QNUM: u16 = 200;
 pub const ZAPRET_DESYNC_MARK: u32 = 0x4000_0000;
 /// Очередь проверочного трафика подбора стратегии: исходящие соединения роутера с портов `ZAPRET_TEST_SPORTS`.
 pub const ZAPRET_TEST_QNUM: u16 = 201;
-pub const ZAPRET_TEST_SPORTS: &str = "49100:49199";
+/// Выше эфемерных портов Linux (32768–60999): обычные соединения роутера (клиент TrustTunnel, вопросы dnsmasq)
+/// сюда не попадают, иначе они ушли бы в очередь 201, а принятый очередью пакет покидает mangle OUTPUT раньше
+/// цепочки O с меткой туннеля. Проверка привязывает порт явно (curl --local-port 61000-61099).
+pub const ZAPRET_TEST_SPORTS: &str = "61000:61099";
 /// Сколько первых пакетов соединения (в сторону сервера) уходит в очередь: TCP и UDP, как в Zapret-Manager.
 const QUEUE_PACKETS_TCP: u32 = 25;
 const QUEUE_PACKETS_UDP: u32 = 5;
@@ -730,16 +733,20 @@ pub fn spec_mark_masks(spec: &[String]) -> Vec<u32> {
     v
 }
 
-/// Маска всех меток, которые использует план (fwmark в правилах, MARK в цепочках). Отбор `-m mark` в цепочке P
-/// только читает метку nfqws2 и в маску не входит.
+/// Маска всех меток, которые использует план (fwmark в правилах, MARK в цепочках). Отбор
+/// `--mark 0x40000000/0x40000000` в цепочке P только читает метку nfqws2 и в маску не входит.
 pub fn our_mark_mask<'a>(entries: impl IntoIterator<Item = &'a Entry>) -> u32 {
     let mut m = 0;
     for e in entries {
         match e {
             Entry::Rule { fwmark: Some(f), .. } => m |= mark_parts(f).map(|(_, mask)| mask).unwrap_or(0),
             Entry::Chain { rows, .. } => {
-                let sets = rows.iter().map(|r| r.iter().filter(|w| *w != "--mark").cloned().collect::<Vec<_>>());
-                m |= sets.flat_map(|r| spec_mark_masks(&r)).fold(0, |a, b| a | b)
+                let desync = fmt_mark(ZAPRET_DESYNC_MARK, ZAPRET_DESYNC_MARK);
+                for r in rows {
+                    let skip = r.windows(2).position(|w| w[0] == "--mark" && w[1] == desync);
+                    let r: Vec<String> = r.iter().enumerate().filter(|(i, _)| skip.is_none_or(|k| *i != k && *i != k + 1)).map(|(_, w)| w.clone()).collect();
+                    m |= spec_mark_masks(&r).into_iter().fold(0, |a, b| a | b);
+                }
             }
             _ => {}
         }
@@ -989,16 +996,29 @@ mod tests {
         let p = build_plan(&spec(), &[], &whole(), false);
         let rows: Vec<String> = chain_rows(&p, "mangle", 'P').iter().map(|r| r.join(" ")).collect();
         assert_eq!(rows, [
-            "-p tcp -m tcp --sport 49100:49199 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num 201 --queue-bypass",
-            "-p udp -m udp --sport 49100:49199 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num 201 --queue-bypass",
+            "-p tcp -m tcp --sport 61000:61099 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num 201 --queue-bypass",
+            "-p udp -m udp --sport 61000:61099 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num 201 --queue-bypass",
         ]);
-        assert_eq!(ZAPRET_TEST_SPORTS, "49100:49199");
+        // диапазон выше эфемерных портов Linux (32768–60999): случайные соединения роутера в очередь 201 не попадают
+        let (lo, hi) = ZAPRET_TEST_SPORTS.split_once(':').map(|(a, b)| (a.parse::<u16>().unwrap(), b.parse::<u16>().unwrap())).unwrap();
+        assert!(lo > 60999 && lo <= hi, "{ZAPRET_TEST_SPORTS}");
         assert!(p.iter().any(|e| matches!(e, Entry::Jump { v6: false, table, from, chain } if table == "mangle" && from == "OUTPUT" && chain.starts_with("MITT_P"))), "{p:#?}");
         // без правил Zapret нет ни очереди, ни проверочной цепочки
         let mut s = spec();
         s.rules.retain(|r| r.act != Act::Zapret);
         let p = build_plan(&s, &[], &whole(), false);
         assert!(!p.iter().any(|e| ["MITT_Q", "MITT_Z", "MITT_P"].iter().any(|x| e.label().contains(x))), "{p:#?}");
+    }
+
+    #[test]
+    fn mark_mask_ignores_only_desync_mark_match() {
+        let p = build_plan(&spec(), &[], &whole(), false);
+        assert_eq!(our_mark_mask(&p), NF_MARK, "отбор метки nfqws2 в P — не наша метка");
+        // любой другой отбор --mark в наших цепочках входит в маску
+        let other = chain(false, "mangle", 'X', vec![vec!["-m".into(), "mark".into(), "--mark".into(), "0x100/0x100".into(), "-j".into(), "RETURN".into()]]);
+        assert_eq!(our_mark_mask(&[other]), 0x100);
+        let neg = chain(false, "mangle", 'X', vec![vec!["-m".into(), "mark".into(), "!".into(), "--mark".into(), "0x40000000/0x40000001".into(), "-j".into(), "RETURN".into()]]);
+        assert_eq!(our_mark_mask(&[neg]), 0x4000_0001);
     }
 
     #[test]

@@ -57,7 +57,7 @@ fn direct_zapret_renders_queue_policy_and_nfqws2_args() {
     let plan: Vec<&str> = v["plan"].as_array().unwrap().iter().map(|x| x.as_str().unwrap()).collect();
     assert!(plan.iter().any(|x| x.contains("-p tcp -m multiport --dports 443,2053,2083,2087,2096,8443 -m connbytes --connbytes 1:25 --connbytes-mode packets --connbytes-dir original -j NFQUEUE --queue-num 200 --queue-bypass")), "{plan:#?}");
     assert!(plan.iter().any(|x| x.contains("-p udp -m multiport --dports 443,19294:19344,50000:50100 -m connbytes --connbytes 1:5 ")), "{plan:#?}");
-    assert!(plan.iter().any(|x| x.contains("--sport 49100:49199 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num 201 --queue-bypass")), "{plan:#?}");
+    assert!(plan.iter().any(|x| x.contains("--sport 61000:61099 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num 201 --queue-bypass")), "{plan:#?}");
     assert!(!plan.iter().any(|x| x.contains("mitt0") || x.contains("table 3100")), "{plan:#?}");
     // по умолчанию — круговой режим каталога: общий профиль, YouTube, Discord и YouTube по QUIC
     let args = std::fs::read_to_string(out.join("nfqws2.args")).unwrap();

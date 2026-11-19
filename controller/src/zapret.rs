@@ -253,6 +253,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn queue_fits_multiport_for_every_choice() {
+        // multiport принимает до 15 портов, диапазон считается за два
+        let c = catalog();
+        let ids = |k: Kind| c.strategies.iter().filter(|s| s.kind == k).map(|s| s.id.clone()).chain([AUTO.to_string()]).collect::<Vec<_>>();
+        for strategy in ids(Kind::General) {
+            for youtube in ids(Kind::Youtube) {
+                let z = ZapretConfig { strategy: strategy.clone(), youtube: youtube.clone() };
+                for (proto, ports) in queue(&z) {
+                    let n: usize = ports.split(',').map(|x| if x.contains('-') { 2 } else { 1 }).sum();
+                    assert!(n <= 15, "{strategy}/{youtube} {}: {n} позиций: {ports}", proto.as_str());
+                }
+            }
+        }
+    }
+
     fn cfg(z: serde_json::Value) -> Config {
         serde_json::from_value(serde_json::json!({ "version": 1, "default_action": { "type": "direct" }, "zapret": z })).unwrap()
     }

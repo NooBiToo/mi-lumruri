@@ -383,7 +383,7 @@ fn build(a: &Args, d: &Desired) -> Result<Built, ExitCode> {
             "message": "сеть на части моста требует physdev и bridge-nf-call=1; ничего не изменено" },
             "missing": Caps::missing(&caps.netfilter_physdev), "caps": caps })));
     }
-    if (!d.spec.zapret_queue.is_empty() || d.spec.uses(Act::Zapret)) && !caps.netfilter_queue_ok {
+    if (!d.spec.zapret_queue.is_empty() || d.spec.uses(Act::Zapret)) && !a.guard_only && !caps.netfilter_queue_ok {
         return Err(out(2, json!({ "ok": false, "error": { "code": "capabilities", "message": "Zapret требует NFQUEUE, multiport и connbytes в ядре и iptables; ничего не изменено" },
             "missing": Caps::missing(&caps.netfilter_queue), "caps": caps })));
     }
