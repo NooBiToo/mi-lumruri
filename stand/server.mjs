@@ -39,6 +39,9 @@ export function defaults() {
     bin: join(ROOT, 'controller', 'target', 'release', exe),
     admin: join(ROOT, 'controller', 'target', 'release', adm),
     www: join(ROOT, 'panel', 'dist'),
+    // каталог готовых списков и сеть LAN роутера (uci) — как на роутере после установки
+    lists: join(ROOT, 'package', 'lists'),
+    uciNetwork: join(ROOT, 'fixtures', 'uci', 'network.stock'),
   }
 }
 
@@ -59,6 +62,8 @@ function runCgi(opts, req, body) {
       HTTPS: 'on',
     }
     if (opts.leases) env.MI_TT_LEASES = opts.leases
+    if (opts.lists) env.MI_TT_LISTS_DIR = opts.lists
+    if (opts.uciNetwork) env.MI_TT_UCI_NETWORK = opts.uciNetwork
     for (const h of ['origin', 'host', 'sec-fetch-site', 'cookie', 'x-mitt-csrf']) {
       if (req.headers[h]) env['HTTP_' + h.toUpperCase().replace(/-/g, '_')] = String(req.headers[h])
     }
@@ -201,6 +206,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   if (args.port) args.port = Number(args.port)
   if (args.config) { args.seed = args.config; delete args.config } // совместимость с этапом 1: файл — исходник, не цель записи
   if (args['state-dir']) { args.stateDir = args['state-dir']; delete args['state-dir'] }
+  if (args['uci-network']) { args.uciNetwork = args['uci-network']; delete args['uci-network'] }
   if ('reset' in args) args.reset = true
   if (args.cert) { args.tlsCert = args.cert; args.tlsKey = args.key; delete args.cert; delete args.key }
   const stand = createStand(args)

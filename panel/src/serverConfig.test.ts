@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { parseClientToml } from './serverConfig'
+import { parseClientToml, parseDeepLink, parseServer } from './serverConfig'
+import exportToml from './fixtures/endpoint-export.toml?raw'
+import exportLink from './fixtures/endpoint-export.deeplink.txt?raw'
 
 const PEM = `-----BEGIN CERTIFICATE-----
 MIIBszCCAVmgAwIBAgIUYWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXowCgYIKoZI
@@ -68,6 +70,33 @@ included_routes = []
       const r = parseClientToml(t)
       expect(r, t).toHaveProperty('error')
       if ('error' in r) expect(r.error.length).toBeGreaterThan(0)
+    }
+  })
+
+  // настоящий вывод trusttunnel_endpoint (лабораторный сервер, пароль заменён): --format toml и ссылка по умолчанию
+  it('parses a real trusttunnel_endpoint export: toml and tt:// link give the same server', () => {
+    const t = parseClientToml(exportToml)
+    const l = parseDeepLink(exportLink)
+    expect(t).toMatchObject({ endpoint: { server: '203.0.113.10', port: 443, sni: 'vpn.example.com', username: 'alice', quic: false, anti_dpi: false }, password: 'dummy-export-pass' }) // secret-scan: allow фиктивный пароль фикстуры
+    if ('error' in t) throw new Error(t.error)
+    expect(t.endpoint.certificate).toMatch(/^-----BEGIN CERTIFICATE-----\n[A-Za-z0-9+/=\n]+\n-----END CERTIFICATE-----$/)
+    expect(t).not.toHaveProperty('warnings')
+    expect(l).toEqual(t)
+    expect(parseServer('  ' + exportLink)).toEqual(t)
+    expect(parseServer(exportToml)).toEqual(t)
+  })
+
+  it('warns about custom_sni and skip_verification the router does not support', () => {
+    const r = parseClientToml(exportToml.replace('custom_sni = ""', 'custom_sni = "cdn.example.net"').replace('skip_verification = false', 'skip_verification = true'))
+    expect(r).toHaveProperty('warnings')
+    if (!('error' in r)) expect(r.warnings).toHaveLength(2)
+    const same = parseClientToml(exportToml.replace('custom_sni = ""', 'custom_sni = "vpn.example.com"'))
+    expect(same).not.toHaveProperty('warnings')
+  })
+
+  it('rejects broken tt:// links', () => {
+    for (const t of ['tt://', 'tt://?', 'tt://?!!!', exportLink.trim().slice(0, 40), 'tt://?AAEC']) {
+      expect(parseDeepLink(t), t).toHaveProperty('error')
     }
   })
 })

@@ -1,10 +1,15 @@
-// Разбор конфигурации клиента TrustTunnel (client.toml или вывод `trusttunnel_endpoint … --format toml`), которую
-// пользователь вставляет на экране «Сервер». Понимается подмножество TOML этих файлов: пары «ключ = значение»
-// (строки всех четырёх видов, логические, числа, массивы строк) и таблицы; берутся ключи верхнего уровня и [endpoint].
+// Разбор конфигурации клиента TrustTunnel, которую пользователь вставляет на экране «Сервер»: ссылка `tt://?…`
+// (вывод `trusttunnel_endpoint … -c <клиент>` по умолчанию, формат — DEEP_LINK.md TrustTunnel) или client.toml
+// (вывод с `--format toml`). Из TOML понимается подмножество этих файлов: пары «ключ = значение» (строки всех четырёх
+// видов, логические, числа, массивы строк) и таблицы; берутся ключи верхнего уровня и [endpoint].
 
 import type { Endpoint } from './api'
 
-export type ParsedServer = { endpoint: Partial<Endpoint>; password?: string } | { error: string }
+/**
+ * Поля точки подключения, пароль, имя сервера (`name`) и предупреждения о параметрах, которые роутер не поддерживает
+ * (другое имя в TLS, отключённая проверка сертификата).
+ */
+export type ParsedServer = { endpoint: Partial<Endpoint>; password?: string; name?: string; warnings?: string[] } | { error: string }
 
 type Value = string | number | boolean | Value[]
 
@@ -148,5 +153,132 @@ export function parseClientToml(text: string): ParsedServer {
   const cert = str('certificate')
   if (cert !== undefined) endpoint.certificate = cert
   const pass = get('password')
-  return typeof pass === 'string' && pass !== '' ? { endpoint, password: pass } : { endpoint }
+  return finish(endpoint, typeof pass === 'string' ? pass : undefined, str('name'), unsupported(host, str('custom_sni'), get('skip_verification') === true))
+}
+
+/** Параметры, которые клиент роутера не поддерживает: пользователь должен знать, что они не перенесены. */
+function unsupported(host: string, customSni: string | undefined, skipVerification: boolean): string[] {
+  const w: string[] = []
+  if (customSni && customSni !== host) {
+    w.push(`сервер задаёт для TLS другое имя («${customSni}», custom_sni) — роутер так не умеет и подключается по имени «${host}»`)
+  }
+  if (skipVerification) w.push('в конфигурации отключена проверка сертификата (skip_verification) — роутер всегда проверяет сертификат сервера')
+  return w
+}
+
+function finish(endpoint: Partial<Endpoint>, password: string | undefined, name: string | undefined, warnings: string[]): ParsedServer {
+  const out: { endpoint: Partial<Endpoint>; password?: string; name?: string; warnings?: string[] } = { endpoint }
+  if (password) out.password = password
+  if (name) out.name = name
+  if (warnings.length) out.warnings = warnings
+  return out
+}
+
+// ---------- ссылка tt://? ----------
+
+const NOT_LINK = 'ссылка tt:// повреждена — проверьте, что она скопирована целиком'
+
+/** DER-сертификаты подряд → PEM; длина каждого — из заголовка SEQUENCE. */
+function derToPem(der: Uint8Array): string | null {
+  const out: string[] = []
+  let i = 0
+  while (i < der.length) {
+    if (der[i] !== 0x30) return null
+    let len = der[i + 1] ?? 0
+    let head = 2
+    if (len & 0x80) {
+      const n = len & 0x7f
+      if (n < 1 || n > 3) return null
+      len = 0
+      for (let k = 0; k < n; k++) len = len * 256 + (der[i + 2 + k] ?? 0)
+      head += n
+    }
+    const end = i + head + len
+    if (end > der.length) return null
+    let bin = ''
+    for (const b of der.subarray(i, end)) bin += String.fromCharCode(b)
+    const lines = btoa(bin).match(/.{1,64}/g) ?? []
+    out.push(['-----BEGIN CERTIFICATE-----', ...lines, '-----END CERTIFICATE-----'].join('\n'))
+    i = end
+  }
+  return out.length ? out.join('\n') : null
+}
+
+class LinkError extends Error {}
+
+/** Ссылка `tt://?<base64url>`: записи «тег — длина — значение», тег и длина — varint QUIC (RFC 9000 §16). */
+export function parseDeepLink(link: string): ParsedServer {
+  const m = /^tt:\/\/\??([A-Za-z0-9_-]+)=*$/.exec(link.trim())
+  if (!m?.[1]) return { error: NOT_LINK }
+  let bytes: Uint8Array
+  try {
+    bytes = Uint8Array.from(atob(m[1].replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))
+  } catch {
+    return { error: NOT_LINK }
+  }
+  let i = 0
+  const varint = (): number => {
+    const f = bytes[i]
+    if (f === undefined) throw new LinkError()
+    const n = 1 << (f >> 6)
+    if (n > 4 || i + n > bytes.length) throw new LinkError()
+    let v = f & 0x3f
+    for (let k = 1; k < n; k++) v = v * 256 + bytes[i + k]!
+    i += n
+    return v
+  }
+  const utf8 = new TextDecoder('utf-8', { fatal: true })
+  const fields = new Map<number, Uint8Array>()
+  const addresses: string[] = []
+  try {
+    while (i < bytes.length) {
+      const tag = varint()
+      const len = varint()
+      if (i + len > bytes.length) throw new LinkError()
+      const v = bytes.subarray(i, i + len)
+      i += len
+      if (tag === 0x02) addresses.push(utf8.decode(v))
+      else fields.set(tag, v) // повтор тега — побеждает последний (DEEP_LINK.md)
+    }
+  } catch {
+    return { error: NOT_LINK }
+  }
+  const text = (tag: number): string | undefined => {
+    const v = fields.get(tag)
+    try {
+      const s = v ? utf8.decode(v).trim() : ''
+      return s === '' ? undefined : s
+    } catch {
+      return undefined
+    }
+  }
+  const flag = (tag: number): boolean => fields.get(tag)?.[0] === 1
+  const host = text(0x01)
+  const first = addresses[0]?.trim()
+  if (fields.has(0x0e) && (!host || !first)) return { error: 'ссылки-подписки (subscription_url) роутер не поддерживает: нужна ссылка с адресом сервера' }
+  if (!host || !first) return { error: NOT_LINK }
+  const addr = splitAddress(first)
+  if (!addr) return { error: `адрес сервера «${first}» ожидается в виде IP:порт` }
+
+  const endpoint: Partial<Endpoint> = { server: addr.server, port: addr.port, sni: host, quic: fields.get(0x09)?.[0] === 2, anti_dpi: flag(0x0a) }
+  const user = text(0x05)
+  if (user !== undefined) endpoint.username = user
+  const der = fields.get(0x08)
+  if (der?.length) {
+    const pem = derToPem(der)
+    if (!pem) return { error: 'сертификат в ссылке tt:// повреждён' }
+    endpoint.certificate = pem
+  }
+  let pass: string | undefined
+  try {
+    pass = fields.has(0x06) ? utf8.decode(fields.get(0x06)!) : undefined
+  } catch {
+    return { error: NOT_LINK }
+  }
+  return finish(endpoint, pass, text(0x0c), unsupported(host, text(0x03), flag(0x07)))
+}
+
+/** Вставленный текст: ссылка `tt://` или client.toml. */
+export function parseServer(text: string): ParsedServer {
+  return /^\s*tt:\/\//.test(text) ? parseDeepLink(text) : parseClientToml(text)
 }

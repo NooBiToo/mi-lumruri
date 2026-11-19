@@ -1,6 +1,6 @@
-// Логика экранов управления без DOM: форма профиля TrustTunnel ↔ Profile, форма DNS, разбор строк ввода, описание правил.
+// Формы без DOM: профиль TrustTunnel ↔ Profile (экран «Сервер»), DNS (экран «Дополнительно»).
 
-import type { Device, Lease, Network, Action, Config, Destination, DnsConfig, Endpoint, Profile, ProfileSecret, Rule } from './api'
+import type { DnsConfig, Endpoint, Profile, ProfileSecret } from './api'
 
 export interface ProfileForm {
   id: string
@@ -49,32 +49,6 @@ export function formToSecret(f: ProfileForm): ProfileSecret | null {
   return f.password ? { password: f.password } : null
 }
 
-export function destinationText(d: Destination, c: Config): string {
-  switch (d.type) {
-    case 'group': return `группа «${c.groups.find((g) => g.id === d.id)?.name ?? d.id}»`
-    case 'category': return `категория «${c.categories?.find((g) => g.id === d.id)?.name ?? d.id}»`
-    case 'domain': return d.value
-    case 'domain_suffix': return `*.${d.value}`
-    case 'cidr': return d.value
-  }
-}
-
-export function actionText(a: Action, c: Config): string {
-  switch (a.type) {
-    case 'profile': return c.profiles.find((p) => p.id === a.id)?.name ?? a.id
-    case 'direct': return 'напрямую'
-    case 'direct_zapret': return 'напрямую с Zapret'
-    case 'block': return 'блокировка'
-  }
-}
-
-export function sourceText(r: Rule, c: Config): string {
-  const s = r.source
-  if (s.type === 'device') return `устройство «${c.devices.find((d) => d.id === s.id)?.name ?? s.id}»`
-  if (s.type === 'network') return `сеть «${c.networks.find((n) => n.id === s.id)?.name ?? s.id}»`
-  return 'вся LAN'
-}
-
 // ---- DNS ----
 /** Резолвер туннеля по умолчанию (controller/src/model.rs: DEFAULT_TUNNEL_RESOLVER). */
 export const DEFAULT_TUNNEL_RESOLVER = '1.1.1.1'
@@ -98,28 +72,4 @@ export function formToDns(f: DnsForm): DnsConfig | null {
   if (resolver && resolver !== DEFAULT_TUNNEL_RESOLVER) d.tunnel_resolver = resolver
   if (f.adblock || exceptions.length) d.adblock = { enabled: f.adblock, ...(exceptions.length ? { exceptions } : {}) }
   return Object.keys(d).length ? d : null
-}
-
-// ---- сети (SSID) и устройства ----
-export interface NetworkForm { id: string; name: string; ssid: string; subnet: string; bridge: string; ports: string }
-
-export function emptyNetworkForm(): NetworkForm { return { id: '', name: '', ssid: '', subnet: '', bridge: 'br-lan', ports: '' } }
-
-export function networkToForm(n: Network): NetworkForm {
-  return { id: n.id, name: n.name, ssid: n.ssid, subnet: n.subnet ?? '', bridge: n.bridge ?? '', ports: (n.ports ?? []).join(' ') }
-}
-
-/** Порты моста — интерфейсы SSID (например wl0 wl1), через пробел или запятую. Подробная проверка — на сервере. */
-export function formToNetwork(f: NetworkForm): Network | string {
-  const id = f.id.trim(), name = f.name.trim(), ssid = f.ssid.trim()
-  if (!id || !name || !ssid) return 'Укажите идентификатор, название и SSID сети.'
-  const ports = f.ports.split(/[\s,]+/).filter(Boolean)
-  if (ports.length && !f.bridge.trim()) return 'Порты SSID задаются только вместе с мостом.'
-  return { id, name, ssid, ...(f.subnet.trim() ? { subnet: f.subnet.trim() } : {}), ...(f.bridge.trim() ? { bridge: f.bridge.trim() } : {}), ...(ports.length ? { ports } : {}) }
-}
-
-/** Устройство из аренды DHCP: идентификатор из имени клиента (только [a-z0-9-]), MAC как есть. */
-export function deviceFromLease(l: Lease, network: string): Device {
-  const base = l.hostname.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32)
-  return { id: base || `dev-${l.mac.replace(/:/g, '').slice(-6)}`, name: l.hostname || l.mac, mac: l.mac, network }
 }

@@ -1,4 +1,4 @@
-// Типы повторяют схему v1 контроллера (controller/src/model.rs, preview.rs).
+// Типы повторяют схему v1 контроллера (controller/src/model.rs).
 
 /** Единственный вид VPN — TrustTunnel (официальный клиент). Профиль может быть только один. */
 export type ProfileKind = 'trusttunnel'
@@ -34,7 +34,8 @@ export interface DnsConfig {
   tunnel_resolver?: string
   adblock?: { enabled: boolean; exceptions?: string[] }
 }
-export interface ZapretConfig { strategy: 'multisplit' | 'multidisorder'; pos?: number; tcp_ports?: number[] }
+/** Выбор стратегий Zapret (controller/src/model.rs): `auto` — круговой режим, иначе id стратегии каталога. */
+export interface ZapretConfig { strategy: string; youtube: string }
 export interface ProfileSecret { password: string }
 
 export interface Group { id: string; name: string; destinations: Destination[] }
@@ -59,45 +60,18 @@ export interface Config {
 
 export interface Issue { path: string; code: string; message: string }
 
-export interface Probe { device?: string; network?: string; host: string }
-export interface PreviewRequest { rule: Rule; probes: Probe[] }
-
-export interface Decision { rule_id: string | null; exit: string }
-export interface Finding { severity: 'warning' | 'info'; code: string; message: string }
-
-export interface Preview {
-  applied: false
-  mode: 'add' | 'replace'
-  rule: Rule
-  level: number
-  level_label: string
-  position: number
-  order: { position: number; rule_id: string; level: number; source: string; destination: string; exit: string; draft: boolean }[]
-  destinations: string[]
-  affected_devices: { id: string; name: string; mac: string; network: string }[]
-  affects_unknown_clients: boolean
-  exit: string
-  on_failure: string | null
-  findings: Finding[]
-  match_entries: { position: number; source: string; destination: string; exit: string; on_failure: string | null }[]
-  probes: { subject: string; host: string; before: Decision; after: Decision; changed: boolean }[]
-}
-
 export interface ApiError { code: string; message: string }
 
 export interface ConfigResponse { ok: boolean; schema_version: number; revision: string | null; config: Config | null; issues: Issue[]; error?: ApiError }
 export interface SaveResponse {
   ok: boolean
-  mode?: 'add' | 'replace'
   previous_revision?: string
   revision?: string
-  rule_id?: string
   config?: Config
   current_revision?: string
   issues: Issue[]
   error?: ApiError
 }
-export interface PreviewResponse { ok: boolean; preview?: Preview; issues: Issue[]; error?: ApiError }
 
 /** Ответ API с HTTP-статусом. Сетевые сбои и не-JSON превращаются в status 0 с понятной ошибкой. */
 export interface ApiResult<T> { status: number; body: T }
@@ -210,21 +184,7 @@ export interface ZapretTestResponse { ok: boolean; test?: ZapretTestState; reque
 export interface ReplaceResponse extends SaveResponse { queued?: boolean }
 
 export const manage = {
-  deleteRule: (base_revision: string, id: string) => call<ManageResponse>('/rules/delete', json({ base_revision, id })),
-  moveRule: (base_revision: string, id: string, position: number) => call<ManageResponse>('/rules/move', json({ base_revision, id, position })),
-  saveProfile: (base_revision: string, profile: Profile) => call<ManageResponse>('/profiles', json({ base_revision, profile })),
-  deleteProfile: (base_revision: string, id: string) => call<ManageResponse>('/profiles/delete', json({ base_revision, id })),
-  saveCategory: (base_revision: string, category: Category) => call<ManageResponse>('/categories', json({ base_revision, category })),
-  deleteCategory: (base_revision: string, id: string) => call<ManageResponse>('/categories/delete', json({ base_revision, id })),
-  categoryList: (id: string, list: string) => call<ManageResponse>('/categories/list', json({ id, list })),
-  saveNetwork: (base_revision: string, network: Network) => call<ManageResponse>('/networks', json({ base_revision, network })),
-  deleteNetwork: (base_revision: string, id: string) => call<ManageResponse>('/networks/delete', json({ base_revision, id })),
-  saveDevice: (base_revision: string, device: Device) => call<ManageResponse>('/devices', json({ base_revision, device })),
-  deleteDevice: (base_revision: string, id: string) => call<ManageResponse>('/devices/delete', json({ base_revision, id })),
   leases: () => call<ManageResponse>('/leases'),
-  saveDns: (base_revision: string, dns: DnsConfig | null) => call<ManageResponse>('/dns', json({ base_revision, dns })),
-  adblockList: (list: string) => call<ManageResponse>('/adblock/list', json({ list })),
-  saveZapret: (base_revision: string, zapret: ZapretConfig | null) => call<ManageResponse>('/zapret', json({ base_revision, zapret })),
   secrets: () => call<ManageResponse>('/secrets'),
   // секрет только записывается: панель не получает его обратно
   setSecret: (profile_id: string, secret: ProfileSecret) => call<ManageResponse>('/secrets', json({ profile_id, secret })),
@@ -234,15 +194,15 @@ export const manage = {
 
 export const api = {
   config: () => call<ConfigResponse>('/config'),
-  preview: (req: PreviewRequest) => call<PreviewResponse>('/preview', json(req)),
-  // Браузер сам добавляет Origin и Sec-Fetch-Site; контроллер принимает запись только с origin панели, с сессией и CSRF.
-  saveRule: (base_revision: string, rule: Rule) => call<SaveResponse>('/rules', json({ base_revision, rule })),
   session: () => call<SessionResponse>('/auth/session'),
   login: (password: string) => call<SessionResponse>('/auth/login', json({ password })),
   second: (factor: SecondFactor) => call<SessionResponse>('/auth/second', json(factor)),
   logout: () => call<SessionResponse>('/auth/logout', json({})),
   router: () => call<RouterResponse>('/router'),
-  /** Замена настроек целиком с проверкой ревизии; контроллер сразу ставит заявку на применение. */
+  /**
+   * Замена настроек целиком с проверкой ревизии; контроллер сразу ставит заявку на применение. Браузер сам добавляет
+   * Origin и Sec-Fetch-Site; контроллер принимает запись только с origin панели, с сессией и CSRF.
+   */
   replaceConfig: (base_revision: string, config: Config) => call<ReplaceResponse>('/config', json({ base_revision, config })),
   lists: () => call<ListsResponse>('/lists'),
   updateLists: () => call<ListsResponse>('/lists/update', json({})),

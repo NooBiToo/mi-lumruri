@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { deviceFromLease, dnsDefault, dnsToForm, emptyNetworkForm, emptyProfileForm, formToDns, formToNetwork, formToProfile, formToSecret, networkToForm, profileToForm } from './manage'
-import { defaultForm, toRequest } from './draft'
-import type { Config } from './api'
+import { dnsDefault, dnsToForm, emptyProfileForm, formToDns, formToProfile, formToSecret, profileToForm } from './manage'
 
 const PEM = '-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUQ\n-----END CERTIFICATE-----'
 
@@ -54,29 +52,5 @@ describe('DNS', () => {
     expect(dnsToForm(d ?? undefined)).toEqual({ resolver: '9.9.9.9', adblock: true, exceptions: 'ads.example.com\ncdn.example.org' })
     expect(formToDns({ ...dnsDefault(), adblock: true })).toEqual({ adblock: { enabled: true } })
     expect(dnsToForm({ adblock: { enabled: false } })).toEqual(dnsDefault())
-  })
-})
-
-describe('правила', () => {
-  it('правило с назначением-категорией', () => {
-    const cfg: Config = { version: 1, profiles: [], networks: [{ id: 'home', name: 'H', ssid: 'H' }], devices: [{ id: 'tv', name: 'TV', mac: 'a4:77:33:10:20:30', network: 'home' }],
-      groups: [], categories: [{ id: 'geo', name: 'Geo', kind: 'domain' }], rules: [], default_action: { type: 'direct' } }
-    const f = { ...defaultForm(cfg), destType: 'category' as const, destGroup: 'geo', actionType: 'direct' as const }
-    expect(toRequest(f).rule.destination).toEqual({ type: 'category', id: 'geo' })
-  })
-})
-
-describe('сети и устройства', () => {
-  it('сеть SSID: порты через пробел или запятую, туда и обратно', () => {
-    const n = formToNetwork({ ...emptyNetworkForm(), id: 'iot', name: 'IoT', ssid: 'Home-IoT', ports: 'wl2, wl3', subnet: '10.10.3.0/24' })
-    expect(n).toEqual({ id: 'iot', name: 'IoT', ssid: 'Home-IoT', subnet: '10.10.3.0/24', bridge: 'br-lan', ports: ['wl2', 'wl3'] })
-    expect(networkToForm(n as never).ports).toBe('wl2 wl3')
-    expect(typeof formToNetwork({ ...emptyNetworkForm(), id: 'x', name: 'x', ssid: 'x', bridge: '', ports: 'wl0' })).toBe('string')
-    expect(typeof formToNetwork(emptyNetworkForm())).toBe('string')
-  })
-  it('устройство из аренды DHCP: безопасный идентификатор из имени клиента', () => {
-    expect(deviceFromLease({ mac: '02:00:00:00:0e:02', ip: '10.10.1.77', hostname: 'Living-Room TV <b>', device: null }, 'home'))
-      .toEqual({ id: 'living-room-tv-b', name: 'Living-Room TV <b>', mac: '02:00:00:00:0e:02', network: 'home' })
-    expect(deviceFromLease({ mac: '02:00:00:00:0e:02', ip: '10.10.1.77', hostname: '', device: null }, 'home').id).toBe('dev-000e02')
   })
 })

@@ -8,17 +8,13 @@ import button from '@primeuix/themes/aura/button'
 import checkbox from '@primeuix/themes/aura/checkbox'
 import confirmdialog from '@primeuix/themes/aura/confirmdialog'
 import dialog from '@primeuix/themes/aura/dialog'
-import iconfield from '@primeuix/themes/aura/iconfield'
 import inputtext from '@primeuix/themes/aura/inputtext'
 import message from '@primeuix/themes/aura/message'
 import password from '@primeuix/themes/aura/password'
 import select from '@primeuix/themes/aura/select'
-import selectbutton from '@primeuix/themes/aura/selectbutton'
 import skeleton from '@primeuix/themes/aura/skeleton'
-import tag from '@primeuix/themes/aura/tag'
 import textarea from '@primeuix/themes/aura/textarea'
 import toast from '@primeuix/themes/aura/toast'
-import togglebutton from '@primeuix/themes/aura/togglebutton'
 import toggleswitch from '@primeuix/themes/aura/toggleswitch'
 import virtualscroller from '@primeuix/themes/aura/virtualscroller'
 
@@ -28,8 +24,7 @@ const AuraLite = {
   primitive: base.primitive,
   semantic: base.semantic,
   components: {
-    button, checkbox, confirmdialog, dialog, iconfield, inputtext, message, password, select, selectbutton, skeleton, tag, textarea, toast,
-    togglebutton, toggleswitch, virtualscroller,
+    button, checkbox, confirmdialog, dialog, inputtext, message, password, select, skeleton, textarea, toast, toggleswitch, virtualscroller,
   },
 } as unknown as typeof Aura
 

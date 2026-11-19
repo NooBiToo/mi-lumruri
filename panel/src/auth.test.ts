@@ -43,14 +43,14 @@ describe('auth', () => {
     const lost = vi.fn()
     onAuthLost(lost)
     setCsrf('tok')
-    await api.preview({ rule: { id: 'r', source: { type: 'lan' }, destination: { type: 'domain', value: 'a.b' }, action: { type: 'direct' }, enabled: true }, probes: [] })
+    await api.updateLists()
     await api.config()
     expect(new Headers(calls[0]!.init.headers).get('X-MITT-CSRF')).toBe('tok')
     expect(calls[0]!.init.credentials).toBe('same-origin')
     expect(new Headers(calls[1]!.init.headers).get('X-MITT-CSRF')).toBeNull()
     expect(lost).toHaveBeenCalledOnce()
     // после потери сессии токен сброшен
-    await api.preview({ rule: { id: 'r', source: { type: 'lan' }, destination: { type: 'domain', value: 'a.b' }, action: { type: 'direct' }, enabled: true }, probes: [] })
+    await api.updateLists()
     expect(new Headers(calls[2]!.init.headers).get('X-MITT-CSRF')).toBeNull()
   })
 
