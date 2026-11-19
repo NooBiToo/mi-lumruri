@@ -44,9 +44,11 @@ pub const ZAPRET_QNUM: u16 = 200;
 pub const ZAPRET_DESYNC_MARK: u32 = 0x4000_0000;
 /// Очередь проверочного трафика подбора стратегии: исходящие соединения роутера с портов `ZAPRET_TEST_SPORTS`.
 pub const ZAPRET_TEST_QNUM: u16 = 201;
-/// Выше эфемерных портов Linux (32768–60999): обычные соединения роутера (клиент TrustTunnel, вопросы dnsmasq)
-/// сюда не попадают, иначе они ушли бы в очередь 201, а принятый очередью пакет покидает mangle OUTPUT раньше
-/// цепочки O с меткой туннеля. Проверка привязывает порт явно (curl --local-port 61000-61099).
+/// Выше эфемерных портов Linux (32768–60999): порты, которые назначает ядро (клиент TrustTunnel, прочие
+/// соединения роутера), в диапазон не попадают; проверка (curl по HTTP/HTTPS) привязывает порт явно
+/// (`--local-port 61000-61099`). Программы, выбирающие порт сами (dnsmasq: 1024–65535), диапазон не исключает,
+/// поэтому цепочка P отбирает только TCP к портам 80 и 443: DNS к резолверу туннеля в очередь 201 не попадает
+/// и не теряет метку цепочки O (принятый очередью пакет покидает mangle OUTPUT).
 pub const ZAPRET_TEST_SPORTS: &str = "61000:61099";
 /// Сколько первых пакетов соединения (в сторону сервера) уходит в очередь: TCP и UDP, как в Zapret-Manager.
 const QUEUE_PACKETS_TCP: u32 = 25;
@@ -509,17 +511,11 @@ pub fn build_plan(spec: &PolicySpec, v6_lan_prefixes: &[String], bridge_ports: &
                 p.insert(c);
             }
         }
-        // проверочный трафик подбора стратегии: соединения роутера с выделенных портов, кроме пакетов самого nfqws2
-        let rows = ["tcp", "udp"]
-            .iter()
-            .map(|proto| {
-                vec![
-                    s("-p"), s(proto), s("-m"), s(proto), s("--sport"), s(ZAPRET_TEST_SPORTS), s("-m"), s("mark"), s("!"), s("--mark"),
-                    fmt_mark(ZAPRET_DESYNC_MARK, ZAPRET_DESYNC_MARK), s("-j"), s("NFQUEUE"), s("--queue-num"), ZAPRET_TEST_QNUM.to_string(), s("--queue-bypass"),
-                ]
-            })
-            .collect();
-        let c = chain(false, m, 'P', rows);
+        // проверочный трафик подбора стратегии: HTTP/HTTPS роутера с выделенных портов, кроме пакетов самого nfqws2
+        let c = chain(false, m, 'P', vec![vec![
+            s("-p"), s("tcp"), s("-m"), s("tcp"), s("--sport"), s(ZAPRET_TEST_SPORTS), s("-m"), s("multiport"), s("--dports"), s("80,443"), s("-m"), s("mark"), s("!"),
+            s("--mark"), fmt_mark(ZAPRET_DESYNC_MARK, ZAPRET_DESYNC_MARK), s("-j"), s("NFQUEUE"), s("--queue-num"), ZAPRET_TEST_QNUM.to_string(), s("--queue-bypass"),
+        ]]);
         p.insert(Entry::Jump { v6: false, table: m.into(), from: "OUTPUT".into(), chain: chain_name(&c) });
         p.insert(c);
     }
@@ -995,11 +991,15 @@ mod tests {
     fn test_queue_only_router_sports() {
         let p = build_plan(&spec(), &[], &whole(), false);
         let rows: Vec<String> = chain_rows(&p, "mangle", 'P').iter().map(|r| r.join(" ")).collect();
-        assert_eq!(rows, [
-            "-p tcp -m tcp --sport 61000:61099 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num 201 --queue-bypass",
-            "-p udp -m udp --sport 61000:61099 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num 201 --queue-bypass",
-        ]);
-        // диапазон выше эфемерных портов Linux (32768–60999): случайные соединения роутера в очередь 201 не попадают
+        assert_eq!(rows, ["-p tcp -m tcp --sport 61000:61099 -m multiport --dports 80,443 -m mark ! --mark 0x40000000/0x40000000 -j NFQUEUE --queue-num 201 --queue-bypass"]);
+        // DNS (UDP и порт 53) в проверочную очередь не попадает ни при каком порте источника
+        for r in chain_rows(&p, "mangle", 'P') {
+            let at = |k: &str| r.iter().position(|w| w == k).and_then(|i| r.get(i + 1)).map(String::as_str);
+            assert_eq!(at("-p"), Some("tcp"), "{r:?}");
+            let dports = at("--dports").expect("порты назначения заданы");
+            assert!(dports.split(',').all(|x| x != "53" && x.split(':').count() == 1), "{r:?}");
+        }
+        // диапазон выше эфемерных портов Linux (32768–60999): порты, которые выбирает ядро, в него не попадают
         let (lo, hi) = ZAPRET_TEST_SPORTS.split_once(':').map(|(a, b)| (a.parse::<u16>().unwrap(), b.parse::<u16>().unwrap())).unwrap();
         assert!(lo > 60999 && lo <= hi, "{ZAPRET_TEST_SPORTS}");
         assert!(p.iter().any(|e| matches!(e, Entry::Jump { v6: false, table, from, chain } if table == "mangle" && from == "OUTPUT" && chain.starts_with("MITT_P"))), "{p:#?}");
