@@ -110,8 +110,7 @@ const report = { version: VERSION, tar: tarPath, tar_bytes: tarSize, tar_sha256:
   files: files.map((f) => ({ path: f.path, size: f.size, unpacked_size: f.unpacked_size })) }
 writeFileSync(join(OUT, `report-${VERSION}.json`), JSON.stringify(report, null, 2) + '\n')
 // install.py сверяет TAR с SHA256SUMS рядом с ним
-writeFileSync(join(OUT, 'SHA256SUMS'), `${report.tar_sha256} *mi-trusttunnel-${VERSION}.tar
-`)
+writeFileSync(join(OUT, 'SHA256SUMS'), `${report.tar_sha256} *mi-trusttunnel-${VERSION}.tar\n`)
 console.log(`пакет: ${tarPath} ${n(tarSize)} Б, sha256 ${report.tar_sha256}`)
 console.log(`на /data: ${n(manifest.data_bytes)} Б; в /tmp после распаковки: ${n(manifest.tmp_bytes)} Б; бюджет 20 000 000 Б, запас ${n(report.headroom)} Б`)
 console.log(`ключ релиза: ${report.key_fingerprint}`)
