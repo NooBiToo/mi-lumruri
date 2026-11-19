@@ -25,7 +25,7 @@ Host 192.168.31.1
 
 ## Быстрая установка с компьютера
 
-Скачайте из [последнего релиза](https://github.com/NooBiToo/mi-trusttunnel/releases/latest) файлы `mi-trusttunnel-*.tar`, `SHA256SUMS` и `install.py` в одну папку (или распакуйте ZIP из GitHub Actions) и откройте терминал в папке с `install.py`, TAR и `SHA256SUMS`. Оставьте исходные имена файлов. На Windows выполните:
+Скачайте из [последнего релиза](https://github.com/NooBiToo/mi-lumruri/releases/latest) файлы `mi-trusttunnel-*.tar`, `SHA256SUMS` и `install.py` в одну папку (или распакуйте ZIP из GitHub Actions) и откройте терминал в папке с `install.py`, TAR и `SHA256SUMS`. Оставьте исходные имена файлов. На Windows выполните:
 
 ```powershell
 python install.py 192.168.31.1
@@ -63,7 +63,7 @@ python install.py 192.168.31.1 --store /mnt/usb-XXXX/mi-trusttunnel
 
 ## 1. Подготовьте пакет и проверьте роутер
 
-Скачайте пакет из [релиза](https://github.com/NooBiToo/mi-trusttunnel/releases/latest) или из успешной сборки GitHub Actions либо соберите его на компьютере. Сверьте SHA-256 установочного TAR со сводкой сборки. Для команд ниже переименуйте проверенный TAR в `mitt-install.tar`. [Где скачать или как собрать пакет](build.md)
+Скачайте пакет из [релиза](https://github.com/NooBiToo/mi-lumruri/releases/latest) или из успешной сборки GitHub Actions либо соберите его на компьютере. Сверьте SHA-256 установочного TAR со сводкой сборки. Для команд ниже переименуйте проверенный TAR в `mitt-install.tar`. [Где скачать или как собрать пакет](build.md)
 
 Откройте терминал на компьютере. В примерах адрес роутера — `192.168.31.1`. Подставьте свой LAN-адрес во все команды и в адрес панели.
 

@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 
 
-REPO = "NooBiToo/mi-trusttunnel"
+REPO = "NooBiToo/mi-lumruri"
 ARTIFACT = "mi-trusttunnel-be7000"
 # Dropbear штатной прошивки предлагает только ключ хоста ssh-rsa, который OpenSSH 8.8+ по умолчанию отключил.
 SSH_OPTS = ["-o", "HostKeyAlgorithms=+ssh-rsa", "-o", "PubkeyAcceptedAlgorithms=+ssh-rsa"]
@@ -79,7 +79,7 @@ def verify(package):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Установить или обновить mi-trusttunnel по SSH.")
+    parser = argparse.ArgumentParser(description="Установить или обновить Mi Lumruri (mi-trusttunnel) по SSH.")
     parser.add_argument("router", nargs="?", type=ipaddress.IPv4Address, default="192.168.31.1",
                         help="LAN-адрес роутера (по умолчанию 192.168.31.1)")
     parser.add_argument("--package", type=Path, help="TAR из распакованного артефакта с SHA256SUMS")

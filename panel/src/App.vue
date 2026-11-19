@@ -125,7 +125,7 @@ onBeforeUnmount(() => { removeEventListener('hashchange', onHash); clearInterval
   <!-- вход и сбои до входа: узкая колонка по центру -->
   <div v-if="auth !== 'ready'" class="gate">
     <div class="gate__brand">
-      <span class="gate__name">mi-trusttunnel</span>
+      <span class="gate__name">Mi Lumruri</span>
       <span class="gate__sub">Вход в панель роутера</span>
     </div>
     <div v-if="auth === 'checking'" class="gate__card" aria-busy="true">
@@ -151,7 +151,7 @@ onBeforeUnmount(() => { removeEventListener('hashchange', onHash); clearInterval
     <aside class="side" aria-label="Разделы">
       <div class="side__brand">
         <span class="side__mark" aria-hidden="true"><Waypoints :size="20" :stroke-width="1.75" /></span>
-        <span class="side__name">mi-trusttunnel</span>
+        <span class="side__name">Mi Lumruri</span>
       </div>
       <nav class="side__nav">
         <a v-for="t in TABS" :key="t.value" :href="`#${t.value}`" :class="['nav', { 'nav--on': tab === t.value }]" :title="t.label"
