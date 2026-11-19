@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { brandColor, serviceIcon } from '../brand'
+import { brandColor, serviceIcon, type ServiceIcon } from '../brand'
 
-const props = defineProps<{ id: string; size?: 'sm' | 'md' }>()
-const icon = computed(() => serviceIcon(props.id))
+// id сервиса каталога или готовый значок (например, DNS-сервера)
+const props = defineProps<{ id?: string; icon?: ServiceIcon; size?: 'sm' | 'md' }>()
+const icon = computed(() => props.icon ?? serviceIcon(props.id ?? ''))
 const color = computed(() => (icon.value.kind === 'brand' ? brandColor(icon.value.hex) : null))
 </script>
 

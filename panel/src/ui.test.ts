@@ -13,8 +13,9 @@ describe('ui', () => {
   })
 
   it('parseDomainInput: разбор как у текстового поля, нормализация, без повторов', () => {
-    expect(parseDomainInput('https://Example.com/path, *.x.org  example.com\nfoo', ['x.org'])).toEqual({ add: ['example.com'], bad: ['foo'] })
-    expect(parseDomainInput('   ', [])).toEqual({ add: [], bad: [] })
+    expect(parseDomainInput('https://Example.com/path, *.x.org  example.com\nfoo', ['x.org'])).toEqual({ add: ['example.com'], bad: ['foo'], dup: ['x.org'] })
+    expect(parseDomainInput('   ', [])).toEqual({ add: [], bad: [], dup: [] })
+    expect(parseDomainInput('a.ru\nb.ru, a.ru;c', ['b.ru'])).toEqual({ add: ['a.ru'], bad: ['c'], dup: ['b.ru'] })
   })
 
   it('avatarHue и initials', () => {

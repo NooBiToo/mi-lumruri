@@ -2,6 +2,9 @@
 
 import type { Config, Lease, ListCatalog, ManageResponse, ZapretConfig, ZapretTestState } from './api'
 import { defaultSimple, fromConfig, normalizeMac, type KnownDevice, type Simple } from './simple'
+import { AUTO, pickedByTest, strategyName } from './zapret'
+
+export { AUTO }
 
 /** Состояние, которое служба роутера пишет в status.json (package/scripts/mitt-lib.sh: status_write). */
 export interface ServiceStatus {
@@ -58,7 +61,11 @@ export function tunnelState(s: ManageResponse | null, c: Config | null, simple: 
     return { tone: 'bad', title: 'Настройки не применены', detail: `${failed.charAt(0).toUpperCase()}${failed.slice(1)}. `
       + (guard ? 'Действует защита: сайты из списка не откроются, пока настройки не применятся.' : 'Роутер работает по прежним настройкам.') }
   }
-  if (simple && !simple.enabled) return { tone: 'idle', title: 'VPN выключен', detail: 'Все сайты открываются напрямую, обход блокировок (Zapret) тоже выключен.' }
+  if (simple && !simple.enabled) {
+    return { tone: 'idle', title: 'VPN выключен', detail: hasZapretSites(simple)
+      ? 'Все сайты открываются напрямую. Сайты с обходом блокировок по-прежнему открываются с Zapret.'
+      : 'Все сайты открываются напрямую, обход блокировок (Zapret) тоже выключен.' }
+  }
   if (!s || !s.ok) return { tone: 'idle', title: 'Проверяю состояние…', detail: null }
   if (!svc || svc.engines?.service === false) {
     return { tone: 'bad', title: 'Служба роутера не запущена', detail: 'Настройки сохраняются, но не действуют. Перезагрузите роутер.' }
@@ -136,15 +143,23 @@ export function devicesSummary(s: Simple): string {
   return s.devices === 'all' ? 'Все устройства дома' : `Только ${plural(s.devices.length, 'выбранное устройство', 'выбранных устройства', 'выбранных устройств')}`
 }
 
-export const AUTO = 'auto'
+/** Есть сайты с обходом блокировок без VPN и устройства, для которых они действуют (правила `zapret-<src>`). */
+export function hasZapretSites(s: Simple): boolean {
+  return (s.zapretServices.length > 0 || s.zapretDomains.length > 0) && (s.devices === 'all' || s.devices.length > 0)
+}
+
+/** Использует ли простой вид обход блокировок: «остальные сайты» с Zapret или свои сайты с обходом. */
+export function usesZapret(s: Simple | null): boolean {
+  return !!s && (s.rest === 'zapret' || hasZapretSites(s))
+}
 
 /**
  * Почему выбранный обход блокировок (Zapret) сейчас не действует, или null. Без правил «напрямую с Zapret» служба
  * nfqws2 не запускает и подбирать способ не на чем: VPN выключен или всё (без исключений, для всех устройств) идёт
- * через VPN.
+ * через VPN. Сайты с обходом блокировок действуют всегда, и при выключенном VPN тоже.
  */
 export function zapretIdle(s: Simple | null): string | null {
-  if (!s || s.rest !== 'zapret') return null
+  if (!s || s.rest !== 'zapret' || hasZapretSites(s)) return null
   if (!s.enabled) return 'Сейчас VPN выключен, а с ним и обход блокировок: все сайты открываются напрямую. Подобрать способ можно, когда VPN включён.'
   if (s.mode === 'all' && s.devices === 'all' && !s.exceptions.length) {
     return 'Сейчас все сайты всех устройств идут через VPN, поэтому обход блокировок не используется и подбирать способ не на чем. '
@@ -153,10 +168,19 @@ export function zapretIdle(s: Simple | null): string | null {
   return null
 }
 
-/** Название стратегии Zapret для людей: id каталога («v4») не показываем никогда. */
-export function strategyLabel(z: ZapretConfig | undefined, tested?: number | null): string {
-  if ((z?.strategy ?? AUTO) === AUTO && (z?.youtube ?? AUTO) === AUTO) return 'Автоматически (рекомендуется)'
-  return tested ? `Подобран автоматически ${when(tested)}` : 'Подобран автоматически'
+/**
+ * Способ обхода для людей: «Способ 4, YouTube: способ 2», id каталога («v4») не показываем никогда. Если способ поставил
+ * последний подбор — с припиской «подобран автоматически» и датой.
+ */
+export function strategyLabel(z: ZapretConfig | undefined, test?: ZapretTestState | null): string {
+  const general = z?.strategy ?? AUTO
+  const youtube = z?.youtube ?? AUTO
+  if (general === AUTO && youtube === AUTO) return 'Автоматически (рекомендуется)'
+  const parts: string[] = []
+  if (general !== AUTO) parts.push(strategyName('general', general))
+  if (youtube !== AUTO) parts.push(strategyName('youtube', youtube))
+  const p = pickedByTest(z, test)
+  return p.general || p.youtube ? `${parts.join(', ')} — подобран автоматически ${when(testedAt(test))}` : parts.join(', ')
 }
 
 /** Когда последний подбор применил способ (для подписи «Подобран автоматически …»), иначе null. */

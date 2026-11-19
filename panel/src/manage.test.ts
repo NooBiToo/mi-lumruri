@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dnsDefault, dnsToForm, emptyProfileForm, formToDns, formToProfile, formToSecret, profileToForm } from './manage'
+import { CUSTOM_DNS, DNS_PRESETS, dnsDefault, dnsPresetIp, dnsPresetOf, dnsToForm, emptyProfileForm, formToDns, formToProfile, formToSecret, profileToForm } from './manage'
 
 const PEM = '-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUQ\n-----END CERTIFICATE-----'
 
@@ -52,5 +52,24 @@ describe('DNS', () => {
     expect(dnsToForm(d ?? undefined)).toEqual({ resolver: '9.9.9.9', adblock: true, exceptions: 'ads.example.com\ncdn.example.org' })
     expect(formToDns({ ...dnsDefault(), adblock: true })).toEqual({ adblock: { enabled: true } })
     expect(dnsToForm({ adblock: { enabled: false } })).toEqual(dnsDefault())
+  })
+  it('готовые серверы ↔ адрес: по умолчанию Cloudflare, незнакомый адрес — «Свой адрес»', () => {
+    expect(DNS_PRESETS.map((p) => [p.id, p.ip])).toEqual([
+      ['cloudflare', '1.1.1.1'], ['quad9', '9.9.9.9'], ['google', '8.8.8.8'], ['adguard', '94.140.14.14'], ['nextdns', '45.90.28.0'],
+    ])
+    for (const p of DNS_PRESETS) {
+      expect(dnsPresetOf(p.ip)).toBe(p.id)
+      expect(dnsPresetIp(p.id)).toBe(p.ip)
+    }
+    expect(dnsPresetOf(dnsToForm(undefined).resolver)).toBe('cloudflare')
+    expect(dnsPresetOf('')).toBe('cloudflare')
+    expect(dnsPresetOf(' 9.9.9.9 ')).toBe('quad9')
+    expect(dnsPresetOf('1.0.0.1')).toBe(CUSTOM_DNS)
+    expect(dnsPresetOf('9.9.9.10')).toBe(CUSTOM_DNS)
+    expect(dnsPresetIp(CUSTOM_DNS)).toBeNull()
+    // Cloudflare сохраняется как отсутствие раздела (по умолчанию), остальные — адресом
+    expect(formToDns({ ...dnsDefault(), resolver: dnsPresetIp('cloudflare')! })).toBeNull()
+    expect(formToDns({ ...dnsDefault(), resolver: dnsPresetIp('adguard')! })).toEqual({ tunnel_resolver: '94.140.14.14' })
+    expect(DNS_PRESETS.find((p) => p.id === 'nextdns')?.note).toMatch(/Linked IP/)
   })
 })

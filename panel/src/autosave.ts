@@ -123,6 +123,27 @@ export function useAutosave(o: AutosaveOptions) {
   return { flush, schedule }
 }
 
+/**
+ * Сохранение сразу, без черновика и задержки (выбор способа обхода): то же состояние в верхней строке, что у
+ * автосохранения, и «Повторить» при ошибке. true — сохранено.
+ */
+export async function saveNow(run: () => Promise<SaveResult>): Promise<boolean> {
+  set('saving')
+  let r: SaveResult
+  try {
+    r = await run()
+  } catch (e) {
+    r = { ok: false, conflict: false, message: String(e) }
+  }
+  if (!r.ok) {
+    set('error', r.message, { label: 'Повторить', run: () => void saveNow(run) })
+    return false
+  }
+  set('saved')
+  if (service.value?.apply_pending) watchApply()
+  return true
+}
+
 /** Сохранить отложенные правки сейчас (например, перед выходом). */
 export async function flushPending(): Promise<void> {
   await pendingFlush?.()

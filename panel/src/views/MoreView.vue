@@ -4,25 +4,41 @@ import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import ToggleSwitch from 'primevue/toggleswitch'
 import { ChevronDown } from 'lucide-vue-next'
-import { api, type ZapretConfig, type ZapretTestState } from '../api'
-import { DEFAULT_TUNNEL_RESOLVER, dnsToForm, formToDns, type DnsForm } from '../manage'
-import { AUTO, strategyLabel, testedAt } from '../status'
-import { config, save, scrollTarget, simple } from '../store'
-import { useAutosave, type Blocker } from '../autosave'
+import { api, type ZapretTestState } from '../api'
+import { CUSTOM_DNS, DNS_PRESETS, dnsPresetIp, dnsPresetOf, dnsToForm, formToDns, type DnsForm } from '../manage'
+import { AUTO, strategyLabel, usesZapret } from '../status'
+import { config, save, saveZapret, scrollTarget, simple } from '../store'
+import { saveNow, useAutosave, type Blocker } from '../autosave'
+import { dnsIcon } from '../brand'
+import ServiceLogo from '../components/ServiceLogo.vue'
 
 defineProps<{ totp: boolean }>()
 const emit = defineEmits<{ navigate: [tab: 'sites'] }>()
 
-interface Draft { dns: DnsForm; autoZapret: boolean }
-const toDraft = (): Draft => ({ dns: dnsToForm(config.value?.dns), autoZapret: false })
+interface Draft { dns: DnsForm }
+const toDraft = (): Draft => ({ dns: dnsToForm(config.value?.dns) })
 const draft = ref<Draft>(toDraft())
 const pristine = ref(JSON.stringify(draft.value))
 const dirty = computed(() => JSON.stringify(draft.value) !== pristine.value)
-watch(config, () => { if (!dirty.value) { draft.value = toDraft(); pristine.value = JSON.stringify(draft.value) } })
+watch(config, () => {
+  if (!dirty.value) { draft.value = toDraft(); pristine.value = JSON.stringify(draft.value); custom.value = dnsPresetOf(draft.value.dns.resolver) === CUSTOM_DNS }
+})
+
+// ---- DNS: готовый сервер или свой адрес ----
+/** «Свой адрес» выбран явно: пока адрес не дописан, он может совпасть с готовым или быть пустым. */
+const custom = ref(dnsPresetOf(draft.value.dns.resolver) === CUSTOM_DNS)
+const dnsChoice = computed(() => (custom.value ? CUSTOM_DNS : dnsPresetOf(draft.value.dns.resolver)))
+const DNS_OPTIONS = [...DNS_PRESETS, { id: CUSTOM_DNS, name: 'Свой адрес', ip: '', desc: 'Любой публичный DNS-сервер (IPv4).' }]
+const dnsNote = computed(() => DNS_PRESETS.find((p) => p.id === dnsChoice.value)?.note ?? null)
+function chooseDns(id: string) {
+  const ip = dnsPresetIp(id)
+  custom.value = ip === null
+  if (ip !== null) draft.value.dns.resolver = ip
+}
 
 const zapret = computed(() => config.value?.zapret)
 const zapretAuto = computed(() => (zapret.value?.strategy ?? AUTO) === AUTO && (zapret.value?.youtube ?? AUTO) === AUTO)
-const zapretOn = computed(() => simple.value?.rest === 'zapret')
+const zapretOn = computed(() => usesZapret(simple.value))
 const test = ref<ZapretTestState | null>(null)
 onMounted(async () => { const r = await api.zapretTest(); if (r.body.ok && r.body.test) test.value = r.body.test })
 function openZapret() {
@@ -30,15 +46,18 @@ function openZapret() {
   emit('navigate', 'sites')
 }
 const totpHelp = ref(false)
+function resetZapret() {
+  void saveNow(() => saveZapret({ strategy: AUTO, youtube: AUTO }))
+}
 
 // ---- автосохранение ----
 /** Адрес DNS проверяем мягко до сохранения, чтобы не отправлять недописанный «1.1». Точнее проверит контроллер. */
 const resolverOk = computed(() => {
   const v = draft.value.dns.resolver.trim()
-  return !v || /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/.test(v)
+  return /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/.test(v)
 })
 function blocker(): Blocker | null {
-  return resolverOk.value ? null : { text: 'DNS-сервер — адрес IPv4, например 1.1.1.1.' }
+  return resolverOk.value ? null : { text: 'Свой DNS-сервер — адрес IPv4, например 1.1.1.1.' }
 }
 useAutosave({
   source: draft,
@@ -51,7 +70,6 @@ useAutosave({
     const dns = formToDns(draft.value.dns)
     if (dns) next.dns = dns
     else delete next.dns
-    if (draft.value.autoZapret) next.zapret = { strategy: AUTO, youtube: AUTO } satisfies ZapretConfig
     const r = await save(next, '')
     if (r.ok) {
       // сохранённое — новая точка отсчёта; правки, сделанные во время запроса, останутся несохранёнными
@@ -76,26 +94,40 @@ useAutosave({
         <ToggleSwitch v-model="draft.dns.adblock" input-id="adblock" />
       </label>
 
-      <div class="setrow">
+      <div class="setblock" role="group" aria-labelledby="dns-title">
         <span class="setrow__text">
-          <label for="dns" class="setrow__title">DNS для сайтов через VPN</label>
-          <span class="setrow__desc">Через него, внутри VPN, узнаются адреса сайтов из вашего списка. По умолчанию {{ DEFAULT_TUNNEL_RESOLVER }} (Cloudflare).</span>
-          <span v-if="!resolverOk" class="field__error">Нужен адрес IPv4, например 1.1.1.1.</span>
+          <span id="dns-title" class="setrow__title">DNS для сайтов через VPN</span>
+          <span class="setrow__desc">Через него, внутри VPN, узнаются адреса сайтов из ваших списков. Обычно подходит Cloudflare.</span>
         </span>
-        <InputText id="dns" v-model="draft.dns.resolver" class="num setrow__input" :placeholder="DEFAULT_TUNNEL_RESOLVER" inputmode="decimal" :invalid="!resolverOk" />
+        <div class="dns" role="radiogroup" aria-labelledby="dns-title">
+          <label v-for="o in DNS_OPTIONS" :key="o.id" :class="['dns__opt', { 'dns__opt--on': dnsChoice === o.id }]">
+            <input type="radio" name="dns" class="dns__radio" :value="o.id" :checked="dnsChoice === o.id" @change="chooseDns(o.id)" />
+            <ServiceLogo :icon="dnsIcon(o.id)" />
+            <span class="dns__text">
+              <span class="dns__name">{{ o.name }}<span v-if="o.ip" class="dns__ip num">{{ o.ip }}</span></span>
+              <span class="dns__desc">{{ o.desc }}</span>
+            </span>
+          </label>
+        </div>
+        <p v-if="dnsNote" class="dns__note">{{ dnsNote }}</p>
+        <div v-if="dnsChoice === 'custom'" class="field dns__custom">
+          <label for="dns" class="field__label">Адрес DNS-сервера</label>
+          <InputText id="dns" v-model="draft.dns.resolver" class="num" placeholder="например, 1.0.0.1" inputmode="decimal" :invalid="!resolverOk" aria-describedby="dns-hint" />
+          <span id="dns-hint" :class="resolverOk ? 'field__hint' : 'field__error'">{{ resolverOk ? 'Публичный адрес IPv4.' : 'Нужен адрес IPv4, например 1.0.0.1.' }}</span>
+        </div>
       </div>
 
       <div class="setrow">
         <span class="setrow__text">
           <span class="setrow__title">Обход блокировок (Zapret)</span>
           <span class="setrow__desc">
-            Способ: {{ draft.autoZapret ? strategyLabel(undefined) : strategyLabel(zapret, testedAt(test)) }}.
+            Способ: {{ strategyLabel(zapret, test) }}.
             <template v-if="!zapretOn">Сейчас выключен — включается на экране «Сайты».</template>
           </span>
         </span>
         <span class="setrow__actions">
-          <Button v-if="!zapretAuto && !draft.autoZapret" label="Вернуть автоматический" severity="secondary" variant="text" size="small" @click="draft.autoZapret = true" />
-          <Button :label="zapretOn ? 'Подобрать заново' : 'Открыть «Сайты»'" severity="secondary" variant="outlined" size="small" @click="openZapret" />
+          <Button v-if="!zapretAuto" label="Вернуть автоматический" severity="secondary" variant="text" size="small" @click="resetZapret" />
+          <Button :label="zapretOn ? 'Выбрать способ' : 'Открыть «Сайты»'" severity="secondary" variant="outlined" size="small" @click="openZapret" />
         </span>
       </div>
 

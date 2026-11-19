@@ -2,7 +2,7 @@
 // Сохраняет любой экран одной функцией `save` (замена настроек целиком, POST /config).
 
 import { computed, ref } from 'vue'
-import { api, manage, type ApiResult, type Config, type Issue, type Lan, type Lease, type ListsResponse, type ManageResponse, type ReplaceResponse } from './api'
+import { api, manage, type ApiResult, type Config, type Issue, type Lan, type Lease, type ListsResponse, type ManageResponse, type ReplaceResponse, type SaveResponse, type ZapretConfig } from './api'
 import { knownDevices, readSimple, tunnelState } from './status'
 import { HOME, toConfig, type KnownDevice, type Simple } from './simple'
 
@@ -170,13 +170,35 @@ const SAVED = 'Сохранено, применяю на роутере'
 export async function save(next: Config, done = SAVED): Promise<SaveResult> {
   if (!revision.value) return { ok: false, conflict: false, message: 'Настройки ещё не загружены.' }
   const r: ApiResult<ReplaceResponse> = await api.replaceConfig(revision.value, next)
+  return saved(r, done)
+}
+
+/**
+ * Выбор способов обхода (POST /zapret). Этот маршрут, в отличие от замены целиком, заявку на применение не ставит —
+ * ставим её сами (POST /apply-request).
+ */
+export async function saveZapret(z: ZapretConfig | null): Promise<SaveResult> {
+  if (!revision.value) return { ok: false, conflict: false, message: 'Настройки ещё не загружены.' }
+  const res = await saved(await api.setZapret(revision.value, z), '', false)
+  if (!res.ok) return res
+  const q = await manage.applyRequest()
+  await loadStatus()
+  if (q.status !== 202) {
+    const message = `Сохранено, но роутер не принял заявку на применение: ${q.body.error?.message ?? `ошибка ${q.status}`}`
+    notify.show('error', 'Не применено', message)
+    return { ok: false, conflict: false, message }
+  }
+  return res
+}
+
+async function saved(r: ApiResult<SaveResponse>, done: string, status = true): Promise<SaveResult> {
   if (r.status === 200 && r.body.ok && r.body.config && r.body.revision) {
     config.value = r.body.config
     revision.value = r.body.revision
     configIssues.value = []
     loadError.value = null
     if (done) notify.show('success', done)
-    void loadStatus()
+    if (status) void loadStatus()
     return { ok: true }
   }
   if (r.status === 409 && r.body.error?.code === 'revision_conflict') {

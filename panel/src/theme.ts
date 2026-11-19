@@ -10,6 +10,7 @@ import dialog from '@primeuix/themes/aura/dialog'
 import inputtext from '@primeuix/themes/aura/inputtext'
 import message from '@primeuix/themes/aura/message'
 import password from '@primeuix/themes/aura/password'
+import select from '@primeuix/themes/aura/select'
 import skeleton from '@primeuix/themes/aura/skeleton'
 import textarea from '@primeuix/themes/aura/textarea'
 import toast from '@primeuix/themes/aura/toast'
@@ -21,7 +22,7 @@ const AuraLite = {
   primitive: base.primitive,
   semantic: base.semantic,
   components: {
-    button, confirmdialog, dialog, inputtext, message, password, skeleton, textarea, toast, toggleswitch,
+    button, confirmdialog, dialog, inputtext, message, password, select, skeleton, textarea, toast, toggleswitch,
   },
 } as unknown as typeof Aura
 

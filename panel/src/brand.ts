@@ -2,8 +2,8 @@
 // Импорт по одному значку: в сборку попадают только используемые.
 
 import type { Component } from 'vue'
-import { siCloudflare, siDigitalocean, siDiscord, siGooglegemini, siGooglemeet, siGoogleplay, siHetzner, siInstagram, siOvh, siRoblox, siTelegram, siTiktok, siX, siYoutube } from 'simple-icons'
-import { Ban, Cloud, Earth, Film, Globe, Landmark, Layers, Newspaper, Sparkles } from 'lucide-vue-next'
+import { siAdguard, siCloudflare, siDigitalocean, siDiscord, siGooglegemini, siGooglemeet, siGoogle, siGoogleplay, siHetzner, siNextdns, siInstagram, siOvh, siQuad9, siRoblox, siTelegram, siTiktok, siX, siYoutube } from 'simple-icons'
+import { Ban, Cloud, Earth, Film, Globe, Landmark, Layers, Newspaper, Server, Sparkles } from 'lucide-vue-next'
 
 export type ServiceIcon = { kind: 'brand'; path: string; hex: string } | { kind: 'lucide'; icon: Component }
 
@@ -37,6 +37,19 @@ const ICONS: Record<string, ServiceIcon> = {
 
 export function serviceIcon(id: string): ServiceIcon {
   return ICONS[id] ?? lucide(Globe)
+}
+
+/** Значки готовых DNS-серверов (manage.ts: DNS_PRESETS); «Свой адрес» — значок сервера. */
+const DNS_ICONS: Record<string, ServiceIcon> = {
+  cloudflare: brand(siCloudflare),
+  quad9: brand(siQuad9),
+  google: brand(siGoogle),
+  adguard: brand(siAdguard),
+  nextdns: brand(siNextdns),
+}
+
+export function dnsIcon(id: string): ServiceIcon {
+  return DNS_ICONS[id] ?? lucide(Server)
 }
 
 /** Почти чёрный цвет бренда (X, TikTok, Roblox) рисуется цветом текста: иначе пропадёт в тёмной теме. */

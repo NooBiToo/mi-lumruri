@@ -4,14 +4,19 @@
 // - сеть `home` — мост и подсеть LAN роутера;
 // - категории `svc-<id>` (домены) и `svc-<id>-ip` (подсети IPv4) отмеченных списков; файлы списков служба роутера
 //   кладёт в categories/ сама по каталогу релиза;
-// - группы `vpn-sites` (списки и свои домены), `vpn-except` (исключения), `vpn-all` (весь IPv4: 0.0.0.0/1 и 128.0.0.0/1);
+// - группы `vpn-sites` (списки и свои домены), `zapret-sites` (сайты с обходом блокировок без VPN: списки и домены),
+//   `vpn-except` (исключения), `vpn-all` (весь IPv4: 0.0.0.0/1 и 128.0.0.0/1); сервис каталога — либо в `vpn-sites`,
+//   либо в `zapret-sites`, не в обеих (категория `svc-<id>` одна);
 // - устройства `dev-<mac без двоеточий>` — только выбранные;
-// - для каждого источника (`lan` или выбранное устройство): `except-<src>` → `vpn-except` → «остальные сайты»,
-//   затем `vpn-<src>` → `vpn-sites` (режим «выбранные») или `vpn-all` (режим «всё») → профиль;
+// - для каждого источника (`lan` или выбранное устройство) по порядку: `except-<src>` → `vpn-except` → «остальные
+//   сайты»; `zapret-<src>` → `zapret-sites` → напрямую с Zapret; `vpn-<src>` → `vpn-sites` (режим «выбранные») или
+//   `vpn-all` (режим «всё») → профиль. Исключения важнее всего, а сайты с обходом не уходят в VPN и в режиме «всё»;
 // - `default_action`: профиль в режиме «всё» для всей сети, иначе «остальные сайты» (напрямую или с Zapret);
 // - последнее правило-метка, всегда выключенное (на маршрутизацию не влияет): `rest-lan`, а при выключенном VPN —
 //   `vpn-off`; его действие — выбор «остальные сайты», чтобы выбор не терялся, когда по правилам его не видно.
-// Выключенный VPN: все правила `enabled: false`, `default_action` напрямую; галочки остаются в группах и правилах.
+// Выключенный VPN: правила VPN и исключений `enabled: false`, `default_action` напрямую; галочки остаются в группах и
+// правилах. Правила `zapret-<src>` остаются включёнными: обход блокировок без VPN от VPN не зависит.
+// Настройки без `zapret-sites` (как до появления сайтов с обходом) — тоже канонические, с пустыми списками.
 //
 // `fromConfig` считает настройки простыми, только если `toConfig` от разобранных ответов даёт ровно их же.
 
@@ -23,6 +28,10 @@ export interface Simple {
   /** id сервисов каталога списков. */
   services: string[]
   customDomains: string[]
+  /** id сервисов каталога, которые открываются напрямую с обходом блокировок (Zapret); с `services` не пересекаются. */
+  zapretServices: string[]
+  /** Свои домены с обходом блокировок без VPN. */
+  zapretDomains: string[]
   exceptions: string[]
   rest: 'direct' | 'zapret'
   /** 'all' — все устройства дома, иначе MAC выбранных устройств. */
@@ -37,6 +46,7 @@ export type FromConfig = { simple: Simple; canonical: true } | { canonical: fals
 export const HOME = 'home'
 export const HOME_NAME = 'Домашняя сеть'
 export const SITES = 'vpn-sites'
+export const ZAPRET_SITES = 'zapret-sites'
 export const EXCEPT = 'vpn-except'
 export const ALL = 'vpn-all'
 const REST_ON = 'rest-lan'
@@ -45,7 +55,24 @@ const SOURCE_PREFIX = 'itdoginfo:'
 const ALL_NETS: Destination[] = [{ type: 'cidr', value: '0.0.0.0/1' }, { type: 'cidr', value: '128.0.0.0/1' }]
 
 export function defaultSimple(): Simple {
-  return { enabled: true, mode: 'selected', services: [], customDomains: [], exceptions: [], rest: 'direct', devices: 'all' }
+  return { enabled: true, mode: 'selected', services: [], customDomains: [], zapretServices: [], zapretDomains: [], exceptions: [], rest: 'direct', devices: 'all' }
+}
+
+/** Как открывается сервис каталога: через VPN, напрямую с обходом блокировок (Zapret) или как все остальные сайты. */
+export type ServiceRoute = 'vpn' | 'zapret' | 'off'
+type ServiceLists = Pick<Simple, 'services' | 'zapretServices'>
+
+export function serviceRoute(s: ServiceLists, id: string): ServiceRoute {
+  return s.services.includes(id) ? 'vpn' : s.zapretServices.includes(id) ? 'zapret' : 'off'
+}
+
+/** Списки сервисов после выбора `route` для `id`: сервис остаётся не больше чем в одном из них. */
+export function setServiceRoute(s: ServiceLists, id: string, route: ServiceRoute): ServiceLists {
+  const services = s.services.filter((x) => x !== id)
+  const zapretServices = s.zapretServices.filter((x) => x !== id)
+  if (route === 'vpn') services.push(id)
+  if (route === 'zapret') zapretServices.push(id)
+  return { services, zapretServices }
 }
 
 /** MAC в виде aa:bb:cc:dd:ee:ff или null, если это не MAC устройства (как normalize_mac контроллера). */
@@ -93,23 +120,32 @@ export function toConfig(base: Config, s: Simple, lan: Lan, catalog: ListCatalog
   const rest: Action = s.rest === 'zapret' ? { type: 'direct_zapret' } : { type: 'direct' }
   const byId = new Map(catalog.services.map((x) => [x.id, x]))
   const services = [...new Set(s.services)].filter((id) => byId.has(id))
+  // сервис и в VPN, и с обходом остаётся в VPN: категория у сервиса одна
+  const zapretServices = [...new Set(s.zapretServices)].filter((id) => byId.has(id) && !services.includes(id))
   const categories: Category[] = []
-  const sites: Destination[] = []
-  for (const id of services) {
-    const svc = byId.get(id)!
-    const name = cleanName(svc.name) || id
-    categories.push({ id: `svc-${id}`, name, kind: 'domain', source: SOURCE_PREFIX + svc.domains })
-    sites.push({ type: 'category', id: `svc-${id}` })
-    if (svc.ipv4) {
-      categories.push({ id: `svc-${id}-ip`, name: cleanName(`${name}: подсети`), kind: 'ip', source: SOURCE_PREFIX + svc.ipv4 })
-      sites.push({ type: 'category', id: `svc-${id}-ip` })
+  const addServices = (ids: string[], into: Destination[]) => {
+    for (const id of ids) {
+      const svc = byId.get(id)!
+      const name = cleanName(svc.name) || id
+      categories.push({ id: `svc-${id}`, name, kind: 'domain', source: SOURCE_PREFIX + svc.domains })
+      into.push({ type: 'category', id: `svc-${id}` })
+      if (svc.ipv4) {
+        categories.push({ id: `svc-${id}-ip`, name: cleanName(`${name}: подсети`), kind: 'ip', source: SOURCE_PREFIX + svc.ipv4 })
+        into.push({ type: 'category', id: `svc-${id}-ip` })
+      }
     }
   }
+  const sites: Destination[] = []
+  addServices(services, sites)
   for (const d of uniqueDomains(s.customDomains)) sites.push({ type: 'domain_suffix', value: d })
+  const zapretSites: Destination[] = []
+  addServices(zapretServices, zapretSites)
+  for (const d of uniqueDomains(s.zapretDomains)) zapretSites.push({ type: 'domain_suffix', value: d })
   const except: Destination[] = uniqueDomains(s.exceptions).map((value) => ({ type: 'domain_suffix', value }))
 
   const groups: Group[] = []
   if (sites.length) groups.push(group(SITES, 'Сайты через VPN', sites))
+  if (zapretSites.length) groups.push(group(ZAPRET_SITES, 'Сайты с обходом блокировок', zapretSites))
   if (except.length) groups.push(group(EXCEPT, 'Исключения', except))
   groups.push(group(ALL, 'Весь интернет', ALL_NETS))
 
@@ -137,6 +173,8 @@ export function toConfig(base: Config, s: Simple, lan: Lan, catalog: ListCatalog
   const rules: Rule[] = []
   for (const [key, src] of sources) {
     if (except.length) rules.push(rule(`except-${key}`, src, EXCEPT, rest, s.enabled))
+    // обход блокировок без VPN от VPN не зависит: правило включено и при выключенном VPN
+    if (zapretSites.length) rules.push(rule(`zapret-${key}`, src, ZAPRET_SITES, { type: 'direct_zapret' }, true))
     if (vpnTarget) rules.push(rule(`vpn-${key}`, src, vpnTarget, toVpn, s.enabled))
   }
   rules.push(rule(s.enabled ? REST_ON : REST_OFF, { type: 'lan' }, ALL, rest, false))
@@ -183,17 +221,25 @@ export function fromConfig(cfg: Config): FromConfig {
   const restFrom = action(marker)
   if (restFrom !== 'direct' && restFrom !== 'direct_zapret') return notSimple('правила изменены вручную')
 
+  /** Сервисы и домены группы сайтов; ошибка — текстом. */
+  const readSites = (id: string, services: string[], domains: string[]): string | null => {
+    for (const d of groups.get(id)?.destinations ?? []) {
+      if (d.type === 'domain_suffix') domains.push(d.value)
+      else if (d.type === 'category') {
+        const m = /^svc-(.+)$/.exec(d.id)
+        const cat = cfg.categories?.find((c) => c.id === d.id)
+        if (!m || !cat) return `в списке сайтов есть категория «${d.id}», добавленная вручную`
+        if (cat.kind === 'domain') services.push(m[1]!)
+      } else return 'в списке сайтов есть записи, добавленные вручную'
+    }
+    return null
+  }
   const services: string[] = []
   const customDomains: string[] = []
-  for (const d of groups.get(SITES)?.destinations ?? []) {
-    if (d.type === 'domain_suffix') customDomains.push(d.value)
-    else if (d.type === 'category') {
-      const m = /^svc-(.+)$/.exec(d.id)
-      const cat = cfg.categories?.find((c) => c.id === d.id)
-      if (!m || !cat) return notSimple(`в списке сайтов есть категория «${d.id}», добавленная вручную`)
-      if (cat.kind === 'domain') services.push(m[1]!)
-    } else return notSimple('в списке сайтов есть записи, добавленные вручную')
-  }
+  const zapretServices: string[] = []
+  const zapretDomains: string[] = []
+  const bad = readSites(SITES, services, customDomains) ?? readSites(ZAPRET_SITES, zapretServices, zapretDomains)
+  if (bad) return notSimple(bad)
   const exceptions: string[] = []
   for (const d of groups.get(EXCEPT)?.destinations ?? []) {
     if (d.type !== 'domain_suffix') return notSimple('в исключениях есть записи, добавленные вручную')
@@ -217,6 +263,8 @@ export function fromConfig(cfg: Config): FromConfig {
     mode,
     services,
     customDomains,
+    zapretServices,
+    zapretDomains,
     exceptions,
     rest: restFrom === 'direct_zapret' ? 'zapret' : 'direct',
     devices: lanRules || macs.length === 0 ? 'all' : macs,
@@ -224,7 +272,7 @@ export function fromConfig(cfg: Config): FromConfig {
 
   // проверка: из этих ответов получаются ровно те же настройки
   const catalog: ListCatalog = { source: '', commit: '', date: '', services: [] }
-  for (const id of services) {
+  for (const id of [...services, ...zapretServices]) {
     const dom = cfg.categories?.find((c) => c.id === `svc-${id}`)
     const ip = cfg.categories?.find((c) => c.id === `svc-${id}-ip`)
     const path = (c: Category | undefined) => (c?.source?.startsWith(SOURCE_PREFIX) ? c.source.slice(SOURCE_PREFIX.length) : '')

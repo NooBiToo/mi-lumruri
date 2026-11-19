@@ -212,4 +212,6 @@ export const api = {
   updateLists: () => call<ListsResponse>('/lists/update', json({})),
   zapretTest: () => call<ZapretTestResponse>('/zapret/test'),
   startZapretTest: () => call<ZapretTestResponse>('/zapret/test', json({ mode: 'quick' })),
+  /** Выбор способов обхода (раздел `zapret`) с проверкой ревизии. Заявку на применение контроллер здесь не ставит. */
+  setZapret: (base_revision: string, zapret: ZapretConfig | null) => call<SaveResponse>('/zapret', json({ base_revision, zapret })),
 }

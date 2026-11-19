@@ -66,8 +66,10 @@ describe('status', () => {
     // успешные рендер и применение — как раньше
     expect(applyFailure({ render: { ok: true }, apply: { exit: 0, error: null } })).toBeNull()
     expect(tunnelState(st({ engines: { service: true, trusttunnel: true }, render: { ok: true }, apply: { exit: 0 } }), cfg, on).title).toBe('VPN работает')
-    // VPN выключен — и Zapret выключен
+    // VPN выключен — и Zapret выключен, кроме сайтов с обходом блокировок
     expect(tunnelState(st({ engines: { service: true } }), cfg, { ...on, enabled: false }).detail).toMatch(/Zapret\) тоже выключен/)
+    expect(tunnelState(st({ engines: { service: true } }), cfg, { ...on, enabled: false, zapretDomains: ['rutracker.org'] }).detail)
+      .toMatch(/Сайты с обходом блокировок по-прежнему открываются с Zapret/)
   })
 
   it('имена устройств: аренда, поверх — настройки, поверх — переименование', () => {
@@ -98,11 +100,15 @@ describe('status', () => {
   it('Zapret: без id стратегий — название, прогресс и итог подбора', () => {
     expect(strategyLabel(undefined)).toBe('Автоматически (рекомендуется)')
     expect(strategyLabel({ strategy: 'auto', youtube: 'auto' })).toBe('Автоматически (рекомендуется)')
-    expect(strategyLabel({ strategy: 'v4', youtube: 'auto' })).toBe('Подобран автоматически')
+    expect(strategyLabel({ strategy: 'v4', youtube: 'auto' })).toBe('Способ 4')
+    expect(strategyLabel({ strategy: 'auto', youtube: 'yv12' })).toBe('YouTube: способ 12')
+    expect(strategyLabel({ strategy: 'v99', youtube: 'auto' })).toBe('Другой способ')
     const done = { state: 'done' as const, started: 1763540000, finished: 1763540200, control: { opened: 12, total: 54 }, best: { id: 'v4', opened: 47 }, applied: true,
       message: 'Применена стратегия v4: открылось 47 из 54, без Zapret — 12' }
     expect(testedAt(done)).toBe(1763540200)
-    expect(strategyLabel({ strategy: 'v4', youtube: 'yv2' }, testedAt(done))).toBe(`Подобран автоматически ${when(1763540200)}`)
+    expect(strategyLabel({ strategy: 'v4', youtube: 'yv2' }, done)).toBe(`Способ 4, YouTube: способ 2 — подобран автоматически ${when(1763540200)}`)
+    // способ выбран вручную, а не подбором
+    expect(strategyLabel({ strategy: 'v7', youtube: 'auto' }, done)).toBe('Способ 7')
     expect(testedAt({ ...done, applied: false })).toBeNull()
     expect(zapretProgress({ state: 'running', progress: { done: 4, total: 11, current: 'v4' } })).toBe('Проверяю способы обхода: 5 из 11')
     expect(zapretProgress({ state: 'running', progress: { done: 0, total: 11, current: 'control' } })).toBe('Проверяю, что открывается без обхода: 1 из 11')
@@ -139,6 +145,11 @@ describe('status', () => {
     expect(zapretIdle({ ...z, mode: 'all', exceptions: ['bank.ru'] })).toBeNull()
     expect(zapretIdle({ ...z, mode: 'all', devices: ['aa:bb:cc:00:00:01'] })).toBeNull()
     expect(zapretIdle(null)).toBeNull()
+    // сайты с обходом блокировок действуют всегда: подбирать есть на чём
+    expect(zapretIdle({ ...z, enabled: false, zapretServices: ['youtube'] })).toBeNull()
+    expect(zapretIdle({ ...z, mode: 'all', zapretDomains: ['rutracker.org'] })).toBeNull()
+    // …но не без устройств
+    expect(zapretIdle({ ...z, enabled: false, zapretServices: ['youtube'], devices: [] })).toMatch(/VPN выключен/)
   })
 
   it('Zapret: применён только способ для YouTube — цифры прохода YouTube', () => {

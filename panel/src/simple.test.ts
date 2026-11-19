@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Config, Lan, ListCatalog } from './api'
-import { defaultSimple, fromConfig, toConfig, type KnownDevice, type Simple } from './simple'
+import { defaultSimple, fromConfig, serviceRoute, setServiceRoute, toConfig, type KnownDevice, type Simple } from './simple'
 import validFixture from '../../fixtures/config.valid.json?raw'
 
 const lan: Lan = { bridge: 'br-lan', subnet: '192.168.31.0/24', address: '192.168.31.1' }
@@ -172,6 +172,95 @@ describe('simple', () => {
     const first = toConfig(base, simple({ devices: ['a4:77:33:10:20:30'] }), lan, catalog, known)
     const again = toConfig(first, simple({ devices: ['a4:77:33:10:20:30'] }), lan, catalog, [{ mac: 'a4:77:33:10:20:30', name: '' }])
     expect(again.devices[0]?.name).toBe('Телевизор')
+  })
+
+  it('zapret_sites: группа, правила по порядку и туда-обратно', () => {
+    const s = simple({ services: ['youtube'], customDomains: ['example.org'], zapretServices: ['meta'], zapretDomains: ['rutracker.org'], exceptions: ['ya.ru'] })
+    const c = toConfig(base, s, lan, catalog, known)
+    expect(c.categories?.map((x) => x.id)).toEqual(['svc-youtube', 'svc-meta', 'svc-meta-ip'])
+    expect(c.groups.map((g) => g.id)).toEqual(['vpn-sites', 'zapret-sites', 'vpn-except', 'vpn-all'])
+    expect(c.groups.find((g) => g.id === 'zapret-sites')?.destinations).toEqual([
+      { type: 'category', id: 'svc-meta' },
+      { type: 'category', id: 'svc-meta-ip' },
+      { type: 'domain_suffix', value: 'rutracker.org' },
+    ])
+    // в каждом источнике: исключения, затем сайты с обходом, затем VPN
+    expect(c.rules.filter((r) => r.enabled).map((r) => [r.id, r.destination, r.action])).toEqual([
+      ['except-lan', { type: 'group', id: 'vpn-except' }, { type: 'direct' }],
+      ['zapret-lan', { type: 'group', id: 'zapret-sites' }, { type: 'direct_zapret' }],
+      ['vpn-lan', { type: 'group', id: 'vpn-sites' }, { type: 'profile', id: 'tt' }],
+    ])
+    expect(roundTrip(s)).toEqual({ canonical: true, simple: s })
+    // только сайты с обходом, без VPN и без сервера
+    const only = simple({ zapretDomains: ['rutracker.org'] })
+    const none = { ...base, profiles: [] }
+    expect(toConfig(none, only, lan, catalog, known).rules.filter((r) => r.enabled).map((r) => r.id)).toEqual(['zapret-lan'])
+    expect(fromConfig(JSON.parse(JSON.stringify(toConfig(none, only, lan, catalog, known))) as Config)).toEqual({ canonical: true, simple: only })
+    expect(roundTrip(only)).toEqual({ canonical: true, simple: only })
+  })
+
+  it('zapret_sites: «всё через VPN» не забирает их в VPN, по устройствам — у каждого своё правило', () => {
+    const all = simple({ mode: 'all', zapretServices: ['youtube'], exceptions: ['gosuslugi.ru'] })
+    const c = toConfig(base, all, lan, catalog, known)
+    expect(c.rules.filter((r) => r.enabled).map((r) => [r.id, r.destination])).toEqual([
+      ['except-lan', { type: 'group', id: 'vpn-except' }],
+      ['zapret-lan', { type: 'group', id: 'zapret-sites' }],
+      ['vpn-lan', { type: 'group', id: 'vpn-all' }],
+    ])
+    expect(c.default_action).toEqual({ type: 'profile', id: 'tt' })
+    expect(roundTrip(all)).toEqual({ canonical: true, simple: all })
+    const devs = simple({ services: ['telegram'], zapretDomains: ['rutracker.org'], devices: ['a4:77:33:10:20:30', '3c:22:fb:01:02:03'] })
+    expect(toConfig(base, devs, lan, catalog, known).rules.filter((r) => r.enabled).map((r) => r.id)).toEqual([
+      'zapret-dev-a47733102030', 'vpn-dev-a47733102030', 'zapret-dev-3c22fb010203', 'vpn-dev-3c22fb010203',
+    ])
+    expect(roundTrip(devs)).toEqual({ canonical: true, simple: devs })
+  })
+
+  it('zapret_sites: при выключенном VPN правила обхода остаются включёнными', () => {
+    const s = simple({ enabled: false, services: ['youtube'], zapretServices: ['telegram'], zapretDomains: ['rutracker.org'], exceptions: ['ya.ru'] })
+    const c = toConfig(base, s, lan, catalog, known)
+    expect(c.rules.filter((r) => r.enabled).map((r) => r.id)).toEqual(['zapret-lan'])
+    expect(c.rules.filter((r) => !r.enabled).map((r) => r.id)).toEqual(['except-lan', 'vpn-lan', 'vpn-off'])
+    expect(c.default_action).toEqual({ type: 'direct' })
+    expect(roundTrip(s)).toEqual({ canonical: true, simple: s })
+  })
+
+  it('zapret_sites: сервис не бывает и в VPN, и с обходом', () => {
+    // в настройки сервис из обоих списков попадает один раз — в VPN
+    const both = toConfig(base, simple({ services: ['youtube'], zapretServices: ['youtube', 'meta'] }), lan, catalog, known)
+    expect(both.categories?.map((x) => x.id)).toEqual(['svc-youtube', 'svc-meta', 'svc-meta-ip'])
+    expect(both.groups.find((g) => g.id === 'zapret-sites')?.destinations.map((d) => (d.type === 'category' ? d.id : ''))).toEqual(['svc-meta', 'svc-meta-ip'])
+    // помощник экрана: выбор для плитки убирает сервис из другого списка
+    let l = { services: ['youtube'], zapretServices: ['meta'] }
+    expect(serviceRoute(l, 'youtube')).toBe('vpn')
+    expect(serviceRoute(l, 'meta')).toBe('zapret')
+    expect(serviceRoute(l, 'telegram')).toBe('off')
+    l = setServiceRoute(l, 'youtube', 'zapret')
+    expect(l).toEqual({ services: [], zapretServices: ['meta', 'youtube'] })
+    l = setServiceRoute(l, 'meta', 'vpn')
+    expect(l).toEqual({ services: ['meta'], zapretServices: ['youtube'] })
+    l = setServiceRoute(l, 'meta', 'off')
+    expect(l).toEqual({ services: [], zapretServices: ['youtube'] })
+    expect(setServiceRoute(l, 'youtube', 'zapret')).toEqual(l)
+  })
+
+  it('zapret_sites: прежний канонический вид без них читается с пустыми списками; ручные правки замечаются', () => {
+    const s = simple({ services: ['youtube'], exceptions: ['ya.ru'] })
+    const old = JSON.parse(JSON.stringify(toConfig(base, s, lan, catalog, known))) as Config
+    expect(old.groups.some((g) => g.id === 'zapret-sites')).toBe(false)
+    const r = fromConfig(old)
+    expect(r).toEqual({ canonical: true, simple: s })
+    if (r.canonical) expect([r.simple.zapretServices, r.simple.zapretDomains]).toEqual([[], []])
+    // правило обхода без группы, группа без правила, выключенное правило, чужое действие — уже не простой вид
+    const z = JSON.parse(JSON.stringify(toConfig(base, simple({ zapretDomains: ['rutracker.org'] }), lan, catalog, known))) as Config
+    const noRule = { ...z, rules: z.rules.filter((x) => x.id !== 'zapret-lan') }
+    expect(fromConfig(noRule).canonical).toBe(false)
+    const off = { ...z, rules: z.rules.map((x) => (x.id === 'zapret-lan' ? { ...x, enabled: false } : x)) }
+    expect(fromConfig(off).canonical).toBe(false)
+    const vpn = { ...z, rules: z.rules.map((x) => (x.id === 'zapret-lan' ? { ...x, action: { type: 'profile' as const, id: 'tt' } } : x)) }
+    expect(fromConfig(vpn).canonical).toBe(false)
+    const ip = { ...z, groups: z.groups.map((g) => (g.id === 'zapret-sites' ? { ...g, destinations: [...g.destinations, { type: 'cidr' as const, value: '10.0.0.0/8' }] } : g)) }
+    expect(fromConfig(ip)).toMatchObject({ canonical: false, reason: expect.stringMatching(/вручную/) })
   })
 
   it('requires a profile only when something goes through VPN', () => {
