@@ -7,13 +7,17 @@ D="$(cd "$(dirname "$0")" && pwd)"
 . "$D/mitt-lib.sh"
 INTERVAL="${MITT_INTERVAL:-5}"
 
-engines_stop() { for n in trusttunnel nfqws2 dnsproxy dnstunnel; do rm -f "$STATE/$n.wanted"; pid_stop "$n"; done; }
+engines_stop() {
+  for n in trusttunnel nfqws2 dnsproxy dnstunnel; do rm -f "$STATE/$n.wanted"; pid_stop "$n"; done
+  # прежний TUN удаляется ядром не сразу: новый клиент и ожидание ниже не должны застать старый mitt0
+  local i=0; while [ $i -lt 50 ] && ip link show mitt0 >/dev/null 2>&1; do sleep 0.2; i=$((i + 1)); done
+}
 engines_start() {
   if [ -f "$RENDER/client.toml" ]; then
     touch "$STATE/trusttunnel.wanted"
     pid_alive trusttunnel || start_bg trusttunnel ${MITT_TT_WRAP:-} "$BIN/trusttunnel_client" -c "$RENDER/client.toml"
-    # TUN должен появиться до apply: маршрут таблицы 3100 ссылается на него
-    local i=0; while [ $i -lt 50 ] && ! ip link show mitt0 >/dev/null 2>&1; do sleep 0.2; i=$((i + 1)); done
+    # TUN должен быть поднят и с адресом до apply: маршрут таблицы 3100 ссылается на него
+    local i=0; while [ $i -lt 75 ] && ! tun_ready; do sleep 0.2; i=$((i + 1)); done
   fi
   if [ -f "$RENDER/nfqws2.args" ]; then
     touch "$STATE/nfqws2.wanted"
@@ -105,6 +109,15 @@ while [ -f "$STATE/service.wanted" ]; do
       engines_start; admin_apply "$e-restart"; status_write; break
     fi
   done
+  # полное применение не прошло (туннель не успел подняться) и действует только защита: повтор, когда mitt0 готов,
+  # не чаще раза в минуту
+  if [ "$(cat "$STATE/protection" 2>/dev/null)" = guard ] && [ -f "$STATE/trusttunnel.wanted" ] && tun_ready; then
+    now=$(date +%s); last=$(cat "$STATE/guard-retry" 2>/dev/null || echo 0)
+    if [ $((now - last)) -ge 60 ] || [ "$now" -lt "$last" ]; then
+      echo "$now" >"$STATE/guard-retry"
+      admin_apply tun-ready && echo full >"$STATE/protection"
+    fi
+  fi
   status_write
 done
 mlog "служба остановлена"

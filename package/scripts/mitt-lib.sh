@@ -124,7 +124,8 @@ render_now() {
 admin_apply() { # admin_apply <метка> [--guard-only]
   local tag="$1" e=""; shift
   adm apply --state-dir "$RUN/admin" --config "$ETC/config.json" --secrets "$ETC/secrets.json" "$@" >"$STATE/apply.$tag.json" 2>&1
-  local rc=$?; printf '{"tag":"%s","exit":%s,"at":%s}\n' "$tag" "$rc" "$(date +%s)" >"$STATE/last-apply.json"
+  local rc=$?; [ "$rc" -eq 0 ] || cp -f "$STATE/apply.$tag.json" "$STATE/apply.$tag.fail.json" 2>/dev/null
+  printf '{"tag":"%s","exit":%s,"at":%s}\n' "$tag" "$rc" "$(date +%s)" >"$STATE/last-apply.json"
   if [ "${1:-}" != --guard-only ]; then
     [ "$rc" -eq 0 ] || { e="$(short_err "$STATE/apply.$tag.json")"; [ -n "$e" ] || e="код $rc"; }
     printf '{"tag":"%s","exit":%s,"at":%s,"error":%s}\n' "$tag" "$rc" "$(date +%s)" "$([ -n "$e" ] && printf '"%s"' "$e" || echo null)" >"$STATE/full-apply.json"
@@ -132,6 +133,8 @@ admin_apply() { # admin_apply <метка> [--guard-only]
   mlog "apply $tag $*: код $rc"; return $rc
 }
 
+# TUN клиента готов: есть, поднят и с IPv4-адресом (клиент настраивает его не сразу после создания)
+tun_ready() { ip link show mitt0 2>/dev/null | grep -q '[<,]UP[,>]' && ip -4 addr show dev mitt0 2>/dev/null | grep -q 'inet '; }
 pid_alive() { [ -f "$STATE/$1.pid" ] && kill -0 "$(cat "$STATE/$1.pid")" 2>/dev/null; }
 pid_stop() { if pid_alive "$1"; then kill "$(cat "$STATE/$1.pid")" 2>/dev/null; sleep 1; kill -9 "$(cat "$STATE/$1.pid")" 2>/dev/null; fi; rm -f "$STATE/$1.pid"; }
 # nfqws2 после запуска сбрасывает права (UID 2147483647) и перечитывает списки хостов уже без root: данным Zapret
