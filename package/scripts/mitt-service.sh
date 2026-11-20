@@ -13,6 +13,20 @@ engines_stop() {
   local i=0; while [ $i -lt 50 ] && ip link show mitt0 >/dev/null 2>&1; do nap; i=$((i + 1)); done
 }
 engines_start() {
+  # защищённый DNS — первым: dnsmasq стока (а через него и клиент TrustTunnel, разрешающий имя сервера) уже
+  # отправляет вопросы в этот прокси; запущенный после клиента, он оставлял того без адреса сервера
+  if [ -f "$RENDER/dns-proxy.args" ]; then
+    touch "$STATE/dnsproxy.wanted"
+    # shellcheck disable=SC2046 — аргументы по одному в строке, без пробелов (формирует рендер)
+    pid_alive dnsproxy || start_bg dnsproxy "$BIN/mi-tt-dns" $(cat "$RENDER/dns-proxy.args") --fallback "$(resolv_file)" --status "$STATE/dns-proxy.json"
+    local j=0; while [ $j -lt 10 ] && ! "$BIN/mi-tt-dns" --probe 127.0.0.1:5453 example.com >/dev/null 2>&1; do nap; j=$((j + 1)); done
+  fi
+  # DoH/DoT для доменов туннеля: сокеты привязаны к mitt0 (до появления TUN вопросы не уходят); запасного пути нет
+  if [ -f "$RENDER/dns-tunnel.args" ]; then
+    touch "$STATE/dnstunnel.wanted"
+    # shellcheck disable=SC2046
+    pid_alive dnstunnel || start_bg dnstunnel "$BIN/mi-tt-dns" $(cat "$RENDER/dns-tunnel.args") --status "$STATE/dns-tunnel.json"
+  fi
   if [ -f "$RENDER/client.toml" ]; then
     touch "$STATE/trusttunnel.wanted"
     pid_alive trusttunnel || start_bg trusttunnel ${MITT_TT_WRAP:-} "$BIN/trusttunnel_client" -c "$RENDER/client.toml"
@@ -23,18 +37,6 @@ engines_start() {
     touch "$STATE/nfqws2.wanted"
     # shellcheck disable=SC2046 — аргументы по одному в строке, без пробелов (формирует рендер)
     pid_alive nfqws2 || { zapret_readable; start_bg nfqws2 ${MITT_NFQWS_WRAP:-} "$BIN/nfqws2" $(cat "$RENDER/nfqws2.args"); }
-  fi
-  # защищённый DNS: до dns_sync (dnsmasq переключается на него, только когда прокси уже слушает)
-  if [ -f "$RENDER/dns-proxy.args" ]; then
-    touch "$STATE/dnsproxy.wanted"
-    # shellcheck disable=SC2046 — аргументы по одному в строке, без пробелов (формирует рендер)
-    pid_alive dnsproxy || start_bg dnsproxy "$BIN/mi-tt-dns" $(cat "$RENDER/dns-proxy.args") --fallback "$(resolv_file)" --status "$STATE/dns-proxy.json"
-  fi
-  # DoH/DoT для доменов туннеля: метка на сокетах ведёт соединения в туннель; запасного пути нет (вопрос не уходит провайдеру)
-  if [ -f "$RENDER/dns-tunnel.args" ]; then
-    touch "$STATE/dnstunnel.wanted"
-    # shellcheck disable=SC2046
-    pid_alive dnstunnel || start_bg dnstunnel "$BIN/mi-tt-dns" $(cat "$RENDER/dns-tunnel.args") --status "$STATE/dns-tunnel.json"
   fi
   return 0
 }
@@ -106,7 +108,7 @@ while [ -f "$STATE/service.wanted" ]; do
       mlog "движок $e завершился — перезапуск"
       # время перезапусков — для диагностики (падения по кругу за последние минуты), последние 50
       echo "$(date +%s) $e" >>"$STATE/restarts"; tail -n 50 "$STATE/restarts" >"$STATE/restarts.t" && mv -f "$STATE/restarts.t" "$STATE/restarts"
-      engines_start; admin_apply "$e-restart"; status_write; break
+      engines_start; admin_apply "$e-restart" && echo full >"$STATE/protection"; status_write; break
     fi
   done
   # полное применение не прошло (туннель не успел подняться) и действует только защита: повтор, когда mitt0 готов,
