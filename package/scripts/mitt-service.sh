@@ -77,7 +77,10 @@ while [ -f "$STATE/service.wanted" ]; do
   fi
   for e in trusttunnel nfqws2; do
     if [ -f "$STATE/$e.wanted" ] && ! pid_alive "$e"; then
-      mlog "движок $e завершился — перезапуск"; engines_start; admin_apply "$e-restart"; status_write; break
+      mlog "движок $e завершился — перезапуск"
+      # время перезапусков — для диагностики (падения по кругу за последние минуты), последние 50
+      echo "$(date +%s) $e" >>"$STATE/restarts"; tail -n 50 "$STATE/restarts" >"$STATE/restarts.t" && mv -f "$STATE/restarts.t" "$STATE/restarts"
+      engines_start; admin_apply "$e-restart"; status_write; break
     fi
   done
   status_write

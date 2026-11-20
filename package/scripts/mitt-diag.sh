@@ -74,12 +74,18 @@ else
 fi
 
 # программы, которые падают и перезапускаются по кругу (служба проверяет их раз в несколько секунд)
-loop=""
+# считаются только перезапуски за последние 10 минут (служба пишет их время в $STATE/restarts)
+since=$(( $(date +%s) - 600 )); loop=""; recent=""
 for e in trusttunnel nfqws2; do
-  c=$(tail -n 40 "$LOG/mitt.log" 2>/dev/null | grep -c "движок $e завершился")
-  [ "$c" -ge 3 ] && loop="$loop $e (перезапусков: $c)"
+  c=$(awk -v s="$since" -v e="$e" '$1 >= s && $2 == e' "$STATE/restarts" 2>/dev/null | wc -l)
+  if [ "$c" -ge 3 ]; then
+    last="$(tail -n 1 "$LOG/$e.log" 2>/dev/null | cut -c1-120)"
+    loop="$loop $e (перезапусков за 10 минут: $c${last:+; последняя запись: $last})"
+  elif [ "$c" -gt 0 ]; then recent="$recent $e ($c)"; fi
 done
-[ -n "$loop" ] && ch restarts bad "перезапускаются по кругу:$loop — подробности в журналах" || ch restarts ok "программы не падают"
+if [ -n "$loop" ]; then ch restarts bad "перезапускаются по кругу:$loop"
+elif [ -n "$recent" ]; then ch restarts warn "перезапускались за последние 10 минут:$recent"
+else ch restarts ok "за последние 10 минут программы не падали"; fi
 
 if [ -n "$site" ]; then
   ip4="$(nslookup "$site" 127.0.0.1 2>/dev/null | awk '/^Name:/{f=1} f && /^Address [0-9]+: /{if ($3 ~ /^[0-9.]+$/) {print $3; exit}}')"
