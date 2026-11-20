@@ -46,7 +46,7 @@ printf '#!/bin/sh\nexport LD_LIBRARY_PATH=%s\nexec %s "$@"\n' "$ISD/usr/lib/x86_
 ln -sf "$(command -v ip)" "$NFBIN/ip"
 chmod +x "$SB"/* "$NFBIN"/*
 LB="$W/labbin"; mkdir -p "$LB"
-for n in mi-tt-ctl mi-tt-admin; do printf '#!/bin/sh\nexec %s "$0.arm64" "$@"\n' "$Q" >"$LB/$n"; done
+for n in mi-tt-ctl mi-tt-admin mi-tt-dns; do printf '#!/bin/sh\nexec %s "$0.arm64" "$@"\n' "$Q" >"$LB/$n"; done
 # nfqws2 — x86_64 той же версии zapret2, что aarch64 в пакете (очередь NFQUEUE под qemu-user не проверяется); файл лежит
 # рядом с Lua, блобами и списками хостов пакета, поэтому --chdir (каталог программы) — тот же, что на роутере.
 # В namespace отображён только uid/gid 0: сброс привилегий — к --uid=0:0, setgroups — через seccomp-обёртку (только лаборатория)

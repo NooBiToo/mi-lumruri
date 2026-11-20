@@ -42,3 +42,8 @@ dpi-detector (tcp16.json и domains.txt).
 Списки блокировки рекламы в пакет не входят: роутер скачивает их по выбору в панели. По умолчанию — HaGeZi DNS Blocklists
 (https://github.com/hagezi/dns-blocklists, варианты Light и Normal в виде wildcard/*-onlydomains.txt), автор — Gerd (hagezi),
 лицензия GPL-3.0. Списки используются без изменений.
+
+Прокси защищённого DNS (mi-tt-dns) собран с библиотеками rustls (Apache-2.0 OR ISC OR MIT, https://github.com/rustls/rustls),
+rustls-rustcrypto (MIT OR Apache-2.0, https://github.com/RustCrypto/rustls-rustcrypto) и криптографией RustCrypto,
+а также webpki-roots (CDLA-Permissive-2.0, https://github.com/rustls/webpki-roots) — корневые сертификаты из программы
+Mozilla CA. Перечень всех зависимостей Rust с лицензиями — controller/Cargo.lock.

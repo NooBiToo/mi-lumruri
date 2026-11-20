@@ -21,6 +21,11 @@ path = "src/main.rs"
 name = "mi-tt-admin"
 path = "src/admin/main.rs"
 
+# DoH/DoT-прокси для dnsmasq (отдельная программа: TLS нужен только ей)
+[[bin]]
+name = "mi-tt-dns"
+path = "src/dnsproxy/main.rs"
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -36,6 +41,10 @@ subtle = { version = "2", default-features = false }
 ed25519-compact = { version = "2", default-features = false }
 # QR-код otpauth для приложения-аутентификатора в терминале (auth init/reset-totp); без image/svg
 qrcode = { version = "0.14", default-features = false }
+# mi-tt-dns: TLS на чистом Rust (RustCrypto, без C — сборка aarch64-musl без C-компилятора), корни Mozilla
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12"] }
+rustls-rustcrypto = "0.1.0-pre.0"
+webpki-roots = "1"
 
 [profile.release]
 opt-level = "z"

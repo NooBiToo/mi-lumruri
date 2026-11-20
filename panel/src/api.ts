@@ -31,6 +31,10 @@ export type Destination =
 export interface Category { id: string; name: string; kind: 'domain' | 'ip'; source?: string }
 export interface HostRecord { domain: string; address: string }
 export type AdblockSource = 'light' | 'normal' | 'url'
+export type SecureServer = 'cloudflare' | 'quad9' | 'google' | 'adguard' | 'nextdns' | 'custom'
+export interface SecureDns { protocol: 'doh' | 'dot'; server: SecureServer; nextdns_id?: string; url?: string; ips?: string[] }
+/** Состояние прокси DoH/DoT (mi-tt-dns), раз в 15 секунд. */
+export interface DnsProxyStatus { at: number; upstream: string; queries: number; upstream_ok: number; fallback: number; failed: number; last_ok: number | null; last_error: string | null }
 /** Итог последней загрузки списка рекламы службой; время — unix-секунды. */
 export interface AdblockStatus { ok: boolean; checked: number; updated: number | null; domains: number | null; url: string; error: string | null }
 export type ListsUpdate = '6h' | 'daily' | 'weekly' | 'manual'
@@ -42,6 +46,8 @@ export interface DnsConfig {
   tunnel_resolver?: string
   /** Блокировка рекламы: список HaGeZi Light (по умолчанию), Normal или своя ссылка; скачивает служба. */
   adblock?: { enabled: boolean; exceptions?: string[]; source?: AdblockSource; url?: string }
+  /** Защищённый DNS (DoH/DoT) для доменов, которые не идут через VPN. */
+  secure?: SecureDns
   /** Свои записи: домен вместе с поддоменами отвечает адресом (IPv4 или IPv6). */
   hosts?: HostRecord[]
 }
@@ -152,6 +158,7 @@ export interface Lease { mac: string; ip: string; hostname: string; device: stri
 export interface ManageResponse {
   ok: boolean
   adblock?: AdblockStatus | null
+  dns_proxy?: DnsProxyStatus | null
   mode?: string
   revision?: string
   config?: Config

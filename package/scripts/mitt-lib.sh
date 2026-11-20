@@ -218,6 +218,17 @@ lists_due() {
   [ "$c" -gt "$now" ] || [ $((now - c)) -ge "$LISTS_PERIOD" ]
 }
 
+# --- защищённый DNS (mi-tt-dns) ---
+# DNS провайдера для запасного пути прокси: resolv-файл штатного dnsmasq (uci), иначе обычные места OpenWrt
+resolv_file() {
+  local f
+  for f in "$( (uci ${MITT_UCI_CONF:+-c "$MITT_UCI_CONF"} -q get dhcp.@dnsmasq[0].resolvfile) 2>/dev/null)" \
+    "$R/tmp/resolv.conf.d/resolv.conf.auto" "$R/tmp/resolv.conf.auto"; do
+    [ -n "$f" ] && [ -f "$f" ] && { echo "$f"; return 0; }
+  done
+  echo "$R/tmp/resolv.conf.auto"
+}
+
 # --- список рекламы (mitt-adblock.sh) ---
 # пора скачивать, если блокировка включена (есть adblock.url) и: в этой загрузке роутера ещё не скачивали или нажата
 # «Обновить» (нет $STATE/adblock-next), сменилась ссылка, подошёл срок отсрочки (успех — период списков, сбой — час)

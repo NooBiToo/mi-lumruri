@@ -79,6 +79,7 @@ verify_and_try() { # подпись и хэши; пробный запуск в�
   lab_override "$st"
   "$st/mi-tt-ctl" --version >/dev/null 2>&1 || fail "mi-tt-ctl не запускается"
   "$st/mi-tt-admin" sha256 "$PKG/manifest.json" >/dev/null 2>&1 || fail "mi-tt-admin не запускается"
+  "$st/mi-tt-dns" --version >/dev/null 2>&1 || fail "mi-tt-dns не запускается"
   "$st/trusttunnel_client" --version >/dev/null 2>&1 || fail "trusttunnel_client не запускается"
   "$st/nfqws2" --version >/dev/null 2>&1; [ $? -le 1 ] || fail "nfqws2 не запускается"
   say "подпись: $(sed -n 's/.*"key_fingerprint": *"\([0-9a-f]*\)".*/\1/p' "$st/verify.json") ($( [ -n "$pinned" ] && echo "закреплённый ключ" || echo "первая установка: сверьте отпечаток"))"

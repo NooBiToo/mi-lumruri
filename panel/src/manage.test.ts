@@ -41,7 +41,7 @@ describe('профиль TrustTunnel', () => {
 
 describe('DNS', () => {
   it('по умолчанию — резолвер 1.1.1.1 без блокировки рекламы; сохраняется как null', () => {
-    expect(dnsDefault()).toEqual({ resolver: '1.1.1.1', adblock: false, adblockSource: 'light', adblockUrl: '', exceptions: '', hosts: [] })
+    expect(dnsDefault()).toMatchObject({ resolver: '1.1.1.1', adblock: false, adblockSource: 'light', adblockUrl: '', exceptions: '', hosts: [], secure: 'off' })
     expect(dnsToForm(undefined)).toEqual(dnsDefault())
     expect(formToDns(dnsDefault())).toBeNull()
     expect(formToDns({ ...dnsDefault(), resolver: '  ' })).toBeNull()
@@ -52,6 +52,15 @@ describe('DNS', () => {
     expect(dnsToForm(d ?? undefined)).toEqual({ ...dnsDefault(), resolver: '9.9.9.9', adblock: true, exceptions: 'ads.example.com\ncdn.example.org' })
     expect(formToDns({ ...dnsDefault(), adblock: true })).toEqual({ adblock: { enabled: true } })
     expect(dnsToForm({ adblock: { enabled: false } })).toEqual(dnsDefault())
+  })
+  it('защищённый DNS: готовый сервер, NextDNS и свой — туда и обратно', () => {
+    expect(formToDns({ ...dnsDefault(), secure: 'doh' })).toEqual({ secure: { protocol: 'doh', server: 'cloudflare' } })
+    expect(formToDns({ ...dnsDefault(), secure: 'dot', secureServer: 'nextdns', nextdnsId: ' ABC123 ', secureUrl: 'лишнее' }))
+      .toEqual({ secure: { protocol: 'dot', server: 'nextdns', nextdns_id: 'abc123' } })
+    const c = formToDns({ ...dnsDefault(), secure: 'doh', secureServer: 'custom', secureUrl: ' https://dns.example/q ', secureIps: '203.0.113.5, 2001:db8::5' })
+    expect(c).toEqual({ secure: { protocol: 'doh', server: 'custom', url: 'https://dns.example/q', ips: ['203.0.113.5', '2001:db8::5'] } })
+    expect(dnsToForm(c ?? undefined)).toMatchObject({ secure: 'doh', secureServer: 'custom', secureIps: '203.0.113.5, 2001:db8::5' })
+    expect(formToDns({ ...dnsDefault(), secure: 'off', secureServer: 'google' })).toBeNull()
   })
   it('список рекламы: Light не пишется, Normal и своя ссылка — туда и обратно', () => {
     expect(formToDns({ ...dnsDefault(), adblock: true, adblockSource: 'normal' })).toEqual({ adblock: { enabled: true, source: 'normal' } })

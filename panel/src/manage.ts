@@ -1,6 +1,6 @@
 // Формы без DOM: профиль TrustTunnel ↔ Profile (экран «Сервер»), DNS (экран «Дополнительно»).
 
-import type { AdblockSource, DnsConfig, Endpoint, HostRecord, Profile, ProfileSecret } from './api'
+import type { AdblockSource, DnsConfig, Endpoint, HostRecord, SecureDns, SecureServer, Profile, ProfileSecret } from './api'
 
 export interface ProfileForm {
   id: string
@@ -53,17 +53,37 @@ export function formToSecret(f: ProfileForm): ProfileSecret | null {
 /** Резолвер туннеля по умолчанию (controller/src/model.rs: DEFAULT_TUNNEL_RESOLVER). */
 export const DEFAULT_TUNNEL_RESOLVER = '1.1.1.1'
 
-export interface DnsForm { resolver: string; adblock: boolean; adblockSource: AdblockSource; adblockUrl: string; exceptions: string; hosts: HostRecord[] }
+/** Защищённый DNS в форме: выключен, DoH или DoT; сервер — готовый или свой (ссылка/имя и IP через запятую). */
+export type SecureMode = 'off' | 'doh' | 'dot'
+export interface DnsForm {
+  resolver: string; adblock: boolean; adblockSource: AdblockSource; adblockUrl: string; exceptions: string; hosts: HostRecord[]
+  secure: SecureMode; secureServer: SecureServer; nextdnsId: string; secureUrl: string; secureIps: string
+}
 
 export function dnsDefault(): DnsForm {
-  return { resolver: DEFAULT_TUNNEL_RESOLVER, adblock: false, adblockSource: 'light', adblockUrl: '', exceptions: '', hosts: [] }
+  return { resolver: DEFAULT_TUNNEL_RESOLVER, adblock: false, adblockSource: 'light', adblockUrl: '', exceptions: '', hosts: [],
+    secure: 'off', secureServer: 'cloudflare', nextdnsId: '', secureUrl: '', secureIps: '' }
 }
 
 export function dnsToForm(d: DnsConfig | undefined): DnsForm {
   if (!d) return dnsDefault()
+  const s = d.secure
   return { resolver: d.tunnel_resolver ?? DEFAULT_TUNNEL_RESOLVER, adblock: !!d.adblock?.enabled, adblockSource: d.adblock?.source ?? 'light',
     adblockUrl: d.adblock?.url ?? '', exceptions: (d.adblock?.exceptions ?? []).join('\n'),
-    hosts: (d.hosts ?? []).map((h) => ({ domain: h.domain, address: h.address })) }
+    hosts: (d.hosts ?? []).map((h) => ({ domain: h.domain, address: h.address })),
+    secure: s?.protocol ?? 'off', secureServer: s?.server ?? 'cloudflare', nextdnsId: s?.nextdns_id ?? '', secureUrl: s?.url ?? '', secureIps: (s?.ips ?? []).join(', ') }
+}
+
+/** Раздел `secure` из формы: поля NextDNS и своего сервера — только для них. Точнее проверит контроллер. */
+function formToSecure(f: DnsForm): SecureDns | null {
+  if (f.secure === 'off') return null
+  const s: SecureDns = { protocol: f.secure, server: f.secureServer }
+  if (f.secureServer === 'nextdns') s.nextdns_id = f.nextdnsId.trim().toLowerCase()
+  if (f.secureServer === 'custom') {
+    s.url = f.secureUrl.trim()
+    s.ips = f.secureIps.split(/[\s,;]+/).filter(Boolean)
+  }
+  return s
 }
 
 /** Настройки DNS из формы; всё по умолчанию — null (контроллер возьмёт 1.1.1.1 и не блокирует рекламу). Адрес и домены проверяет контроллер. */
@@ -77,6 +97,8 @@ export function formToDns(f: DnsForm): DnsConfig | null {
   if (f.adblock || exceptions.length || f.adblockSource !== 'light') {
     d.adblock = { enabled: f.adblock, ...(exceptions.length ? { exceptions } : {}), ...(f.adblockSource !== 'light' ? { source: f.adblockSource } : {}), ...(url ? { url } : {}) }
   }
+  const secure = formToSecure(f)
+  if (secure) d.secure = secure
   if (f.hosts.length) d.hosts = f.hosts.map((h) => ({ domain: h.domain, address: h.address }))
   return Object.keys(d).length ? d : null
 }

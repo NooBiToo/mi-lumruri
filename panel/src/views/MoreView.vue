@@ -84,7 +84,42 @@ const adblockText = computed(() => {
   return `${(a.domains ?? 0).toLocaleString('ru-RU')} доменов · список ${a.updated ? `от ${when(a.updated)}` : 'загружен'} · проверен ${when(a.checked)}`
 })
 
+// ---- защищённый DNS (DoH/DoT) ----
+const SECURE_MODES = [{ value: 'off' as const, label: 'Выключен' }, { value: 'doh' as const, label: 'DoH' }, { value: 'dot' as const, label: 'DoT' }]
+const SECURE_SERVERS = [
+  { id: 'cloudflare' as const, name: 'Cloudflare', desc: 'Быстрый, без фильтров' },
+  { id: 'quad9' as const, name: 'Quad9', desc: 'Не открывает опасные сайты' },
+  { id: 'google' as const, name: 'Google', desc: 'Надёжный, без фильтров' },
+  { id: 'adguard' as const, name: 'AdGuard DNS', desc: 'Блокирует рекламу и трекеры' },
+  { id: 'nextdns' as const, name: 'NextDNS', desc: 'Свои фильтры, нужен ID профиля' },
+  { id: 'custom' as const, name: 'Свой сервер', desc: 'Ссылка или имя и IP-адреса' },
+]
+// DoH у Quad9 не работает (только HTTP/2): при переключении на DoH — Cloudflare
+watch(() => draft.value.dns.secure, (m) => { if (m === 'doh' && draft.value.dns.secureServer === 'quad9') draft.value.dns.secureServer = 'cloudflare' })
+/** Мягкая проверка до сохранения: NextDNS — 6 символов, свой — ссылка/имя и хотя бы один IP. Точнее проверит контроллер. */
+const secureOk = computed(() => {
+  const f = draft.value.dns
+  if (f.secure === 'off') return true
+  if (f.secureServer === 'nextdns') return /^[0-9a-f]{6}$/i.test(f.nextdnsId.trim())
+  if (f.secureServer !== 'custom') return true
+  const url = f.secureUrl.trim()
+  const urlOk = f.secure === 'doh' ? /^https:\/\/[a-z0-9.-]+(:\d+)?(\/\S*)?$/i.test(url) : /^[a-z0-9.-]+\.[a-z0-9-]+(:\d+)?$/i.test(url)
+  return urlOk && f.secureIps.split(/[\s,;]+/).filter(Boolean).length > 0
+})
+/** Состояние прокси: только если он включён в сохранённых настройках и пишет состояние. */
+const secureState = computed(() => {
+  const p = service.value?.dns_proxy
+  if (!p || !config.value?.dns?.secure || dirty.value) return null
+  const via = p.upstream.startsWith('dot') ? 'DoT' : 'DoH'
+  if (!p.upstream_ok && p.fallback) return { tone: 'warn', text: `Сервер недоступен — ответы идут через DNS провайдера${p.last_error ? `: ${p.last_error}` : ''}` }
+  // единичные сбои (например, при загрузке, пока часы роутера не выставлены) — не повод для предупреждения
+  if (p.fallback) return { tone: p.fallback * 20 > p.upstream_ok + p.fallback ? 'warn' : 'ok',
+    text: `Работает (${via}): ответов ${p.upstream_ok}, через провайдера при сбоях — ${p.fallback}${p.last_error ? ` · последняя ошибка: ${p.last_error}` : ''}` }
+  return { tone: 'ok', text: p.queries ? `Работает (${via}): ответов через защищённый сервер — ${p.upstream_ok}` : `Включён (${via}), вопросов пока не было` }
+})
+
 function blocker(): Blocker | null {
+  if (!secureOk.value) return { text: 'Защищённый DNS: проверьте ID NextDNS или адрес своего сервера' }
   if (!adblockUrlOk.value) return { text: 'Ссылка на список рекламы — https://…' }
   return resolverOk.value ? null : { text: 'Свой DNS-сервер — адрес IPv4, например 1.1.1.1.' }
 }
@@ -179,6 +214,49 @@ useAutosave({
           <InputText id="dns" v-model="draft.dns.resolver" class="num" placeholder="например, 1.0.0.1" inputmode="decimal" :invalid="!resolverOk" aria-describedby="dns-hint" />
           <span id="dns-hint" :class="resolverOk ? 'field__hint' : 'field__error'">{{ resolverOk ? 'Публичный адрес IPv4.' : 'Нужен адрес IPv4, например 1.0.0.1.' }}</span>
         </div>
+      </div>
+
+      <div class="setblock" role="group" aria-labelledby="secure-title">
+        <span class="setrow__text">
+          <span id="secure-title" class="setrow__title">Защищённый DNS для остальных сайтов</span>
+          <span class="setrow__desc">Адреса сайтов не через VPN (в том числе с обходом блокировок) роутер узнаёт по шифрованному каналу —
+            провайдер не видит и не подменяет ответы. Если сервер недоступен, роутер временно спрашивает DNS провайдера, чтобы интернет не пропадал</span>
+        </span>
+        <Segmented v-model="draft.dns.secure" class="self-start" :options="SECURE_MODES" label="Защищённый DNS" name="secure-mode" />
+        <template v-if="draft.dns.secure !== 'off'">
+          <p v-if="draft.dns.secure === 'dot'" class="dns__note">Провайдеры в России часто блокируют DoT (порт 853). Если в состоянии ниже ответы идут через провайдера — выберите DoH</p>
+          <div class="dns" role="radiogroup" aria-label="Сервер защищённого DNS">
+            <label v-for="o in SECURE_SERVERS" :key="o.id" :class="['dns__opt', { 'dns__opt--on': draft.dns.secureServer === o.id, 'dns__opt--off': o.id === 'quad9' && draft.dns.secure === 'doh' }]">
+              <input v-model="draft.dns.secureServer" type="radio" name="secure-server" class="dns__radio" :value="o.id" :disabled="o.id === 'quad9' && draft.dns.secure === 'doh'" />
+              <ServiceLogo :icon="dnsIcon(o.id)" />
+              <span class="dns__text">
+                <span class="dns__name">{{ o.name }}</span>
+                <span class="dns__desc">{{ o.id === 'quad9' && draft.dns.secure === 'doh' ? 'Только DoT: DoH у Quad9 — HTTP/2' : o.desc }}</span>
+              </span>
+            </label>
+          </div>
+          <div v-if="draft.dns.secureServer === 'nextdns'" class="field dns__custom">
+            <label for="nextdns-id" class="field__label">ID профиля NextDNS</label>
+            <InputText id="nextdns-id" v-model="draft.dns.nextdnsId" class="num" placeholder="abc123" spellcheck="false" autocomplete="off" :invalid="!secureOk" />
+            <span class="field__hint">6 символов из личного кабинета NextDNS (раздел «Настройка»)</span>
+          </div>
+          <div v-if="draft.dns.secureServer === 'custom'" class="row2 dns__custom--wide">
+            <div class="field">
+              <label for="secure-url" class="field__label">{{ draft.dns.secure === 'doh' ? 'Ссылка DoH' : 'Имя сервера DoT' }}</label>
+              <InputText id="secure-url" v-model="draft.dns.secureUrl" :placeholder="draft.dns.secure === 'doh' ? 'https://dns.example/dns-query' : 'dns.example'"
+                spellcheck="false" autocomplete="off" :invalid="!secureOk" />
+            </div>
+            <div class="field">
+              <label for="secure-ips" class="field__label">IP-адреса сервера</label>
+              <InputText id="secure-ips" v-model="draft.dns.secureIps" class="num" placeholder="203.0.113.5, 203.0.113.6" spellcheck="false" autocomplete="off" :invalid="!secureOk" />
+            </div>
+            <span class="field__hint">IP нужны, чтобы подключаться к серверу без DNS: до 4 адресов через запятую</span>
+          </div>
+          <span :class="['adblock__state', { 'adblock__state--bad': secureState?.tone === 'warn' }]">
+            <span :class="['led', `led--${secureState?.tone ?? 'idle'}`]" aria-hidden="true" />
+            <span class="meta">{{ secureState?.text ?? (dirty ? 'Сохраняется…' : 'Роутер включит защищённый DNS в течение минуты') }}</span>
+          </span>
+        </template>
       </div>
 
       <div class="setblock" role="group" aria-labelledby="lists-title">

@@ -84,9 +84,82 @@ pub struct DnsConfig {
     pub tunnel_resolver: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adblock: Option<AdblockConfig>,
+    /// Защищённый DNS (DoH/DoT) для доменов, которые не идут через туннель: их вопросы dnsmasq отдаёт mi-tt-dns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secure: Option<SecureDns>,
     /// Свои записи: домен вместе с поддоменами отвечает заданным адресом (например, домашний сервер за Traefik).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hosts: Vec<HostRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SecureDns {
+    pub protocol: SecureProto,
+    pub server: SecureServer,
+    /// NextDNS: ID профиля (6 символов 0-9a-f) из личного кабинета.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nextdns_id: Option<String>,
+    /// Свой сервер: ссылка DoH `https://имя/путь` или имя DoT `имя[:порт]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Свой сервер: его IP-адреса (подключение без DNS), 1–4.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ips: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SecureProto {
+    Doh,
+    Dot,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SecureServer {
+    Cloudflare,
+    Quad9,
+    Google,
+    Adguard,
+    Nextdns,
+    Custom,
+}
+
+/// Порт, на котором mi-tt-dns ждёт вопросы dnsmasq (только 127.0.0.1).
+pub const DNS_PROXY_PORT: u16 = 5453;
+
+impl SecureDns {
+    /// Параметры mi-tt-dns (по одному в строке): адрес приёма, сервер и его IP. Запасной путь и файл состояния
+    /// добавляет служба. None — свой сервер или NextDNS заданы не полностью (это ловит проверка настроек).
+    pub fn proxy_args(&self) -> Option<Vec<String>> {
+        let (doh, dot, ips): (String, String, Vec<String>) = match self.server {
+            SecureServer::Cloudflare => ("https://cloudflare-dns.com/dns-query".into(), "one.one.one.one".into(), vec!["1.1.1.1".into(), "1.0.0.1".into()]),
+            SecureServer::Quad9 => ("https://dns.quad9.net/dns-query".into(), "dns.quad9.net".into(), vec!["9.9.9.9".into(), "149.112.112.112".into()]),
+            SecureServer::Google => ("https://dns.google/dns-query".into(), "dns.google".into(), vec!["8.8.8.8".into(), "8.8.4.4".into()]),
+            SecureServer::Adguard => ("https://dns.adguard-dns.com/dns-query".into(), "dns.adguard-dns.com".into(), vec!["94.140.14.14".into(), "94.140.15.15".into()]),
+            SecureServer::Nextdns => {
+                let id = self.nextdns_id.as_deref()?;
+                (format!("https://dns.nextdns.io/{id}"), format!("{id}.dns.nextdns.io"), vec!["45.90.28.0".into(), "45.90.30.0".into()])
+            }
+            SecureServer::Custom => {
+                let u = self.url.clone()?;
+                if self.ips.is_empty() {
+                    return None;
+                }
+                (u.clone(), u, self.ips.clone())
+            }
+        };
+        let mut a = vec!["--listen".to_string(), format!("127.0.0.1:{DNS_PROXY_PORT}")];
+        match self.protocol {
+            SecureProto::Doh => a.extend(["--doh".to_string(), doh]),
+            SecureProto::Dot => a.extend(["--dot".to_string(), dot]),
+        }
+        for ip in ips {
+            a.extend(["--ip".to_string(), ip]);
+        }
+        Some(a)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -379,5 +452,29 @@ mod schedule_tests {
         assert_eq!(serde_json::from_str::<ScheduleConfig>(r#"{"lists":"manual"}"#).unwrap().file(), "lists=0\nzapret_check=0\n");
         assert!(serde_json::from_str::<ScheduleConfig>(r#"{"lists":"hourly"}"#).is_err());
         assert_eq!(serde_json::to_string(&s).unwrap(), r#"{"lists":"6h","zapret_check":"weekly"}"#);
+    }
+}
+
+#[cfg(test)]
+mod secure_dns_tests {
+    use super::*;
+
+    fn sd(json: &str) -> SecureDns {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn proxy_args_for_presets_and_custom() {
+        let a = sd(r#"{"protocol":"doh","server":"cloudflare"}"#).proxy_args().unwrap();
+        assert_eq!(a, ["--listen", "127.0.0.1:5453", "--doh", "https://cloudflare-dns.com/dns-query", "--ip", "1.1.1.1", "--ip", "1.0.0.1"]);
+        let q = sd(r#"{"protocol":"dot","server":"quad9"}"#).proxy_args().unwrap();
+        assert_eq!(&q[2..4], ["--dot", "dns.quad9.net"]);
+        let n = sd(r#"{"protocol":"dot","server":"nextdns","nextdns_id":"abc123"}"#).proxy_args().unwrap();
+        assert_eq!(&n[2..4], ["--dot", "abc123.dns.nextdns.io"]);
+        assert!(sd(r#"{"protocol":"doh","server":"nextdns"}"#).proxy_args().is_none());
+        let c = sd(r#"{"protocol":"doh","server":"custom","url":"https://dns.example/q","ips":["203.0.113.5"]}"#).proxy_args().unwrap();
+        assert_eq!(&c[2..], ["--doh", "https://dns.example/q", "--ip", "203.0.113.5"]);
+        assert!(sd(r#"{"protocol":"doh","server":"custom","url":"https://dns.example/q"}"#).proxy_args().is_none());
+        assert!(serde_json::from_str::<SecureDns>(r#"{"protocol":"doq","server":"google"}"#).is_err());
     }
 }

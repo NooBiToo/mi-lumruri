@@ -11,6 +11,7 @@ export const CHECK_TITLES: Record<string, string> = {
   route: 'Маршрут в туннель',
   firewall: 'Сортировка трафика',
   dns: 'DNS роутера',
+  secure: 'Защищённый DNS (DoH/DoT)',
   zapret: 'Обход блокировок (Zapret)',
   restarts: 'Стабильность программ',
 }

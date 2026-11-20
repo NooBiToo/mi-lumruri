@@ -329,6 +329,8 @@ label.setrow { cursor: pointer; }
 }
 .dns__opt:hover { border-color: var(--line-strong); }
 .dns__opt--on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.dns__opt--off { opacity: 0.5; cursor: not-allowed; }
+.dns__opt--off .dns__radio { cursor: not-allowed; }
 .dns__opt:has(.dns__radio:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
 .dns__radio { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
 .dns__opt .logo { width: 2.25rem; height: 2.25rem; }

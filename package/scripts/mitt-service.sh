@@ -7,7 +7,7 @@ D="$(cd "$(dirname "$0")" && pwd)"
 . "$D/mitt-lib.sh"
 INTERVAL="${MITT_INTERVAL:-5}"
 
-engines_stop() { for n in trusttunnel nfqws2; do rm -f "$STATE/$n.wanted"; pid_stop "$n"; done; }
+engines_stop() { for n in trusttunnel nfqws2 dnsproxy; do rm -f "$STATE/$n.wanted"; pid_stop "$n"; done; }
 engines_start() {
   if [ -f "$RENDER/client.toml" ]; then
     touch "$STATE/trusttunnel.wanted"
@@ -19,6 +19,12 @@ engines_start() {
     touch "$STATE/nfqws2.wanted"
     # shellcheck disable=SC2046 — аргументы по одному в строке, без пробелов (формирует рендер)
     pid_alive nfqws2 || { zapret_readable; start_bg nfqws2 ${MITT_NFQWS_WRAP:-} "$BIN/nfqws2" $(cat "$RENDER/nfqws2.args"); }
+  fi
+  # защищённый DNS: до dns_sync (dnsmasq переключается на него, только когда прокси уже слушает)
+  if [ -f "$RENDER/dns-proxy.args" ]; then
+    touch "$STATE/dnsproxy.wanted"
+    # shellcheck disable=SC2046 — аргументы по одному в строке, без пробелов (формирует рендер)
+    pid_alive dnsproxy || start_bg dnsproxy "$BIN/mi-tt-dns" $(cat "$RENDER/dns-proxy.args") --fallback "$(resolv_file)" --status "$STATE/dns-proxy.json"
   fi
   return 0
 }
@@ -85,7 +91,7 @@ while [ -f "$STATE/service.wanted" ]; do
   if ! pid_alive adblock-update && adblock_due; then
     start_bg adblock-update sh "$SCR/mitt-adblock.sh"
   fi
-  for e in trusttunnel nfqws2; do
+  for e in trusttunnel nfqws2 dnsproxy; do
     if [ -f "$STATE/$e.wanted" ] && ! pid_alive "$e"; then
       mlog "движок $e завершился — перезапуск"
       # время перезапусков — для диагностики (падения по кругу за последние минуты), последние 50

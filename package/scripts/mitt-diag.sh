@@ -67,6 +67,19 @@ else
   ch dns skip "свои настройки DNS не нужны"
 fi
 
+if [ -f "$RENDER/dns-proxy.args" ]; then
+  if ! pid_alive dnsproxy; then ch secure bad "прокси DoH/DoT не запущен"
+  elif "$BIN/mi-tt-dns" --probe 127.0.0.1:5453 example.com >/dev/null 2>&1; then
+    fb="$(sed -n 's/.*"fallback":\([0-9]*\).*/\1/p' "$STATE/dns-proxy.json" 2>/dev/null)"; ok="$(sed -n 's/.*"upstream_ok":\([0-9]*\).*/\1/p' "$STATE/dns-proxy.json" 2>/dev/null)"
+    err="$(sed -n 's/.*"last_error":"\([^"]*\)".*/\1/p' "$STATE/dns-proxy.json" 2>/dev/null)"
+    if [ "${ok:-0}" -eq 0 ] && [ "${fb:-0}" -gt 0 ]; then ch secure warn "сервер недоступен, ответы идут через DNS провайдера${err:+: $err}"
+    elif [ $(( ${fb:-0} * 20 )) -gt $(( ${ok:-0} + ${fb:-0} )) ]; then ch secure warn "работает, но заметная часть ответов ($fb) шла через DNS провайдера${err:+, последняя ошибка: $err}"
+    else ch secure ok "ответов через защищённый сервер: ${ok:-0}$( [ "${fb:-0}" -gt 0 ] && echo ", через провайдера при сбоях: $fb")"; fi
+  else ch secure bad "прокси DoH/DoT не отвечает"; fi
+else
+  ch secure skip "защищённый DNS выключен"
+fi
+
 if [ -f "$RENDER/nfqws2.args" ]; then
   pid_alive nfqws2 && ch zapret ok "nfqws2 работает" || ch zapret bad "nfqws2 не запущен"
 else
@@ -76,7 +89,7 @@ fi
 # программы, которые падают и перезапускаются по кругу (служба проверяет их раз в несколько секунд)
 # считаются только перезапуски за последние 10 минут (служба пишет их время в $STATE/restarts)
 since=$(( $(date +%s) - 600 )); loop=""; recent=""
-for e in trusttunnel nfqws2; do
+for e in trusttunnel nfqws2 dnsproxy; do
   c=$(awk -v s="$since" -v e="$e" '$1 >= s && $2 == e' "$STATE/restarts" 2>/dev/null | wc -l)
   if [ "$c" -ge 3 ]; then
     last="$(tail -n 1 "$LOG/$e.log" 2>/dev/null | cut -c1-120)"

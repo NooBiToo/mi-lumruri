@@ -420,6 +420,37 @@ fn check_dns(issues: &mut Vec<Issue>, d: &DnsConfig) {
             _ => issues.push(Issue::new("dns.tunnel_resolver", "bad_resolver", "резолвер туннеля — публичный IPv4-адрес DNS-сервера, например 1.1.1.1")),
         }
     }
+    if let Some(s) = &d.secure {
+        // DoH у Quad9 — только HTTP/2, а mi-tt-dns говорит HTTP/1.1 (сервер отвечает 505)
+        if s.protocol == SecureProto::Doh && s.server == SecureServer::Quad9 {
+            issues.push(Issue::new("dns.secure.server", "quad9_doh", "Quad9 по DoH работает только через HTTP/2 — выберите DoT или другой сервер"));
+        }
+        match s.server {
+            SecureServer::Nextdns => {
+                if !s.nextdns_id.as_deref().is_some_and(|i| i.len() == 6 && i.bytes().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())) {
+                    issues.push(Issue::new("dns.secure.nextdns_id", "bad_nextdns_id", "ID профиля NextDNS — 6 символов 0-9 и a-f из личного кабинета"));
+                }
+            }
+            SecureServer::Custom => {
+                let ok = match (s.protocol, s.url.as_deref()) {
+                    (SecureProto::Doh, Some(u)) => check_list_url(u) && u.trim_start_matches("https://").split(['/', ':']).next().is_some_and(|h| normalize_domain(h, 2).is_ok()),
+                    (SecureProto::Dot, Some(u)) => u.rsplit_once(':').map_or(u, |(h, p)| if p.parse::<u16>().is_ok() { h } else { u }) != ""
+                        && normalize_domain(u.rsplit_once(':').filter(|(_, p)| p.parse::<u16>().is_ok()).map_or(u, |(h, _)| h), 2).is_ok(),
+                    _ => false,
+                };
+                if !ok {
+                    issues.push(Issue::new("dns.secure.url", "bad_url", match s.protocol {
+                        SecureProto::Doh => "сервер DoH — ссылка https://имя/путь, например https://dns.example/dns-query",
+                        SecureProto::Dot => "сервер DoT — имя сервера, например dns.example или dns.example:853",
+                    }));
+                }
+                if s.ips.is_empty() || s.ips.len() > 4 || !s.ips.iter().all(|i| i.parse::<IpAddr>().is_ok_and(|a| !a.is_unspecified() && !a.is_loopback() && !a.is_multicast())) {
+                    issues.push(Issue::new("dns.secure.ips", "bad_ips", "IP-адреса сервера — от 1 до 4, через них роутер подключается без DNS"));
+                }
+            }
+            _ => {}
+        }
+    }
     if d.hosts.len() > 256 {
         issues.push(Issue::new("dns.hosts", "too_many", "не больше 256 своих записей"));
     }
@@ -556,13 +587,33 @@ mod tests {
         let rec = |d: &str, a: &str| HostRecord { domain: d.into(), address: a.into() };
         let check = |h: Vec<HostRecord>| {
             let mut i = Vec::new();
-            check_dns(&mut i, &DnsConfig { tunnel_resolver: None, adblock: None, hosts: h });
+            check_dns(&mut i, &DnsConfig { tunnel_resolver: None, adblock: None, secure: None, hosts: h });
             i.into_iter().map(|x| format!("{}:{}", x.path, x.code)).collect::<Vec<_>>()
         };
         assert!(check(vec![rec("home.example.com", "192.168.31.10"), rec("nas", "fd00::5")]).is_empty());
         assert_eq!(check(vec![rec("home.example.com", "192.168.31.10"), rec("Home.Example.com.", "192.168.31.11")]), ["dns.hosts[1].domain:duplicate"]);
         assert_eq!(check(vec![rec("*.home.example.com", "0.0.0.0")]), ["dns.hosts[0].domain:bad_domain", "dns.hosts[0].address:bad_address"]);
         assert_eq!(check(vec![rec("home.example.com", "192.168.31.10/24")]), ["dns.hosts[0].address:bad_address"]);
+    }
+
+    #[test]
+    fn secure_dns_checks() {
+        let check = |json: &str| {
+            let mut i = Vec::new();
+            let secure: SecureDns = serde_json::from_str(json).unwrap();
+            check_dns(&mut i, &DnsConfig { tunnel_resolver: None, adblock: None, secure: Some(secure), hosts: vec![] });
+            i.into_iter().map(|x| x.code).collect::<Vec<_>>()
+        };
+        assert!(check(r#"{"protocol":"doh","server":"google"}"#).is_empty());
+        assert_eq!(check(r#"{"protocol":"doh","server":"quad9"}"#), ["quad9_doh"]);
+        assert!(check(r#"{"protocol":"dot","server":"quad9"}"#).is_empty());
+        assert_eq!(check(r#"{"protocol":"doh","server":"nextdns","nextdns_id":"ABC123"}"#), ["bad_nextdns_id"]);
+        assert!(check(r#"{"protocol":"dot","server":"nextdns","nextdns_id":"abc123"}"#).is_empty());
+        assert!(check(r#"{"protocol":"doh","server":"custom","url":"https://dns.example/dns-query","ips":["203.0.113.5"]}"#).is_empty());
+        assert!(check(r#"{"protocol":"dot","server":"custom","url":"dns.example:853","ips":["203.0.113.5","2001:db8::5"]}"#).is_empty());
+        assert_eq!(check(r#"{"protocol":"doh","server":"custom","url":"http://dns.example/q","ips":["203.0.113.5"]}"#), ["bad_url"]);
+        assert_eq!(check(r#"{"protocol":"dot","server":"custom","url":"dns.example","ips":[]}"#), ["bad_ips"]);
+        assert_eq!(check(r#"{"protocol":"dot","server":"custom","url":"dns.example","ips":["127.0.0.1"]}"#), ["bad_ips"]);
     }
 
     #[test]

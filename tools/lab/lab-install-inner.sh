@@ -20,7 +20,7 @@ printf '#!/bin/sh\nexec %s -L %s %s/usr/bin/openssl "$@"\n' "$Q" "$F" "$F" >"$SB
 chmod +x "$SB"/*
 # ARM64-программы пакета — через qemu (обёртки вместо распакованных файлов, только при MITT_ROOT)
 LB="$W/labbin"; mkdir -p "$LB"
-for n in mi-tt-ctl mi-tt-admin trusttunnel_client nfqws2; do printf '#!/bin/sh\nexec %s "$0.arm64" "$@"\n' "$Q" >"$LB/$n"; done; chmod +x "$LB"/*
+for n in mi-tt-ctl mi-tt-admin mi-tt-dns trusttunnel_client nfqws2; do printf '#!/bin/sh\nexec %s "$0.arm64" "$@"\n' "$Q" >"$LB/$n"; done; chmod +x "$LB"/*
 
 newroot() { # newroot <каталог>: файловая система роутера из образа (только нужное)
   local r="$1"; rm -rf "$r"; mkdir -p "$r/data" "$r/tmp" "$r/etc/config" "$r/usr/share/xiaoqiang"
