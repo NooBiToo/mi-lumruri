@@ -15,6 +15,8 @@ CMD="${1:-install}"; [ $# -gt 0 ] && shift
 NOSTART=""; PURGE=""; NEWSTORE=""
 for a in "$@"; do case "$a" in --no-start) NOSTART=1;; --purge) PURGE=1;; --store=/*) NEWSTORE="${a#--store=}"; NEWSTORE="${NEWSTORE%/}";; *) echo "неизвестный аргумент $a"; exit 2;; esac; done
 RESERVE_DATA=$((2 * 1024 * 1024))   # оставить штатной прошивке на /data
+RESERVE_TIGHT=$((512 * 1024))       # впритык: прежний релиз удаляется после установки, отката не будет
+TIGHT=""
 RESERVE_TMP=$((16 * 1024 * 1024))   # RAM для работы движков сверх распакованных файлов
 UCI="uci ${MITT_UCI_CONF:+-c $MITT_UCI_CONF}"
 say() { echo "mi-trusttunnel: $*"; }
@@ -63,7 +65,13 @@ checks() {
       p="$(cat "$DATA/previous.ver" 2>/dev/null)"; [ -n "$p" ] && [ ! -d "$DATA/releases/$p" ] && rm -f "$DATA/previous.ver"
       have_d=$(( $(avail_kb "$R/data") * 1024 ))
     fi
-    [ "$have_d" -ge $((need_d + RESERVE_DATA)) ] || fail "на /data свободно $have_d байт, нужно $need_d + резерв $RESERVE_DATA; освободите место или храните релизы на USB: --store=/mnt/usb-…/mi-trusttunnel"
+    if [ "$have_d" -lt $((need_d + RESERVE_DATA)) ]; then
+      # /data маленький (20 МБ, большую часть занимает прошивка): ставим, а прежний релиз удаляем после установки —
+      # место вернётся, но откатиться на прошлую версию будет нельзя (настройки сохраняются)
+      [ "$have_d" -ge $((need_d + RESERVE_TIGHT)) ]         || fail "на /data свободно $have_d байт, нужно не меньше $((need_d + RESERVE_TIGHT)); храните релизы на USB: --store=/mnt/usb-…/mi-trusttunnel"
+      TIGHT=1
+      say "на /data мало места: после установки прежний релиз будет удалён, откат на него будет недоступен"
+    fi
   fi
   [ "$have_t" -ge $((need_t + RESERVE_TMP)) ] || fail "в /tmp свободно $have_t байт, нужно $need_t + резерв $RESERVE_TMP"
   t="$R/tmp/.mitt-exec.$$"; printf '#!/bin/sh\nexit 0\n' >"$t" && chmod 700 "$t" && "$t" || { rm -f "$t"; fail "в /tmp нельзя исполнять файлы"; }
@@ -176,6 +184,8 @@ install_release() {
     setver current "$ver"
   fi
   [ -n "$oldstore" ] && rm -rf "$oldstore/releases"
+  # места впритык: прежний релиз не хранится (см. проверку места)
+  [ -n "$TIGHT" ] && rm -f "$DATA/previous.ver"
   # старые релизы, кроме current и previous, удаляются (место в хранилище)
   local keep_c keep_p
   keep_c="$(cat "$DATA/current.ver")"; keep_p="$(cat "$DATA/previous.ver" 2>/dev/null)"
