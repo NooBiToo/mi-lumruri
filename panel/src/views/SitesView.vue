@@ -10,6 +10,7 @@ import ManualBanner from './ManualBanner.vue'
 import Segmented from '../components/Segmented.vue'
 import ServiceLogo from '../components/ServiceLogo.vue'
 import DomainList from '../components/DomainList.vue'
+import ListsCard from '../components/ListsCard.vue'
 
 const emit = defineEmits<{ navigate: [tab: 'server' | 'devices' | 'zapret'] }>()
 
@@ -175,10 +176,12 @@ onMounted(async () => {
             </div>
           </div>
           <p v-if="!groups.length" class="muted">Ничего не нашлось. Сайт можно добавить в свои списки ниже.</p>
-          <p class="hint">Списки сайтов обновляются сами раз в сутки. «Всё заблокированное в России» — большой общий список: его хватает, если не знаете, что выбрать.</p>
+          <p class="hint">«Всё заблокированное в России» — большой общий список: его хватает, если не знаете, что выбрать.</p>
         </template>
         <Message v-else severity="warn" :closable="false">Каталог сайтов не загрузился. Обновите страницу.</Message>
       </div>
+
+      <ListsCard />
 
       <DomainList v-if="draft.mode === 'selected'" id="custom" v-model="draft.custom" title="Свои сайты через VPN" placeholder="example.com"
         sub="Сайты, которых нет среди сервисов. Поддомены тоже пойдут через VPN." empty="Пока пусто. Добавьте адрес сайта, например example.com." />

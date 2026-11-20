@@ -3,11 +3,10 @@ import { computed, ref, watch } from 'vue'
 import InputText from 'primevue/inputtext'
 import ToggleSwitch from 'primevue/toggleswitch'
 import { ChevronDown, ChevronRight } from 'lucide-vue-next'
-import type { ListsUpdate } from '../api'
 import { CUSTOM_DNS, DNS_PRESETS, dnsPresetIp, dnsPresetOf, dnsToForm, formToDns, type DnsForm } from '../manage'
 import { config, save, service } from '../store'
 import { when } from '../status'
-import { saveNow, useAutosave, type Blocker } from '../autosave'
+import { useAutosave, type Blocker } from '../autosave'
 import { dnsIcon } from '../brand'
 import ServiceLogo from '../components/ServiceLogo.vue'
 import Segmented from '../components/Segmented.vue'
@@ -38,19 +37,6 @@ function chooseDns(id: string) {
 
 const totpHelp = ref(false)
 
-// ---- обновление готовых списков сайтов: сохраняется сразу ----
-const LISTS_UPDATES = [
-  { value: '6h' as const, label: 'Каждые 6 часов' }, { value: 'daily' as const, label: 'Раз в сутки' },
-  { value: 'weekly' as const, label: 'Раз в неделю' }, { value: 'manual' as const, label: 'Вручную' },
-]
-const listsUpdate = ref<ListsUpdate>(config.value?.schedule?.lists ?? 'daily')
-watch(() => config.value?.schedule?.lists, (v) => { listsUpdate.value = v ?? 'daily' })
-watch(listsUpdate, async (v) => {
-  const c = config.value
-  if (!c || (c.schedule?.lists ?? 'daily') === v) return
-  const ok = await saveNow(() => save({ ...c, schedule: { ...c.schedule, lists: v } }, ''))
-  if (!ok) listsUpdate.value = config.value?.schedule?.lists ?? 'daily'
-})
 
 // ---- автосохранение ----
 /** Адрес DNS проверяем мягко до сохранения, чтобы не отправлять недописанный «1.1». Точнее проверит контроллер. */
@@ -259,13 +245,6 @@ useAutosave({
         </template>
       </div>
 
-      <div class="setblock" role="group" aria-labelledby="lists-title">
-        <span class="setrow__text">
-          <span id="lists-title" class="setrow__title">Обновление списков сайтов</span>
-          <span class="setrow__desc">Как часто роутер проверяет новые версии готовых списков (allow-domains). «Вручную» — только по кнопке «Обновить» на «Обзоре»</span>
-        </span>
-        <Segmented v-model="listsUpdate" class="self-start" :options="LISTS_UPDATES" label="Обновление списков сайтов" name="lists-update" />
-      </div>
 
       <div class="setrow setrow--top">
         <span class="setrow__text">

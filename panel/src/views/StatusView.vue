@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
-import { ArrowRight, RefreshCw } from 'lucide-vue-next'
+import { ArrowRight } from 'lucide-vue-next'
 import { api, type ZapretTestState } from '../api'
-import { catalog, config, leases, lists, loadLeases, loadLists, loadStatus, notify, profile, service, serverReady, simple, simpleState, tunnel } from '../store'
+import { catalog, config, leases, lists, loadLeases, loadLists, loadStatus, profile, service, serverReady, simple, simpleState, tunnel } from '../store'
 import { AUTO, deviceRows, plural, when, zapretIdle } from '../status'
 import { avatarHue, initials } from '../ui'
 import TopoMap, { type TopoBranch, type Tone } from '../components/TopoMap.vue'
@@ -78,28 +78,11 @@ const hubTopo = computed(() => ({ tone: tunnel.value.tone as Tone, meta: tunnel.
 const zapretAuto = computed(() => (config.value?.zapret?.strategy ?? AUTO) === AUTO && (config.value?.zapret?.youtube ?? AUTO) === AUTO)
 
 // ---- списки сайтов ----
-const updating = ref(false)
 const listsStatus = computed(() => lists.value?.status ?? null)
 const snapshot = computed(() => {
   const d = catalog.value?.date
   return d ? new Date(`${d}T00:00:00`).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) : null
 })
-let listsTimer: number | undefined
-async function updateLists() {
-  updating.value = true
-  try {
-    const r = await api.updateLists()
-    if (r.status === 202) {
-      notify.show('info', 'Проверяю обновления списков', 'Это займёт до минуты.')
-      listsTimer = window.setTimeout(() => void loadLists().finally(() => (updating.value = false)), 20000)
-    } else {
-      notify.show('error', 'Не получилось', r.body.error?.message)
-      updating.value = false
-    }
-  } catch {
-    updating.value = false
-  }
-}
 onMounted(async () => {
   void loadStatus()
   void loadLists()
@@ -107,7 +90,6 @@ onMounted(async () => {
   const r = await api.zapretTest()
   if (r.body.ok && r.body.test) test.value = r.body.test
 })
-onBeforeUnmount(() => clearTimeout(listsTimer))
 </script>
 
 <template>
@@ -155,9 +137,7 @@ onBeforeUnmount(() => clearTimeout(listsTimer))
         <span :class="['meta', { 'warn-text': listsStatus && !listsStatus.ok }]">
           Списки сайтов {{ listsStatus?.updated ? `обновлены ${when(listsStatus.updated)}` : snapshot ? `от ${snapshot}, из установки` : '' }}{{ listsStatus && !listsStatus.ok ? ' · проверка не удалась' : '' }}
         </span>
-        <button type="button" class="link-btn" :disabled="updating || lists?.requested" @click="updateLists">
-          <RefreshCw :size="14" :class="{ spin: updating || lists?.requested }" aria-hidden="true" />Обновить
-        </button>
+        <button type="button" class="link-btn" @click="emit('navigate', 'sites')">Настроить</button>
       </div>
       <p v-if="!simple.enabled" class="hint">VPN выключен: выбор сохранён и заработает, когда вы включите VPN</p>
     </div>
