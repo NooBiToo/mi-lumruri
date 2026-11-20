@@ -52,8 +52,18 @@ checks() {
     have_d=$(( $(avail_kb "$up") * 1024 ))
     [ "$have_d" -ge $((need_d + RESERVE_DATA)) ] || fail "в $up свободно $have_d байт, нужно $need_d + резерв $RESERVE_DATA"
   else
-    # при обновлении прежний релиз остаётся для отката: нужен объём ещё одного релиза
-    [ "$have_d" -ge $((need_d + RESERVE_DATA)) ] || fail "на /data свободно $have_d байт, нужно $need_d + резерв $RESERVE_DATA"
+    # при обновлении прежний релиз остаётся для отката: нужен объём ещё одного релиза. Не хватает — удаляются релизы,
+    # кроме текущего: после установки их удалили бы всё равно (для отката останется нынешний текущий)
+    if [ "$have_d" -lt $((need_d + RESERVE_DATA)) ] && [ -d "$DATA/releases" ]; then
+      keep="$(cat "$DATA/current.ver" 2>/dev/null)"
+      for d in "$DATA"/releases/*; do
+        [ -d "$d" ] && [ "$(basename "$d")" != "$keep" ] || continue
+        rm -rf "$d" && say "место на /data: удалён старый релиз $(basename "$d") (откат — на текущий $keep)"
+      done
+      p="$(cat "$DATA/previous.ver" 2>/dev/null)"; [ -n "$p" ] && [ ! -d "$DATA/releases/$p" ] && rm -f "$DATA/previous.ver"
+      have_d=$(( $(avail_kb "$R/data") * 1024 ))
+    fi
+    [ "$have_d" -ge $((need_d + RESERVE_DATA)) ] || fail "на /data свободно $have_d байт, нужно $need_d + резерв $RESERVE_DATA; освободите место или храните релизы на USB: --store=/mnt/usb-…/mi-trusttunnel"
   fi
   [ "$have_t" -ge $((need_t + RESERVE_TMP)) ] || fail "в /tmp свободно $have_t байт, нужно $need_t + резерв $RESERVE_TMP"
   t="$R/tmp/.mitt-exec.$$"; printf '#!/bin/sh\nexit 0\n' >"$t" && chmod 700 "$t" && "$t" || { rm -f "$t"; fail "в /tmp нельзя исполнять файлы"; }
