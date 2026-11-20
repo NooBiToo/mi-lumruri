@@ -133,6 +133,8 @@ admin_apply() { # admin_apply <метка> [--guard-only]
   mlog "apply $tag $*: код $rc"; return $rc
 }
 
+# пауза 0,2 с: sleep в BusyBox стока не понимает дробные секунды (сразу выходит с ошибкой), usleep — понимает
+nap() { usleep 200000 2>/dev/null || sleep 1; }
 # TUN клиента готов: есть, поднят и с IPv4-адресом (клиент настраивает его не сразу после создания)
 tun_ready() { ip link show mitt0 2>/dev/null | grep -q '[<,]UP[,>]' && ip -4 addr show dev mitt0 2>/dev/null | grep -q 'inet '; }
 pid_alive() { [ -f "$STATE/$1.pid" ] && kill -0 "$(cat "$STATE/$1.pid")" 2>/dev/null; }

@@ -10,14 +10,14 @@ INTERVAL="${MITT_INTERVAL:-5}"
 engines_stop() {
   for n in trusttunnel nfqws2 dnsproxy dnstunnel; do rm -f "$STATE/$n.wanted"; pid_stop "$n"; done
   # прежний TUN удаляется ядром не сразу: новый клиент и ожидание ниже не должны застать старый mitt0
-  local i=0; while [ $i -lt 50 ] && ip link show mitt0 >/dev/null 2>&1; do sleep 0.2; i=$((i + 1)); done
+  local i=0; while [ $i -lt 50 ] && ip link show mitt0 >/dev/null 2>&1; do nap; i=$((i + 1)); done
 }
 engines_start() {
   if [ -f "$RENDER/client.toml" ]; then
     touch "$STATE/trusttunnel.wanted"
     pid_alive trusttunnel || start_bg trusttunnel ${MITT_TT_WRAP:-} "$BIN/trusttunnel_client" -c "$RENDER/client.toml"
     # TUN должен быть поднят и с адресом до apply: маршрут таблицы 3100 ссылается на него
-    local i=0; while [ $i -lt 75 ] && ! tun_ready; do sleep 0.2; i=$((i + 1)); done
+    local i=0; while [ $i -lt 75 ] && ! tun_ready; do nap; i=$((i + 1)); done
   fi
   if [ -f "$RENDER/nfqws2.args" ]; then
     touch "$STATE/nfqws2.wanted"
