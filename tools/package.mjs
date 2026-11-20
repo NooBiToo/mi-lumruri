@@ -20,10 +20,10 @@ const PY = process.platform === 'win32' ? 'python' : 'python3'
 const sha = (b) => createHash('sha256').update(b).digest('hex')
 
 // --- движки ARM64 ---
-// Официальный клиент TrustTunnel (статически собранный aarch64); архив закреплён по SHA-256 релиза v1.1.12.
-const TT_VER = 'v1.1.12'
+// Официальный клиент TrustTunnel (статически собранный aarch64); архив закреплён по SHA-256 релиза v1.3.0.
+const TT_VER = 'v1.3.0'
 const TT_TGZ = join(DL, `trusttunnel_client-${TT_VER}-linux-aarch64.tar.gz`)
-const TT_TGZ_SHA = '10402be7e715f35380e8bcf67e2d8f2ceb9fad81eef8274a472e3a085a0d5cc1'
+const TT_TGZ_SHA = '837ec64520d546cdf8e7a327614589f64dc6c4f30e408e3788de7bfaef05b52b'
 mkdirSync(DL, { recursive: true })
 if (!existsSync(TT_TGZ)) {
   execFileSync('curl', ['-sSfL', '--proto', '=https', '-o', TT_TGZ, `https://github.com/TrustTunnel/TrustTunnelClient/releases/download/${TT_VER}/trusttunnel_client-${TT_VER}-linux-aarch64.tar.gz`])

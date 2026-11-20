@@ -411,6 +411,25 @@ fn check_endpoint(issues: &mut Vec<Issue>, path: &str, e: &Endpoint) {
             issues.push(Issue::new(format!("{path}.certificate"), "bad_certificate", m));
         }
     }
+    // client_random: «prefix[/mask]» — hex, маска той же длины; ключ — hex. Клиент берёт ключ, если заданы оба: не путаем
+    let hex = |s: &str| !s.is_empty() && s.len() <= 64 && s.len() % 2 == 0 && s.bytes().all(|c| c.is_ascii_hexdigit());
+    if let Some(r) = &e.client_random {
+        let ok = match r.split_once('/') {
+            Some((p, m)) => hex(p) && hex(m) && p.len() == m.len(),
+            None => hex(r),
+        };
+        if !ok {
+            issues.push(Issue::new(format!("{path}.client_random"), "bad_client_random", "client_random — hex-строка (чётная длина, до 64 знаков), с маской: «префикс/маска» одинаковой длины"));
+        }
+    }
+    if let Some(k) = &e.client_random_auth_key {
+        if !hex(k) {
+            issues.push(Issue::new(format!("{path}.client_random_auth_key"), "bad_client_random_auth_key", "ключ client_random — hex-строка чётной длины, до 64 знаков"));
+        }
+    }
+    if e.client_random.is_some() && e.client_random_auth_key.is_some() {
+        issues.push(Issue::new(format!("{path}.client_random"), "client_random_conflict", "задайте что-то одно: префикс client_random или ключ client_random"));
+    }
 }
 
 fn check_dns(issues: &mut Vec<Issue>, d: &DnsConfig) {
@@ -572,7 +591,7 @@ mod tests {
 
     #[test]
     fn endpoint_server_ip_or_domain() {
-        let ep = |s: &str| Endpoint { server: s.into(), port: 443, sni: None, username: "u".into(), quic: false, anti_dpi: false, certificate: None };
+        let ep = |s: &str| Endpoint { server: s.into(), port: 443, sni: None, username: "u".into(), quic: false, anti_dpi: false, certificate: None, tls_profile: None, client_random: None, client_random_auth_key: None };
         for ok in ["203.0.113.10", "2001:db8::1", "tunnel.example.com"] {
             let mut i = Vec::new();
             check_endpoint(&mut i, "e", &ep(ok));
@@ -583,6 +602,27 @@ mod tests {
             check_endpoint(&mut i, "e", &ep(bad));
             assert!(i.iter().any(|x| x.code == "bad_server"), "{bad}");
         }
+    }
+
+    #[test]
+    fn endpoint_client_random() {
+        let base = || Endpoint { server: "203.0.113.10".into(), port: 443, sni: None, username: "u".into(), quic: false, anti_dpi: false, certificate: None, tls_profile: None, client_random: None, client_random_auth_key: None };
+        let codes = |e: Endpoint| {
+            let mut i = Vec::new();
+            check_endpoint(&mut i, "e", &e);
+            i.into_iter().map(|x| x.code).collect::<Vec<_>>()
+        };
+        assert!(codes(Endpoint { client_random: Some("ab12".into()), ..base() }).is_empty());
+        assert!(codes(Endpoint { client_random: Some("ab12/ff00".into()), ..base() }).is_empty());
+        assert!(codes(Endpoint { client_random_auth_key: Some("00112233445566778899aabbccddeeff".into()), ..base() }).is_empty());
+        for bad in ["", "abc", "zz", "ab12/ff", "ab12/"] {
+            assert_eq!(codes(Endpoint { client_random: Some(bad.into()), ..base() }), ["bad_client_random"], "{bad}");
+        }
+        assert_eq!(codes(Endpoint { client_random_auth_key: Some("xyz0".into()), ..base() }), ["bad_client_random_auth_key"]);
+        assert_eq!(codes(Endpoint { client_random: Some("ab".into()), client_random_auth_key: Some("cd".into()), ..base() }), ["client_random_conflict"]);
+        let e: Endpoint = serde_json::from_str(r#"{"server":"203.0.113.10","port":443,"username":"u","tls_profile":"chrome_canary"}"#).unwrap();
+        assert_eq!(e.tls_profile, Some(crate::model::TlsProfile::ChromeCanary));
+        assert!(serde_json::from_str::<Endpoint>(r#"{"server":"x","port":1,"username":"u","tls_profile":"default"}"#).is_err());
     }
 
     #[test]

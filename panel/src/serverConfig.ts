@@ -3,7 +3,23 @@
 // (вывод с `--format toml`). Из TOML понимается подмножество этих файлов: пары «ключ = значение» (строки всех четырёх
 // видов, логические, числа, массивы строк) и таблицы; берутся ключи верхнего уровня и [endpoint].
 
-import type { Endpoint } from './api'
+import type { Endpoint, TlsProfile } from './api'
+
+/** Отпечатки TLS в порядке тега 0x10 ссылки tt:// (DEEP_LINK.md: 0x00 = chrome … 0x06 = boringssl). */
+export const TLS_PROFILES: TlsProfile[] = ['chrome', 'chrome_canary', 'safari', 'firefox', 'okhttp', 'openssl', 'boringssl']
+
+/** Профиль TLS из client.toml: `default` — устаревшее имя boringssl; chrome (по умолчанию) не записывается. */
+function tlsProfileOf(v: string): TlsProfile | 'bad' | undefined {
+  const p = v.toLowerCase() === 'default' ? 'boringssl' : v.toLowerCase()
+  if (!(TLS_PROFILES as string[]).includes(p)) return 'bad'
+  return p === 'chrome' ? undefined : (p as TlsProfile)
+}
+
+/** client_random и ключ: пустые не пишутся; если заданы оба, клиент берёт ключ — так же поступаем и мы. */
+function clientRandom(endpoint: Partial<Endpoint>, prefix: string | undefined, key: string | undefined): void {
+  if (key) endpoint.client_random_auth_key = key
+  else if (prefix) endpoint.client_random = prefix
+}
 
 /**
  * Поля точки подключения, пароль, имя сервера (`name`) и предупреждения о параметрах, которые роутер не поддерживает
@@ -152,6 +168,13 @@ export function parseClientToml(text: string): ParsedServer {
   if (typeof anti === 'boolean') endpoint.anti_dpi = anti
   const cert = str('certificate')
   if (cert !== undefined) endpoint.certificate = cert
+  const tls = str('tls_profile')
+  if (tls !== undefined) {
+    const p = tlsProfileOf(tls)
+    if (p === 'bad') return { error: `профиль TLS «${tls}» неизвестен (tls_profile)` }
+    if (p) endpoint.tls_profile = p
+  }
+  clientRandom(endpoint, str('client_random'), str('client_random_auth_key'))
   const pass = get('password')
   return finish(endpoint, typeof pass === 'string' ? pass : undefined, str('name'), unsupported(host, str('custom_sni'), get('skip_verification') === true))
 }
@@ -269,6 +292,14 @@ export function parseDeepLink(link: string): ParsedServer {
     if (!pem) return { error: 'сертификат в ссылке tt:// повреждён' }
     endpoint.certificate = pem
   }
+  // 0x10 — один байт, номер профиля; неизвестный номер ссылка не должна молча терять (DEEP_LINK.md: «MUST reject»)
+  const tls = fields.get(0x10)
+  if (tls) {
+    const p = tls.length === 1 ? TLS_PROFILES[tls[0]!] : undefined
+    if (!p) return { error: 'профиль TLS в ссылке tt:// неизвестен — обновите панель роутера' }
+    if (p !== 'chrome') endpoint.tls_profile = p
+  }
+  clientRandom(endpoint, text(0x0b), text(0x0f))
   let pass: string | undefined
   try {
     pass = fields.has(0x06) ? utf8.decode(fields.get(0x06)!) : undefined

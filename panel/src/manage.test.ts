@@ -27,6 +27,17 @@ describe('профиль TrustTunnel', () => {
     // повторное сохранение без изменений даёт тот же профиль
     expect(formToProfile(back)).toEqual(p)
   })
+  it('профиль TLS и client_random: по умолчанию не пишутся, заданные — туда и обратно', () => {
+    const f = { ...emptyProfileForm(), id: 'tt', name: 'TT', server: '203.0.113.10', username: 'alice' }
+    const plain = formToProfile(f)
+    if (typeof plain !== 'object') throw new Error(plain)
+    expect(plain.endpoint).not.toHaveProperty('tls_profile')
+    expect(plain.endpoint).not.toHaveProperty('client_random')
+    const p = formToProfile({ ...f, tlsProfile: 'safari', clientRandomAuthKey: ' 00FF ' })
+    if (typeof p !== 'object') throw new Error(p)
+    expect(p.endpoint).toMatchObject({ tls_profile: 'safari', client_random_auth_key: '00ff' })
+    expect(profileToForm(p)).toMatchObject({ tlsProfile: 'safari', clientRandomAuthKey: '00ff', clientRandom: '' })
+  })
   it('профиль без точки подключения открывается пустой формой', () => {
     expect(profileToForm({ id: 'tt', name: 'TT', kind: 'trusttunnel', on_failure: 'block' })).toEqual({ ...emptyProfileForm(), id: 'tt', name: 'TT' })
   })

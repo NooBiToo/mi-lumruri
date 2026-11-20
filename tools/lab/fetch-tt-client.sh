@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Официальный клиент TrustTunnel v1.1.12 для x86_64 (лаборатория; в пакет идёт aarch64 из того же релиза).
+# Официальный клиент TrustTunnel v1.3.0 для x86_64 (лаборатория; в пакет идёт aarch64 из того же релиза).
 # Архив закреплён по SHA-256; распакованный клиент — .tools/lab/bin/trusttunnel_client.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 D="$ROOT/.tools/lab/dl/tt"; B="$ROOT/.tools/lab/bin"; mkdir -p "$D" "$B"
-VER=v1.1.12; A="trusttunnel_client-$VER-linux-x86_64.tar.gz"
-WANT=75b7df59351e26462487464de5f3462153e00195f2d40677872fb93a5b44c488
+VER=v1.3.0; A="trusttunnel_client-$VER-linux-x86_64.tar.gz"
+WANT=99e764bb2c080f7a60c441b51ad75fa7ec00e6c8a80afe36030af37201ba32f7
 if [ ! -s "$D/$A" ]; then
   curl -sSfL --proto '=https' -o "$D/$A.part" "https://github.com/TrustTunnel/TrustTunnelClient/releases/download/$VER/$A"
   mv "$D/$A.part" "$D/$A"

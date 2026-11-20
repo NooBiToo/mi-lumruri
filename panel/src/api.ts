@@ -16,7 +16,14 @@ export interface Endpoint {
   anti_dpi: boolean
   /** Сертификат сервера (PEM) для самоподписанного сервера. */
   certificate?: string
+  /** Отпечаток TLS ClientHello, под который маскируется клиент (TrustTunnel 1.3). Без поля — chrome. */
+  tls_profile?: TlsProfile
+  /** Префикс client_random (hex, «префикс/маска»), если сервер пускает только по нему. */
+  client_random?: string
+  /** Ключ client_random (hex, сервер 1.3): client_random выводится из ключа. Задаётся что-то одно с префиксом. */
+  client_random_auth_key?: string
 }
+export type TlsProfile = 'chrome' | 'chrome_canary' | 'safari' | 'firefox' | 'okhttp' | 'openssl' | 'boringssl'
 export interface Profile { id: string; name: string; kind: ProfileKind; on_failure: 'block' | 'direct'; endpoint?: Endpoint }
 export interface Network { id: string; name: string; ssid: string; segment?: string; subnet?: string; bridge?: string; ports?: string[] }
 export interface Device { id: string; name: string; mac: string; network: string }

@@ -338,6 +338,44 @@ pub struct Endpoint {
     /// Сертификат сервера (PEM) для самоподписанного сервера. Без него — проверка цепочки до корневых сертификатов.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub certificate: Option<String>,
+    /// Отпечаток TLS ClientHello, под который маскируется клиент (`tls_profile`, клиент 1.3). Без него — chrome.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_profile: Option<TlsProfile>,
+    /// Префикс client_random (hex, `prefix[/mask]`): сервер с правилом по префиксу пускает только такие подключения.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_random: Option<String>,
+    /// Ключ client_random (hex, `client_random_auth_key`, сервер 1.3): client_random выводится из ключа и имени сервера.
+    /// Заменяет префикс — задаётся что-то одно.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_random_auth_key: Option<String>,
+}
+
+/// Отпечаток TLS ClientHello клиента TrustTunnel 1.3 (`[endpoint].tls_profile`; в ссылке tt:// — тег 0x10, байт 0–6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TlsProfile {
+    Chrome,
+    ChromeCanary,
+    Safari,
+    Firefox,
+    Okhttp,
+    Openssl,
+    /// Собственный ClientHello библиотеки TLS, без маскировки.
+    Boringssl,
+}
+
+impl TlsProfile {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TlsProfile::Chrome => "chrome",
+            TlsProfile::ChromeCanary => "chrome_canary",
+            TlsProfile::Safari => "safari",
+            TlsProfile::Firefox => "firefox",
+            TlsProfile::Okhttp => "okhttp",
+            TlsProfile::Openssl => "openssl",
+            TlsProfile::Boringssl => "boringssl",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]

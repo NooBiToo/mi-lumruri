@@ -143,10 +143,10 @@ fn toml_str(v: &str) -> String {
     format!("\"{}\"", v.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-/// client.toml для trusttunnel_client 1.1.x. Маршруты (`included_routes`) пустые: выбор маршрута держит
+/// client.toml для trusttunnel_client 1.3.x. Маршруты (`included_routes`) пустые: выбор маршрута держит
 /// mi-tt-admin (метка и таблица 3100), клиент только создаёт TUN `mitt0` и передаёт в туннель то, что в него пришло.
 pub fn client_toml(e: &Endpoint, password: &str) -> String {
-    // домен в addresses клиент разрешает сам (проверено на trusttunnel_client 1.1.12)
+    // домен в addresses клиент разрешает сам (проверено на trusttunnel_client 1.1.12 и 1.3.0)
     let server = match e.server.parse::<std::net::IpAddr>() {
         Ok(ip) => ip.to_string(),
         Err(_) => normalize_domain(&e.server, 1).unwrap_or_else(|_| e.server.clone()),
@@ -172,10 +172,12 @@ custom_sni = \"\"\n\
 has_ipv6 = false\n\
 username = {user}\n\
 password = {pass}\n\
-client_random = \"\"\n\
+client_random = {random}\n\
+client_random_auth_key = {random_key}\n\
 skip_verification = false\n\
 {cert}\n\
 upstream_protocol = \"{proto}\"\n\
+tls_profile = \"{tls}\"\n\
 anti_dpi = {anti}\n\
 dns_upstreams = []\n\
 \n\
@@ -189,7 +191,10 @@ change_system_dns = false\n",
         addr = toml_str(&addr),
         user = toml_str(&e.username),
         pass = toml_str(password),
+        random = toml_str(e.client_random.as_deref().unwrap_or_default()),
+        random_key = toml_str(e.client_random_auth_key.as_deref().unwrap_or_default()),
         proto = if e.quic { "http3" } else { "http2" },
+        tls = e.tls_profile.unwrap_or(crate::model::TlsProfile::Chrome).as_str(),
         anti = e.anti_dpi,
     )
 }
@@ -428,7 +433,18 @@ mod tests {
     use super::*;
 
     fn ep() -> Endpoint {
-        Endpoint { server: "203.0.113.10".into(), port: 443, sni: Some("vpn.example".into()), username: "user1".into(), quic: false, anti_dpi: true, certificate: None }
+        Endpoint { server: "203.0.113.10".into(), port: 443, sni: Some("vpn.example".into()), username: "user1".into(), quic: false, anti_dpi: true, certificate: None, tls_profile: None, client_random: None, client_random_auth_key: None }
+    }
+
+    #[test]
+    fn client_toml_tls_profile_and_client_random() {
+        let t = client_toml(&ep(), "p");
+        assert!(t.contains("tls_profile = \"chrome\"\n") && t.contains("client_random = \"\"\n") && t.contains("client_random_auth_key = \"\"\n"), "{t}");
+        let e = Endpoint { tls_profile: Some(crate::model::TlsProfile::ChromeCanary), client_random_auth_key: Some("00ff".into()), ..ep() };
+        let t = client_toml(&e, "p");
+        assert!(t.contains("tls_profile = \"chrome_canary\"\n") && t.contains("client_random_auth_key = \"00ff\"\n"), "{t}");
+        let e = Endpoint { client_random: Some("ab12/ffff".into()), ..ep() };
+        assert!(client_toml(&e, "p").contains("client_random = \"ab12/ffff\"\n"));
     }
 
     #[test]

@@ -26,10 +26,10 @@
 | Вход | Пароль (Argon2id), по желанию TOTP с кодами восстановления, серверные сессии | Сертификат панели выпускается на роутере при установке. TOTP включается по SSH |
 | Данные | Версионированный JSON, файлы в `/data/mi-trusttunnel/etc` | Атомарная запись, предыдущая версия для отката. Пароль профиля — в отдельном `secrets.json` (0600), в API не возвращается. Сессии и журналы — в RAM |
 | Интеграция с прошивкой | BusyBox ash, fw3 include, iptables, ipset, ip rule, dnsmasq | Shell используется для установки, старта и службы. Решения о маршруте принимает контроллер |
-| Сетевые движки | `trusttunnel_client` v1.1.12, nfqws2 из zapret2 v1.0.7 | Туннель TrustTunnel через TUN `mitt0`. Обработка Zapret для действия «напрямую с Zapret»: встроенный каталог стратегий, профили nfqws2 |
+| Сетевые движки | `trusttunnel_client` v1.3.0, nfqws2 из zapret2 v1.0.7 | Туннель TrustTunnel через TUN `mitt0`. Обработка Zapret для действия «напрямую с Zapret»: встроенный каталог стратегий, профили nfqws2 |
 | Списки сайтов | Снимок [itdoginfo/allow-domains](https://github.com/itdoginfo/allow-domains) в пакете, `mitt-lists.sh` | Категории `svc-*` для панели, ежедневная проверка обновлений через curl стока |
 
-Клиент TrustTunnel — официальная статическая сборка aarch64 из релиза [TrustTunnelClient v1.1.12](https://github.com/TrustTunnel/TrustTunnelClient/releases/tag/v1.1.12). Архив закреплён по SHA-256 в `tools/package.mjs`.
+Клиент TrustTunnel — официальная статическая сборка aarch64 из релиза [TrustTunnelClient v1.3.0](https://github.com/TrustTunnel/TrustTunnelClient/releases/tag/v1.3.0). Архив закреплён по SHA-256 в `tools/package.mjs`.
 
 ## Сетевые компоненты
 
@@ -49,7 +49,7 @@
 
 | Файл | В пакете, байт | В RAM после распаковки, байт |
 |---|---:|---:|
-| `trusttunnel_client` v1.1.12 | 2 277 116 | 7 013 936 |
+| `trusttunnel_client` v1.3.0 | 2 808 776 | 8 624 304 |
 | `mi-tt-admin` | 447 148 | 1 107 080 |
 | `mi-tt-ctl` | 395 360 | 977 408 |
 | nfqws2 (zapret2 v1.0.7) | 317 336 | 318 196 |

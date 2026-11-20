@@ -1,6 +1,6 @@
 // Формы без DOM: профиль TrustTunnel ↔ Profile (экран «Сервер»), DNS (экран «Дополнительно»).
 
-import type { AdblockSource, DnsConfig, Endpoint, HostRecord, SecureDns, SecureServer, Profile, ProfileSecret } from './api'
+import type { AdblockSource, DnsConfig, Endpoint, HostRecord, SecureDns, SecureServer, Profile, ProfileSecret, TlsProfile } from './api'
 
 export interface ProfileForm {
   id: string
@@ -13,12 +13,18 @@ export interface ProfileForm {
   quic: boolean
   antiDpi: boolean
   certificate: string
+  tlsProfile: TlsProfile
+  clientRandom: string
+  clientRandomAuthKey: string
   // пароль: только ввод, сохранённое значение панель не получает
   password: string
 }
 
 export function emptyProfileForm(): ProfileForm {
-  return { id: '', name: '', onFailure: 'block', server: '', port: '443', sni: '', username: '', quic: false, antiDpi: false, certificate: '', password: '' }
+  return {
+    id: '', name: '', onFailure: 'block', server: '', port: '443', sni: '', username: '', quic: false, antiDpi: false, certificate: '',
+    tlsProfile: 'chrome', clientRandom: '', clientRandomAuthKey: '', password: '',
+  }
 }
 
 export function profileToForm(p: Profile): ProfileForm {
@@ -28,6 +34,7 @@ export function profileToForm(p: Profile): ProfileForm {
   if (!e) return f
   Object.assign(f, {
     server: e.server, port: String(e.port), sni: e.sni ?? '', username: e.username ?? '', quic: !!e.quic, antiDpi: !!e.anti_dpi, certificate: e.certificate ?? '',
+    tlsProfile: e.tls_profile ?? 'chrome', clientRandom: e.client_random ?? '', clientRandomAuthKey: e.client_random_auth_key ?? '',
   })
   return f
 }
@@ -41,6 +48,12 @@ export function formToProfile(f: ProfileForm): Profile | string {
   // PEM из textarea: переводы строк приводим к \n, пустые строки по краям убираем
   const cert = f.certificate.replace(/\r\n?/g, '\n').trim()
   if (cert) endpoint.certificate = `${cert}\n`
+  // по умолчанию (chrome, пустые client_random) поля не пишутся: настройки старых версий остаются прежними
+  if (f.tlsProfile !== 'chrome') endpoint.tls_profile = f.tlsProfile
+  const random = f.clientRandom.trim().toLowerCase()
+  const key = f.clientRandomAuthKey.trim().toLowerCase()
+  if (random) endpoint.client_random = random
+  if (key) endpoint.client_random_auth_key = key
   return { id: f.id.trim(), name: f.name.trim(), kind: 'trusttunnel', on_failure: f.onFailure, endpoint }
 }
 

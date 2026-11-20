@@ -7,9 +7,10 @@ import Password from 'primevue/password'
 import Textarea from 'primevue/textarea'
 import ToggleSwitch from 'primevue/toggleswitch'
 import { Check, ChevronDown, ClipboardPaste, Minus } from 'lucide-vue-next'
-import { manage, type Endpoint } from '../api'
+import Select from 'primevue/select'
+import { manage, type Endpoint, type TlsProfile } from '../api'
 import { emptyProfileForm, formToProfile, formToSecret, profileToForm, type ProfileForm } from '../manage'
-import { parseServer } from '../serverConfig'
+import { parseServer, TLS_PROFILES } from '../serverConfig'
 import { config, hasPassword, loadSecrets, notify, profile, save, simple, tunnel } from '../store'
 import Segmented from '../components/Segmented.vue'
 
@@ -24,6 +25,11 @@ watch(profile, () => { if (!dirty.value) { form.value = formFrom(); pristine.val
 const firstTime = computed(() => !profile.value?.endpoint)
 const advanced = ref(false)
 const FAILURE = [{ value: 'block' as const, label: 'Не открывать' }, { value: 'direct' as const, label: 'Открывать напрямую' }]
+const TLS_LABEL: Record<TlsProfile, string> = {
+  chrome: 'Chrome (по умолчанию)', chrome_canary: 'Chrome Canary', safari: 'Safari', firefox: 'Firefox', okhttp: 'OkHttp (Android)',
+  openssl: 'OpenSSL', boringssl: 'Без маскировки (BoringSSL)',
+}
+const TLS_OPTIONS = TLS_PROFILES.map((id) => ({ id, label: TLS_LABEL[id] }))
 
 // ---- вставка конфигурации ----
 const pasted = ref('')
@@ -44,8 +50,16 @@ function recognize() {
   if (e.quic !== undefined) f.quic = e.quic
   if (e.anti_dpi !== undefined) f.antiDpi = e.anti_dpi
   f.certificate = e.certificate ?? ''
+  f.tlsProfile = e.tls_profile ?? 'chrome'
+  f.clientRandom = e.client_random ?? ''
+  f.clientRandomAuthKey = e.client_random_auth_key ?? ''
   if (r.password) f.password = r.password
   if (r.name && !profile.value) f.name = r.name
+  // необязательные параметры — только если они есть в ссылке
+  const extra = [
+    ...(e.tls_profile ? [{ label: 'Профиль TLS', value: TLS_LABEL[e.tls_profile] }] : []),
+    ...(e.client_random_auth_key ? [{ label: 'Ключ client_random', value: 'есть' }] : e.client_random ? [{ label: 'Префикс client_random', value: 'есть' }] : []),
+  ]
   parsed.value = {
     rows: [
       { label: 'Сервер', value: e.server ? `${e.server}${e.port ? `:${e.port}` : ''}` : null },
@@ -53,6 +67,7 @@ function recognize() {
       { label: 'Логин', value: e.username ?? null },
       { label: 'Пароль', value: r.password ? 'есть' : null },
       { label: 'Сертификат', value: e.certificate ? 'есть' : null },
+      ...extra,
     ],
     warnings: r.warnings ?? [],
   }
@@ -207,6 +222,22 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
             <Textarea id="srv-cert" v-model="form.certificate" rows="4" spellcheck="false" class="mono" placeholder="-----BEGIN CERTIFICATE-----" />
             <span class="field__hint">Нужен, только если сервер использует свой сертификат. Обычно приходит вместе со ссылкой.</span>
           </div>
+          <div class="field">
+            <label for="srv-tls" class="field__label">Профиль TLS</label>
+            <Select v-model="form.tlsProfile" input-id="srv-tls" :options="TLS_OPTIONS" option-label="label" option-value="id" fluid />
+            <span class="field__hint">Под какой браузер или приложение маскируется подключение. Меняйте, если так сказано в настройках сервера или провайдер мешает подключению.</span>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label for="srv-cr" class="field__label">Префикс client_random</label>
+              <InputText id="srv-cr" v-model="form.clientRandom" spellcheck="false" autocomplete="off" class="mono" placeholder="префикс/маска" />
+            </div>
+            <div class="field">
+              <label for="srv-crk" class="field__label">Ключ client_random</label>
+              <InputText id="srv-crk" v-model="form.clientRandomAuthKey" spellcheck="false" autocomplete="off" class="mono" />
+            </div>
+          </div>
+          <span class="field__hint">Нужны, только если сервер пускает подключения по client_random. Обычно приходят вместе со ссылкой; задаётся что-то одно — префикс или ключ.</span>
         </div>
 
         <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
