@@ -1,3 +1,5 @@
+> **Исторический документ.** План реализации на 2026-11-19, реализован в версиях 0.3.x; дальше код менялся без правки этого текста. Текущее поведение — в [руководстве](../../guide.md) и [ARCHITECTURE.md](../../../ARCHITECTURE.md).
+
 # Простая панель, списки сайтов и Zapret одной кнопкой — план реализации
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

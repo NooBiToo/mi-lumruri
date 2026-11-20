@@ -1,5 +1,12 @@
 Mi Lumruri (mi-trusttunnel)
 
+Сторонние компоненты, которые входят в установочный пакет или используются им.
+
+Клиент TrustTunnel trusttunnel_client v1.3.0 (официальная статическая сборка linux-aarch64, без изменений):
+https://github.com/TrustTunnel/TrustTunnelClient, лицензия Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0).
+
+nfqws2, Lua-библиотеки и блобы из zapret2 v1.0.7 (bol-van, лицензия MIT, без изменений): https://github.com/bol-van/zapret2
+
 Стратегии Zapret в controller/data/zapret-strategies.json взяты из проекта
 Zapret Manager (files/Zapret2/zapret2, коммит 18c008bc98329727d3b3676c24907e2b17463c6c)
 и переведены в формат каталога: группы кругового режима разделены на отдельные стратегии.
@@ -18,8 +25,6 @@ zapret-openwrt (zapret2/files/fake/4pda.bin, коммит 1b04a87558ec7965bfed0e
   https://github.com/remittor/zapret-openwrt
   Licensed under the MIT License
 
-Блобы nfqws2 и Lua-библиотеки из zapret2 v1.0.7 (bol-van, лицензия MIT): https://github.com/bol-van/zapret2
-
 Список хостов package/zapret/zapret-hosts-discord.txt взят из Zapret Manager (Apache-2.0, см. выше),
 package/zapret/zapret-hosts-youtube.txt — перечень доменов YouTube из itdoginfo/allow-domains (Services/youtube.lst, коммит 932e11c43a9e000a24ba08129c15d99287c6e9a9).
 
@@ -35,15 +40,20 @@ dpi-detector (tcp16.json и domains.txt).
 (https://github.com/itdoginfo/allow-domains, коммит 932e11c43a9e000a24ba08129c15d99287c6e9a9 от 2026-11-09). В репозитории нет файла
 лицензии; списки используются как общедоступные данные с указанием источника и не изменяются. Автор списков — itdoginfo.
 
-Панель (panel) использует значки Lucide (пакет lucide-vue-next, лицензия ISC, https://lucide.dev) и логотипы
+Панель (panel) собрана с Vue (лицензия MIT, https://vuejs.org), PrimeVue и @primeuix/themes (лицензия MIT,
+https://primevue.org). Она использует значки Lucide (пакет lucide-vue-next, лицензия ISC, https://lucide.dev) и логотипы
 сервисов из Simple Icons (пакет simple-icons, лицензия CC0-1.0, https://simpleicons.org). Логотипы — товарные знаки
 своих владельцев и показываются только для узнавания сервисов в списке.
+
+Шрифт панели Onest (пакет @fontsource-variable/onest, файлы WOFF2 для кириллицы и латиницы):
+Copyright 2021 The Onest Project Authors (https://github.com/simpals/onest), лицензия SIL Open Font License 1.1
+(https://openfontlicense.org).
 
 Списки блокировки рекламы в пакет не входят: роутер скачивает их по выбору в панели. По умолчанию — HaGeZi DNS Blocklists
 (https://github.com/hagezi/dns-blocklists, варианты Light и Normal в виде wildcard/*-onlydomains.txt), автор — Gerd (hagezi),
 лицензия GPL-3.0. Списки используются без изменений.
 
-Прокси защищённого DNS (mi-tt-dns) собран с библиотеками rustls (Apache-2.0 OR ISC OR MIT, https://github.com/rustls/rustls),
+Прокси защищённого DNS (mi-tt-dns) собран с библиотеками rustls 0.23 (Apache-2.0 OR ISC OR MIT, https://github.com/rustls/rustls),
 rustls-rustcrypto (MIT OR Apache-2.0, https://github.com/RustCrypto/rustls-rustcrypto) и криптографией RustCrypto,
 а также webpki-roots (CDLA-Permissive-2.0, https://github.com/rustls/webpki-roots) — корневые сертификаты из программы
-Mozilla CA. Перечень всех зависимостей Rust с лицензиями — controller/Cargo.lock.
+Mozilla CA. Полный перечень зависимостей Rust с версиями — controller/Cargo.lock, лицензия каждой указана в её пакете на crates.io.

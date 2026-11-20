@@ -49,13 +49,15 @@ if grep -q MI_TT_TEST_NOW controller/target/aarch64-unknown-linux-musl/release/m
 fi
 echo "отладочная подмена времени (MI_TT_TEST_NOW) в release: отсутствует"
 node tools/package.mjs >out/package-build.txt
+# версия пакета по умолчанию — из tools/package.mjs
+VER=$(sed -n "s/.*: '\([0-9][0-9.]*\)'$/\1/p" tools/package.mjs | head -n 1)
 head -3 out/package-build.txt
-node -e 'const r=JSON.parse(require("fs").readFileSync("out/package/report-0.3.0.json","utf8")); if (r.headroom < 0) { console.error("ОШИБКА: пакет не помещается в бюджет flash"); process.exit(1) }'
+VER="$VER" node -e 'const r=JSON.parse(require("fs").readFileSync(`out/package/report-${process.env.VER}.json`,"utf8")); if (r.headroom < 0) { console.error("ОШИБКА: пакет не помещается в бюджет flash"); process.exit(1) }'
 # архив: закрытых ключей (PEM) быть не должно; прочие совпадения — в отчёт (без значений)
-python -I -X utf8 tools/secret-scan.py archive out/package/mi-trusttunnel-0.3.0.tar | tee out/secret-scan-archives.txt | tail -1
+python -I -X utf8 tools/secret-scan.py archive out/package/mi-trusttunnel-$VER.tar | tee out/secret-scan-archives.txt | tail -1
 if grep -q private_key_pem out/secret-scan-archives.txt; then echo "ОШИБКА: закрытый ключ в архиве пакета"; exit 1; fi
 tools/lab/install-packages.sh >/dev/null   # v1, v2, v5, подменённый, чужой ключ — для лаборатории установщика
-node tools/package.mjs >/dev/null           # вернуть в out/package пакет 0.3.0 (install-packages.sh собирает 0.1.0-stage12)
+node tools/package.mjs >/dev/null           # вернуть в out/package пакет текущей версии (install-packages.sh собирает 0.1.0-stage12)
 
 step "7. изолированные лаборатории (Linux/WSL): установка/обновление/откат/внешнее хранилище и автозагрузка без WAN с настоящими TrustTunnel, dnsmasq и ipset"
 if [ -f .tools/lab/bin/trusttunnel_endpoint ]; then
