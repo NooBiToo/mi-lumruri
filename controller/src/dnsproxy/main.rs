@@ -36,6 +36,8 @@ enum Proto {
 
 struct Upstream {
     proto: Proto,
+    /// Метка сокетов (SO_MARK): 0 — без метки; иначе соединения идут по правилу `ip rule fwmark` (в туннель).
+    mark: u32,
     /// Имя сервера: SNI и проверка сертификата, у DoH — ещё и заголовок Host.
     host: String,
     /// Путь DoH (`/dns-query`); у DoT не используется.
@@ -83,7 +85,7 @@ impl Pool {
     }
 
     fn connect_to(&self, a: SocketAddr) -> Result<BufReader<Tls>, String> {
-        let tcp = TcpStream::connect_timeout(&a, CONNECT_TIMEOUT).map_err(|e| e.to_string())?;
+        let tcp = if self.up.mark == 0 { TcpStream::connect_timeout(&a, CONNECT_TIMEOUT).map_err(|e| e.to_string())? } else { connect_marked(a, self.up.mark)? };
         tcp.set_read_timeout(Some(IO_TIMEOUT)).ok();
         tcp.set_write_timeout(Some(IO_TIMEOUT)).ok();
         tcp.set_nodelay(true).ok();
@@ -148,6 +150,20 @@ impl Pool {
             }
         }
     }
+}
+
+/// Соединение с меткой сокета (SO_MARK) — до connect: по ней ядро выбирает маршрут (таблица туннеля) и адрес отправителя.
+#[cfg(target_os = "linux")]
+fn connect_marked(a: SocketAddr, mark: u32) -> Result<TcpStream, String> {
+    let s = socket2::Socket::new(socket2::Domain::for_address(a), socket2::Type::STREAM, Some(socket2::Protocol::TCP)).map_err(|e| e.to_string())?;
+    s.set_mark(mark).map_err(|e| format!("метка сокета: {e}"))?;
+    s.connect_timeout(&a.into(), CONNECT_TIMEOUT).map_err(|e| e.to_string())?;
+    Ok(TcpStream::from(s))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn connect_marked(_a: SocketAddr, _mark: u32) -> Result<TcpStream, String> {
+    Err("метка сокета (--mark) есть только в Linux".into())
 }
 
 /// Ответ HTTP/1.1: статус 200, тело по Content-Length или chunked. Соединение остаётся открытым.
@@ -346,15 +362,16 @@ struct Args {
     ips: Vec<IpAddr>,
     fallback: Option<String>,
     status: Option<String>,
+    mark: u32,
 }
 
 fn usage(m: &str) -> ! {
-    eprintln!("mi-tt-dns: {m}\n  mi-tt-dns --listen 127.0.0.1:5453 (--doh URL | --dot HOST[:port]) --ip IP [--ip IP…] [--fallback resolv] [--status file]\n  mi-tt-dns --probe 127.0.0.1:5453 example.com\n  mi-tt-dns --version");
+    eprintln!("mi-tt-dns: {m}\n  mi-tt-dns --listen 127.0.0.1:5453 (--doh URL | --dot HOST[:port]) --ip IP [--ip IP…] [--fallback resolv] [--status file] [--mark 0x4000]\n  mi-tt-dns --probe 127.0.0.1:5453 example.com\n  mi-tt-dns --version");
     std::process::exit(2)
 }
 
 fn parse_args(v: &[String]) -> Args {
-    let mut a = Args { listen: "127.0.0.1:5453".parse().unwrap(), proto: Proto::Doh, target: String::new(), ips: Vec::new(), fallback: None, status: None };
+    let mut a = Args { listen: "127.0.0.1:5453".parse().unwrap(), proto: Proto::Doh, target: String::new(), ips: Vec::new(), fallback: None, status: None, mark: 0 };
     let mut it = v.iter();
     while let Some(k) = it.next() {
         let mut val = || it.next().cloned().unwrap_or_else(|| usage(&format!("{k}: нет значения")));
@@ -365,6 +382,10 @@ fn parse_args(v: &[String]) -> Args {
             "--ip" => a.ips.push(val().parse().unwrap_or_else(|_| usage("--ip: IP-адрес"))),
             "--fallback" => a.fallback = Some(val()),
             "--status" => a.status = Some(val()),
+            "--mark" => {
+                let v = val();
+                a.mark = v.strip_prefix("0x").map_or_else(|| v.parse().ok(), |h| u32::from_str_radix(h, 16).ok()).unwrap_or_else(|| usage("--mark: число, например 0x4000"));
+            }
             _ => usage(&format!("неизвестный параметр {k}")),
         }
     }
@@ -392,7 +413,7 @@ fn upstream(a: &Args) -> Result<Upstream, String> {
         return Err(format!("имя сервера «{host}» не подходит"));
     }
     let tls = tls_config(if a.proto == Proto::Doh { b"http/1.1" } else { b"dot" })?;
-    Ok(Upstream { proto: a.proto, host, path, addrs: a.ips.iter().map(|ip| SocketAddr::new(*ip, port)).collect(), tls })
+    Ok(Upstream { proto: a.proto, mark: a.mark, host, path, addrs: a.ips.iter().map(|ip| SocketAddr::new(*ip, port)).collect(), tls })
 }
 
 /// Вопрос A о домене: ID случайный от времени, флаг RD.

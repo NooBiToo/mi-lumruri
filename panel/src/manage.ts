@@ -58,11 +58,20 @@ export type SecureMode = 'off' | 'doh' | 'dot'
 export interface DnsForm {
   resolver: string; adblock: boolean; adblockSource: AdblockSource; adblockUrl: string; exceptions: string; hosts: HostRecord[]
   secure: SecureMode; secureServer: SecureServer; nextdnsId: string; secureUrl: string; secureIps: string
+  /** Шифрование DNS для сайтов через VPN (DoH/DoT поверх туннеля). */
+  tunnelSecure: SecureMode
+}
+
+/** Какое шифрование DNS через VPN доступно для резолвера туннеля (контроллер: DnsConfig::tunnel_proxy_args). */
+export function tunnelSecureModes(resolver: string): SecureMode[] {
+  if (['1.1.1.1', '1.0.0.1', '8.8.8.8', '8.8.4.4', '94.140.14.14', '94.140.15.15'].includes(resolver)) return ['off', 'doh', 'dot']
+  if (['9.9.9.9', '149.112.112.112'].includes(resolver)) return ['off', 'dot']
+  return ['off']
 }
 
 export function dnsDefault(): DnsForm {
   return { resolver: DEFAULT_TUNNEL_RESOLVER, adblock: false, adblockSource: 'light', adblockUrl: '', exceptions: '', hosts: [],
-    secure: 'off', secureServer: 'cloudflare', nextdnsId: '', secureUrl: '', secureIps: '' }
+    secure: 'off', secureServer: 'cloudflare', nextdnsId: '', secureUrl: '', secureIps: '', tunnelSecure: 'off' }
 }
 
 export function dnsToForm(d: DnsConfig | undefined): DnsForm {
@@ -71,7 +80,8 @@ export function dnsToForm(d: DnsConfig | undefined): DnsForm {
   return { resolver: d.tunnel_resolver ?? DEFAULT_TUNNEL_RESOLVER, adblock: !!d.adblock?.enabled, adblockSource: d.adblock?.source ?? 'light',
     adblockUrl: d.adblock?.url ?? '', exceptions: (d.adblock?.exceptions ?? []).join('\n'),
     hosts: (d.hosts ?? []).map((h) => ({ domain: h.domain, address: h.address })),
-    secure: s?.protocol ?? 'off', secureServer: s?.server ?? 'cloudflare', nextdnsId: s?.nextdns_id ?? '', secureUrl: s?.url ?? '', secureIps: (s?.ips ?? []).join(', ') }
+    secure: s?.protocol ?? 'off', secureServer: s?.server ?? 'cloudflare', nextdnsId: s?.nextdns_id ?? '', secureUrl: s?.url ?? '', secureIps: (s?.ips ?? []).join(', '),
+    tunnelSecure: d.tunnel_secure ?? 'off' }
 }
 
 /** Раздел `secure` из формы: поля NextDNS и своего сервера — только для них. Точнее проверит контроллер. */
@@ -92,6 +102,8 @@ export function formToDns(f: DnsForm): DnsConfig | null {
   const exceptions = f.exceptions.split(/[\s,]+/).filter(Boolean)
   const d: DnsConfig = {}
   if (resolver && resolver !== DEFAULT_TUNNEL_RESOLVER) d.tunnel_resolver = resolver
+  // шифрование — только если оно доступно для выбранного сервера (иначе контроллер отклонит настройки)
+  if (f.tunnelSecure !== 'off' && tunnelSecureModes(resolver || DEFAULT_TUNNEL_RESOLVER).includes(f.tunnelSecure)) d.tunnel_secure = f.tunnelSecure
   // источник по умолчанию (Light) не пишется; ссылка — только для «Своя ссылка» (недописанная при другом источнике не сохраняется)
   const url = f.adblockSource === 'url' ? f.adblockUrl.trim() : ''
   if (f.adblock || exceptions.length || f.adblockSource !== 'light') {

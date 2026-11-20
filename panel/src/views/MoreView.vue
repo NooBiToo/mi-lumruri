@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import InputText from 'primevue/inputtext'
 import ToggleSwitch from 'primevue/toggleswitch'
 import { ChevronDown, ChevronRight } from 'lucide-vue-next'
-import { CUSTOM_DNS, DNS_PRESETS, dnsPresetIp, dnsPresetOf, dnsToForm, formToDns, type DnsForm } from '../manage'
+import { CUSTOM_DNS, DNS_PRESETS, dnsPresetIp, dnsPresetOf, dnsToForm, formToDns, tunnelSecureModes, type DnsForm } from '../manage'
 import { config, save, service } from '../store'
 import { when } from '../status'
 import { useAutosave, type Blocker } from '../autosave'
@@ -68,6 +68,28 @@ const adblockText = computed(() => {
   if (!a) return 'Роутер скачает список в течение минуты'
   if (a.error) return `Список не обновился: ${a.error}. Пока действует прежний, если он был`
   return `${(a.domains ?? 0).toLocaleString('ru-RU')} доменов · список ${a.updated ? `от ${when(a.updated)}` : 'загружен'} · проверен ${when(a.checked)}`
+})
+
+// ---- шифрование DNS через VPN (DoH/DoT поверх туннеля) ----
+const tunnelModes = computed(() => tunnelSecureModes(draft.value.dns.resolver.trim()))
+const TUNNEL_SECURE_LABELS = { off: 'Обычный', doh: 'DoH', dot: 'DoT' } as const
+const TUNNEL_SECURE_MODES = computed(() => tunnelModes.value.map((m) => ({ value: m, label: TUNNEL_SECURE_LABELS[m] })))
+// выбранный сервер не поддерживает текущее шифрование — сбросить на доступное
+watch(tunnelModes, (m) => { if (!m.includes(draft.value.dns.tunnelSecure)) draft.value.dns.tunnelSecure = 'off' })
+const tunnelSecureHint = computed(() => {
+  const m = tunnelModes.value
+  if (m.length === 1) return 'Для этого сервера доступен только обычный режим: шифрование есть для Cloudflare, Google, AdGuard и Quad9 (DoT)'
+  if (!m.includes('doh')) return 'У Quad9 — только DoT: его DoH работает лишь через HTTP/2'
+  return draft.value.dns.tunnelSecure === 'off'
+    ? 'Обычно не нужно: вопросы и так внутри туннеля'
+    : 'Если туннель не работает, вопросы не уходят к провайдеру — сайты из списка ждут, пока VPN снова заработает'
+})
+const tunnelState = computed(() => {
+  const p = service.value?.dns_tunnel
+  if (!p || !config.value?.dns?.tunnel_secure || dirty.value) return null
+  if (p.upstream_ok) return { tone: 'ok', text: `Работает: шифрованных ответов через туннель — ${p.upstream_ok}` }
+  if (p.failed) return { tone: 'bad', text: `Сервер не отвечает через туннель${p.last_error ? `: ${p.last_error}` : ''}` }
+  return { tone: 'ok', text: 'Включено, вопросов пока не было' }
 })
 
 // ---- защищённый DNS (DoH/DoT) ----
@@ -182,7 +204,8 @@ useAutosave({
       <div class="setblock" role="group" aria-labelledby="dns-title">
         <span class="setrow__text">
           <span id="dns-title" class="setrow__title">DNS для сайтов через VPN</span>
-          <span class="setrow__desc">Через него, внутри VPN, узнаются адреса сайтов из ваших списков. Обычно подходит Cloudflare.</span>
+          <span class="setrow__desc">Через него узнаются адреса сайтов из ваших списков. Вопросы идут внутри VPN-туннеля — провайдер их не видит.
+            Шифрование DoH/DoT защищает ещё и участок от VPN-сервера до DNS-сервера</span>
         </span>
         <div class="dns" role="radiogroup" aria-labelledby="dns-title">
           <label v-for="o in DNS_OPTIONS" :key="o.id" :class="['dns__opt', { 'dns__opt--on': dnsChoice === o.id }]">
@@ -195,6 +218,15 @@ useAutosave({
           </label>
         </div>
         <p v-if="dnsNote" class="dns__note">{{ dnsNote }}</p>
+        <div class="field">
+          <span id="tunnel-secure-title" class="field__label">Шифрование</span>
+          <Segmented v-model="draft.dns.tunnelSecure" class="self-start" :options="TUNNEL_SECURE_MODES" label="Шифрование DNS через VPN" name="tunnel-secure" />
+          <span class="field__hint">{{ tunnelSecureHint }}</span>
+          <span v-if="tunnelState" :class="['adblock__state', { 'adblock__state--bad': tunnelState.tone === 'bad' }]">
+            <span :class="['led', `led--${tunnelState.tone}`]" aria-hidden="true" />
+            <span class="meta">{{ tunnelState.text }}</span>
+          </span>
+        </div>
         <div v-if="dnsChoice === 'custom'" class="field dns__custom">
           <label for="dns" class="field__label">Адрес DNS-сервера</label>
           <InputText id="dns" v-model="draft.dns.resolver" class="num" placeholder="например, 1.0.0.1" inputmode="decimal" :invalid="!resolverOk" aria-describedby="dns-hint" />

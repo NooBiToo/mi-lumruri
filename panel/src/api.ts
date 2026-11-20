@@ -44,6 +44,8 @@ export interface ScheduleConfig { lists?: ListsUpdate; zapret_check?: ZapretChec
 export interface DnsConfig {
   /** Публичный IPv4 DNS-сервера для доменов, идущих через TrustTunnel; запросы к нему идут через туннель. По умолчанию 1.1.1.1. */
   tunnel_resolver?: string
+  /** DoH/DoT поверх туннеля для доменов VPN (только готовые серверы). */
+  tunnel_secure?: 'doh' | 'dot'
   /** Блокировка рекламы: список HaGeZi Light (по умолчанию), Normal или своя ссылка; скачивает служба. */
   adblock?: { enabled: boolean; exceptions?: string[]; source?: AdblockSource; url?: string }
   /** Защищённый DNS (DoH/DoT) для доменов, которые не идут через VPN. */
@@ -159,6 +161,7 @@ export interface ManageResponse {
   ok: boolean
   adblock?: AdblockStatus | null
   dns_proxy?: DnsProxyStatus | null
+  dns_tunnel?: DnsProxyStatus | null
   mode?: string
   revision?: string
   config?: Config

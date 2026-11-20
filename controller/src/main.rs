@@ -198,10 +198,12 @@ fn render_cmd(cfg: &str, secrets: &str, out: &str) -> Response {
                 .and_then(|_| store::write_atomic(&dir.join("policy.json"), &policy))
                 .and_then(|_| store::write_atomic(&dir.join("routes.json"), &routes))
                 .and_then(|_| opt("client.toml", r.client_toml.clone(), true))
-                .and_then(|_| write_dns_file(&config, &r.dns, cfg_path, dir))
+                .and_then(|_| write_dns_file(&config, &r.dns, cfg_path, dir, tunnel_dns_args(&config, &r).is_some()))
                 // параметры mi-tt-dns по одному в строке; нет файла — защищённый DNS выключен
                 .and_then(|_| opt("dns-proxy.args", config.dns.as_ref().and_then(|d| d.secure.as_ref()).and_then(|s| s.proxy_args())
                     .map(|a| a.join("\n") + "\n"), false))
+                // второй mi-tt-dns — для доменов туннеля; нужен, только когда туннель есть и в него идут домены
+                .and_then(|_| opt("dns-tunnel.args", tunnel_dns_args(&config, &r).map(|a| a.join("\n") + "\n"), false))
                 .and_then(|_| opt("schedule", Some(config.schedule.unwrap_or_default().file()), false))
                 // откуда служба скачивает список рекламы; нет файла — блокировка выключена
                 .and_then(|_| opt("adblock.url", config.dns.as_ref().and_then(|d| d.adblock.as_ref()).filter(|a| a.enabled)
@@ -221,7 +223,14 @@ fn render_cmd(cfg: &str, secrets: &str, out: &str) -> Response {
 /// Файл dnsmasq: наборы ipset доменов правил, резолвер туннеля и блокировка рекламы. Список рекламы — скачанный службой
 /// (`MI_TT_ADBLOCK_LIST`, копия в RAM), иначе `adblock.list` рядом с настройками (загрузка через CLI/API).
 /// Пустой — файла нет. Ошибочный список рекламы — отказ (действующие файлы не меняются).
-fn write_dns_file(config: &model::Config, plan: &mi_tt::dns::DnsPlan, cfg: &std::path::Path, dir: &std::path::Path) -> Result<(), String> {
+fn tunnel_dns_args(config: &model::Config, r: &render::Rendered) -> Option<Vec<String>> {
+    if r.client_toml.is_none() || r.dns.tunnel_domains.is_empty() {
+        return None;
+    }
+    config.dns.as_ref()?.tunnel_proxy_args()?.ok()
+}
+
+fn write_dns_file(config: &model::Config, plan: &mi_tt::dns::DnsPlan, cfg: &std::path::Path, dir: &std::path::Path, tunnel_secure: bool) -> Result<(), String> {
     use mi_tt::dns;
     let conf = dir.join("dnsmasq-mitt.conf");
     let adblock = config.dns.as_ref().and_then(|d| d.adblock.as_ref());
@@ -238,7 +247,12 @@ fn write_dns_file(config: &model::Config, plan: &mi_tt::dns::DnsPlan, cfg: &std:
     }
     let hosts = config.dns.as_ref().map(|d| d.hosts.as_slice()).unwrap_or_default();
     let secure = config.dns.as_ref().and_then(|d| d.secure.as_ref()).and_then(|s| s.proxy_args()).is_some();
-    let text = dns::dnsmasq_conf(plan, adblock, &blocked, hosts, secure);
+    // DoH/DoT поверх туннеля: домены туннеля dnsmasq спрашивает у второго прокси, а не у резолвера напрямую
+    let mut plan = plan.clone();
+    if tunnel_secure {
+        plan.resolver = format!("127.0.0.1#{}", model::DNS_TUNNEL_PORT);
+    }
+    let text = dns::dnsmasq_conf(&plan, adblock, &blocked, hosts, secure);
     if text.is_empty() {
         let _ = std::fs::remove_file(&conf);
         return Ok(());

@@ -660,7 +660,8 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
             let adblock = std::fs::read(run_dir().join("adblock.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
             // состояние прокси DoH/DoT (mi-tt-dns пишет раз в 15 секунд); выключен — null
             let dns_proxy = std::fs::read(run_dir().join("dns-proxy.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
-            Response { status: 200, body: json!({ "ok": true, "service": st, "apply_pending": pending, "adblock": adblock, "dns_proxy": dns_proxy, "max_rules": MAX_RULES, "issues": [] }) }
+            let dns_tunnel = std::fs::read(run_dir().join("dns-tunnel.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
+            Response { status: 200, body: json!({ "ok": true, "service": st, "apply_pending": pending, "adblock": adblock, "dns_proxy": dns_proxy, "dns_tunnel": dns_tunnel, "max_rules": MAX_RULES, "issues": [] }) }
         }
         (_, x) if PATHS.contains(&x) => {
             Response::error(405, "method_not_allowed", format!("метод {method} не поддерживается"))

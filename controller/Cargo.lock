@@ -550,6 +550,7 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "sha2 0.10.9",
+ "socket2",
  "subtle",
  "totp-lite",
  "webpki-roots",
@@ -1005,6 +1006,16 @@ checksum = "28d567dcbaf0049cb8ac2608a76cd95ff9e4412e1899d389ee400918ca7537f5"
 dependencies = [
  "digest 0.11.3",
  "rand_core 0.10.1",
+]
+
+[[package]]
+name = "socket2"
+version = "0.5.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e22376abed350d73dd1cd119b57ffccad95b4e585a7cda43e286245ce23c0678"
+dependencies = [
+ "libc",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

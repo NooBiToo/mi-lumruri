@@ -420,6 +420,9 @@ fn check_dns(issues: &mut Vec<Issue>, d: &DnsConfig) {
             _ => issues.push(Issue::new("dns.tunnel_resolver", "bad_resolver", "резолвер туннеля — публичный IPv4-адрес DNS-сервера, например 1.1.1.1")),
         }
     }
+    if let Some(Err(m)) = d.tunnel_proxy_args() {
+        issues.push(Issue::new("dns.tunnel_secure", "tunnel_secure_unavailable", m));
+    }
     if let Some(s) = &d.secure {
         // DoH у Quad9 — только HTTP/2, а mi-tt-dns говорит HTTP/1.1 (сервер отвечает 505)
         if s.protocol == SecureProto::Doh && s.server == SecureServer::Quad9 {
@@ -587,7 +590,7 @@ mod tests {
         let rec = |d: &str, a: &str| HostRecord { domain: d.into(), address: a.into() };
         let check = |h: Vec<HostRecord>| {
             let mut i = Vec::new();
-            check_dns(&mut i, &DnsConfig { tunnel_resolver: None, adblock: None, secure: None, hosts: h });
+            check_dns(&mut i, &DnsConfig { tunnel_resolver: None, tunnel_secure: None, adblock: None, secure: None, hosts: h });
             i.into_iter().map(|x| format!("{}:{}", x.path, x.code)).collect::<Vec<_>>()
         };
         assert!(check(vec![rec("home.example.com", "192.168.31.10"), rec("nas", "fd00::5")]).is_empty());
@@ -601,7 +604,7 @@ mod tests {
         let check = |json: &str| {
             let mut i = Vec::new();
             let secure: SecureDns = serde_json::from_str(json).unwrap();
-            check_dns(&mut i, &DnsConfig { tunnel_resolver: None, adblock: None, secure: Some(secure), hosts: vec![] });
+            check_dns(&mut i, &DnsConfig { tunnel_resolver: None, tunnel_secure: None, adblock: None, secure: Some(secure), hosts: vec![] });
             i.into_iter().map(|x| x.code).collect::<Vec<_>>()
         };
         assert!(check(r#"{"protocol":"doh","server":"google"}"#).is_empty());

@@ -80,6 +80,17 @@ else
   ch secure skip "защищённый DNS выключен"
 fi
 
+if [ -f "$RENDER/dns-tunnel.args" ]; then
+  if ! pid_alive dnstunnel; then ch tunnelsecure bad "прокси DoH/DoT для сайтов через VPN не запущен"
+  elif "$BIN/mi-tt-dns" --probe 127.0.0.1:5454 example.com >/dev/null 2>&1; then
+    ok="$(sed -n 's/.*"upstream_ok":\([0-9]*\).*/\1/p' "$STATE/dns-tunnel.json" 2>/dev/null)"
+    ch tunnelsecure ok "шифрованные ответы через туннель: ${ok:-0}"
+  else
+    err="$(sed -n 's/.*"last_error":"\([^"]*\)".*/\1/p' "$STATE/dns-tunnel.json" 2>/dev/null)"
+    ch tunnelsecure bad "сервер не отвечает через туннель${err:+: $err}"
+  fi
+fi
+
 if [ -f "$RENDER/nfqws2.args" ]; then
   pid_alive nfqws2 && ch zapret ok "nfqws2 работает" || ch zapret bad "nfqws2 не запущен"
 else
@@ -89,7 +100,7 @@ fi
 # программы, которые падают и перезапускаются по кругу (служба проверяет их раз в несколько секунд)
 # считаются только перезапуски за последние 10 минут (служба пишет их время в $STATE/restarts)
 since=$(( $(date +%s) - 600 )); loop=""; recent=""
-for e in trusttunnel nfqws2 dnsproxy; do
+for e in trusttunnel nfqws2 dnsproxy dnstunnel; do
   c=$(awk -v s="$since" -v e="$e" '$1 >= s && $2 == e' "$STATE/restarts" 2>/dev/null | wc -l)
   if [ "$c" -ge 3 ]; then
     last="$(tail -n 1 "$LOG/$e.log" 2>/dev/null | cut -c1-120)"

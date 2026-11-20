@@ -82,6 +82,10 @@ pub struct DnsConfig {
     /// IPv4-адрес DNS-сервера для доменов, которые идут через туннель (по умолчанию 1.1.1.1).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tunnel_resolver: Option<String>,
+    /// Шифрование вопросов к резолверу туннеля (DoH/DoT поверх туннеля): защищает и участок от VPN-сервера до DNS.
+    /// Только для готовых серверов (Cloudflare, Google, AdGuard; Quad9 — DoT): для них известно имя в сертификате.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tunnel_secure: Option<SecureProto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adblock: Option<AdblockConfig>,
     /// Защищённый DNS (DoH/DoT) для доменов, которые не идут через туннель: их вопросы dnsmasq отдаёт mi-tt-dns.
@@ -128,6 +132,8 @@ pub enum SecureServer {
 
 /// Порт, на котором mi-tt-dns ждёт вопросы dnsmasq (только 127.0.0.1).
 pub const DNS_PROXY_PORT: u16 = 5453;
+/// Порт второго mi-tt-dns — для доменов туннеля (DoH/DoT поверх туннеля).
+pub const DNS_TUNNEL_PORT: u16 = 5454;
 
 impl SecureDns {
     /// Параметры mi-tt-dns (по одному в строке): адрес приёма, сервер и его IP. Запасной путь и файл состояния
@@ -175,6 +181,27 @@ pub const DEFAULT_TUNNEL_RESOLVER: &str = "1.1.1.1";
 impl DnsConfig {
     pub fn resolver(&self) -> &str {
         self.tunnel_resolver.as_deref().unwrap_or(DEFAULT_TUNNEL_RESOLVER)
+    }
+
+    /// Параметры второго mi-tt-dns для доменов туннеля: порт 5454, метка туннеля на сокетах (соединения идут в TUN по
+    /// правилу fwmark), без запасного пути — без туннеля вопрос не должен уходить провайдеру. None — шифрование выключено;
+    /// Err — для этого резолвера оно недоступно (своё IP, NextDNS без ID, DoH у Quad9).
+    pub fn tunnel_proxy_args(&self) -> Option<Result<Vec<String>, &'static str>> {
+        let protocol = self.tunnel_secure?;
+        let server = match self.resolver() {
+            "1.1.1.1" | "1.0.0.1" => SecureServer::Cloudflare,
+            "8.8.8.8" | "8.8.4.4" => SecureServer::Google,
+            "94.140.14.14" | "94.140.15.15" => SecureServer::Adguard,
+            "9.9.9.9" | "149.112.112.112" => SecureServer::Quad9,
+            _ => return Some(Err("шифрование DNS через VPN есть только для Cloudflare, Google, AdGuard и Quad9 (DoT)")),
+        };
+        if protocol == SecureProto::Doh && server == SecureServer::Quad9 {
+            return Some(Err("Quad9 по DoH работает только через HTTP/2 — выберите DoT"));
+        }
+        let mut a = SecureDns { protocol, server, nextdns_id: None, url: None, ips: vec![] }.proxy_args()?;
+        a[1] = format!("127.0.0.1:{DNS_TUNNEL_PORT}");
+        a.extend(["--mark".to_string(), format!("{:#x}", crate::plan::NF_MARK)]);
+        Some(Ok(a))
     }
 }
 
@@ -476,5 +503,26 @@ mod secure_dns_tests {
         assert_eq!(&c[2..], ["--doh", "https://dns.example/q", "--ip", "203.0.113.5"]);
         assert!(sd(r#"{"protocol":"doh","server":"custom","url":"https://dns.example/q"}"#).proxy_args().is_none());
         assert!(serde_json::from_str::<SecureDns>(r#"{"protocol":"doq","server":"google"}"#).is_err());
+    }
+}
+
+#[cfg(test)]
+mod tunnel_secure_tests {
+    use super::*;
+
+    fn dns(json: &str) -> DnsConfig {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn tunnel_proxy_args_mark_and_port() {
+        assert!(dns(r#"{}"#).tunnel_proxy_args().is_none());
+        let a = dns(r#"{"tunnel_secure":"doh"}"#).tunnel_proxy_args().unwrap().unwrap();
+        assert_eq!(a, ["--listen", "127.0.0.1:5454", "--doh", "https://cloudflare-dns.com/dns-query", "--ip", "1.1.1.1", "--ip", "1.0.0.1", "--mark", "0x4000"]);
+        let g = dns(r#"{"tunnel_resolver":"8.8.8.8","tunnel_secure":"dot"}"#).tunnel_proxy_args().unwrap().unwrap();
+        assert_eq!(&g[2..4], ["--dot", "dns.google"]);
+        assert!(dns(r#"{"tunnel_resolver":"9.9.9.9","tunnel_secure":"dot"}"#).tunnel_proxy_args().unwrap().is_ok());
+        assert!(dns(r#"{"tunnel_resolver":"9.9.9.9","tunnel_secure":"doh"}"#).tunnel_proxy_args().unwrap().is_err());
+        assert!(dns(r#"{"tunnel_resolver":"45.90.28.0","tunnel_secure":"doh"}"#).tunnel_proxy_args().unwrap().is_err());
     }
 }

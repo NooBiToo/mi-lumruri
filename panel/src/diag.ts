@@ -12,6 +12,7 @@ export const CHECK_TITLES: Record<string, string> = {
   firewall: 'Сортировка трафика',
   dns: 'DNS роутера',
   secure: 'Защищённый DNS (DoH/DoT)',
+  tunnelsecure: 'Шифрованный DNS через VPN',
   zapret: 'Обход блокировок (Zapret)',
   restarts: 'Стабильность программ',
 }

@@ -53,6 +53,13 @@ describe('DNS', () => {
     expect(formToDns({ ...dnsDefault(), adblock: true })).toEqual({ adblock: { enabled: true } })
     expect(dnsToForm({ adblock: { enabled: false } })).toEqual(dnsDefault())
   })
+  it('шифрование DNS через VPN: только для готовых серверов', () => {
+    expect(formToDns({ ...dnsDefault(), tunnelSecure: 'doh' })).toEqual({ tunnel_secure: 'doh' })
+    expect(dnsToForm({ tunnel_secure: 'dot' }).tunnelSecure).toBe('dot')
+    expect(formToDns({ ...dnsDefault(), resolver: '9.9.9.9', tunnelSecure: 'doh' })).toEqual({ tunnel_resolver: '9.9.9.9' })
+    expect(formToDns({ ...dnsDefault(), resolver: '9.9.9.9', tunnelSecure: 'dot' })).toEqual({ tunnel_resolver: '9.9.9.9', tunnel_secure: 'dot' })
+    expect(formToDns({ ...dnsDefault(), resolver: '203.0.113.9', tunnelSecure: 'doh' })).toEqual({ tunnel_resolver: '203.0.113.9' })
+  })
   it('защищённый DNS: готовый сервер, NextDNS и свой — туда и обратно', () => {
     expect(formToDns({ ...dnsDefault(), secure: 'doh' })).toEqual({ secure: { protocol: 'doh', server: 'cloudflare' } })
     expect(formToDns({ ...dnsDefault(), secure: 'dot', secureServer: 'nextdns', nextdnsId: ' ABC123 ', secureUrl: 'лишнее' }))
