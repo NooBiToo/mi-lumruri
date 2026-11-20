@@ -138,12 +138,17 @@ pub const DNS_TUNNEL_PORT: u16 = 5454;
 impl SecureDns {
     /// Параметры mi-tt-dns (по одному в строке): адрес приёма, сервер и его IP. Запасной путь и файл состояния
     /// добавляет служба. None — свой сервер или NextDNS заданы не полностью (это ловит проверка настроек).
+    /// Аргументы mi-tt-dns. У готовых серверов адреса IPv4, затем IPv6: прокси ходит на IPv6 только при недоступности
+    /// всех IPv4 (запасной путь на будущее; без IPv6 у провайдера он не мешает). У NextDNS адреса IPv6 личные — только IPv4.
     pub fn proxy_args(&self) -> Option<Vec<String>> {
+        fn v4v6(v4: &[&str], v6: &[&str]) -> Vec<String> {
+            v4.iter().chain(v6).map(|s| s.to_string()).collect()
+        }
         let (doh, dot, ips): (String, String, Vec<String>) = match self.server {
-            SecureServer::Cloudflare => ("https://cloudflare-dns.com/dns-query".into(), "one.one.one.one".into(), vec!["1.1.1.1".into(), "1.0.0.1".into()]),
-            SecureServer::Quad9 => ("https://dns.quad9.net/dns-query".into(), "dns.quad9.net".into(), vec!["9.9.9.9".into(), "149.112.112.112".into()]),
-            SecureServer::Google => ("https://dns.google/dns-query".into(), "dns.google".into(), vec!["8.8.8.8".into(), "8.8.4.4".into()]),
-            SecureServer::Adguard => ("https://dns.adguard-dns.com/dns-query".into(), "dns.adguard-dns.com".into(), vec!["94.140.14.14".into(), "94.140.15.15".into()]),
+            SecureServer::Cloudflare => ("https://cloudflare-dns.com/dns-query".into(), "one.one.one.one".into(), v4v6(&["1.1.1.1", "1.0.0.1"], &["2606:4700:4700::1111", "2606:4700:4700::1001"])),
+            SecureServer::Quad9 => ("https://dns.quad9.net/dns-query".into(), "dns.quad9.net".into(), v4v6(&["9.9.9.9", "149.112.112.112"], &["2620:fe::fe", "2620:fe::9"])),
+            SecureServer::Google => ("https://dns.google/dns-query".into(), "dns.google".into(), v4v6(&["8.8.8.8", "8.8.4.4"], &["2001:4860:4860::8888", "2001:4860:4860::8844"])),
+            SecureServer::Adguard => ("https://dns.adguard-dns.com/dns-query".into(), "dns.adguard-dns.com".into(), v4v6(&["94.140.14.14", "94.140.15.15"], &["2a10:50c0::ad1:ff", "2a10:50c0::ad2:ff"])),
             SecureServer::Nextdns => {
                 let id = self.nextdns_id.as_deref()?;
                 (format!("https://dns.nextdns.io/{id}"), format!("{id}.dns.nextdns.io"), vec!["45.90.28.0".into(), "45.90.30.0".into()])
@@ -495,7 +500,7 @@ mod secure_dns_tests {
     #[test]
     fn proxy_args_for_presets_and_custom() {
         let a = sd(r#"{"protocol":"doh","server":"cloudflare"}"#).proxy_args().unwrap();
-        assert_eq!(a, ["--listen", "127.0.0.1:5453", "--doh", "https://cloudflare-dns.com/dns-query", "--ip", "1.1.1.1", "--ip", "1.0.0.1"]);
+        assert_eq!(a, ["--listen", "127.0.0.1:5453", "--doh", "https://cloudflare-dns.com/dns-query", "--ip", "1.1.1.1", "--ip", "1.0.0.1", "--ip", "2606:4700:4700::1111", "--ip", "2606:4700:4700::1001"]);
         let q = sd(r#"{"protocol":"dot","server":"quad9"}"#).proxy_args().unwrap();
         assert_eq!(&q[2..4], ["--dot", "dns.quad9.net"]);
         let n = sd(r#"{"protocol":"dot","server":"nextdns","nextdns_id":"abc123"}"#).proxy_args().unwrap();
@@ -520,7 +525,7 @@ mod tunnel_secure_tests {
     fn tunnel_proxy_args_mark_and_port() {
         assert!(dns(r#"{}"#).tunnel_proxy_args().is_none());
         let a = dns(r#"{"tunnel_secure":"doh"}"#).tunnel_proxy_args().unwrap().unwrap();
-        assert_eq!(a, ["--listen", "127.0.0.1:5454", "--doh", "https://cloudflare-dns.com/dns-query", "--ip", "1.1.1.1", "--ip", "1.0.0.1", "--device", "mitt0", "--mark", "0x4000"]);
+        assert_eq!(a, ["--listen", "127.0.0.1:5454", "--doh", "https://cloudflare-dns.com/dns-query", "--ip", "1.1.1.1", "--ip", "1.0.0.1", "--ip", "2606:4700:4700::1111", "--ip", "2606:4700:4700::1001", "--device", "mitt0", "--mark", "0x4000"]);
         let g = dns(r#"{"tunnel_resolver":"8.8.8.8","tunnel_secure":"dot"}"#).tunnel_proxy_args().unwrap().unwrap();
         assert_eq!(&g[2..4], ["--dot", "dns.google"]);
         assert!(dns(r#"{"tunnel_resolver":"9.9.9.9","tunnel_secure":"dot"}"#).tunnel_proxy_args().unwrap().is_ok());

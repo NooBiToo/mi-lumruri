@@ -74,10 +74,8 @@ fn now() -> u64 {
 
 impl Pool {
     fn connect(&self) -> Result<BufReader<Tls>, String> {
-        let n = self.up.addrs.len();
         let mut last = String::new();
-        for _ in 0..n {
-            let a = self.up.addrs[(self.next.fetch_add(1, Ordering::Relaxed) as usize) % n];
+        for a in connect_order(&self.up.addrs, self.next.fetch_add(1, Ordering::Relaxed) as usize) {
             match self.connect_to(a) {
                 Ok(s) => return Ok(s),
                 Err(e) => last = format!("{a}: {e}"),
@@ -156,6 +154,14 @@ impl Pool {
             }
         }
     }
+}
+
+/// Порядок попыток: адреса IPv4 по кругу (нагрузка поровну), затем IPv6 по порядку — запасной путь. Без IPv4 — только IPv6.
+fn connect_order(addrs: &[SocketAddr], turn: usize) -> Vec<SocketAddr> {
+    let v4: Vec<SocketAddr> = addrs.iter().copied().filter(SocketAddr::is_ipv4).collect();
+    let mut out: Vec<SocketAddr> = (0..v4.len()).map(|i| v4[(turn + i) % v4.len()]).collect();
+    out.extend(addrs.iter().copied().filter(SocketAddr::is_ipv6));
+    out
 }
 
 /// Соединение с меткой (SO_MARK) и/или привязкой к устройству (SO_BINDTODEVICE) — до connect. Привязка надёжнее метки:
@@ -558,6 +564,18 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ipv6_only_after_all_ipv4() {
+        let a = |s: &str| s.parse::<SocketAddr>().unwrap();
+        let addrs = [a("1.1.1.1:443"), a("1.0.0.1:443"), a("[2606:4700:4700::1111]:443"), a("[2606:4700:4700::1001]:443")];
+        assert_eq!(connect_order(&addrs, 0), addrs);
+        assert_eq!(connect_order(&addrs, 1), [addrs[1], addrs[0], addrs[2], addrs[3]]);
+        assert_eq!(connect_order(&addrs, 2), addrs);
+        let only6 = [addrs[2], addrs[3]];
+        assert_eq!(connect_order(&only6, 1), only6);
+        assert!(connect_order(&[], 3).is_empty());
+    }
 
     #[test]
     fn http_response_content_length_and_chunked() {
