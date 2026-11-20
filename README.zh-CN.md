@@ -8,7 +8,7 @@
 
 **路由器：** 小米 BE7000（RC06），固件 1.1.38。无需刷机：软件包通过 SSH 安装到内部存储（约 5 MB），使用原厂的 iptables、ipset 和 dnsmasq 运行。
 
-面板和详细指南为俄语。**[安装与设置](docs/guide.md)** · [更新或回滚](docs/guide.md#обновление-и-откат) · [限制](docs/guide.md#ограничения) · [卸载](docs/guide.md#удаление) · [构建软件包](docs/build.md)
+面板为俄语界面，指南中给出了每个俄语标签。**[安装与设置](docs/guide.zh-CN.md)** · [更新或回滚](docs/guide.zh-CN.md#更新与回滚) · [限制](docs/guide.zh-CN.md#限制) · [卸载](docs/guide.zh-CN.md#卸载) · [构建软件包](docs/build.md)（俄语）
 
 ## 安装
 
@@ -18,7 +18,7 @@
 python install.py 192.168.31.1
 ```
 
-需要 Python 3.8+、OpenSSH 客户端，以及路由器的 root SSH 权限（[获取方法](docs/guide.md#доступ-по-ssh-перед-установкой)）。安装程序会询问 root 密码并设置面板密码。面板地址：`https://192.168.31.1:8443/`。
+需要 Python 3.8+、OpenSSH 客户端，以及路由器的 root SSH 权限（[获取方法](docs/guide.zh-CN.md#安装前开启-ssh-访问)）。安装程序会询问 root 密码并设置面板密码。面板地址：`https://192.168.31.1:8443/`。
 
 路由器内部存储空间很小：约 20 MB，其中固件占用约 9 MB。空间紧张时，安装程序会安装新版本但不保留旧版本，并提示将无法回滚。
 
@@ -43,6 +43,11 @@ python install.py 192.168.31.1
 
 ![「诊断」页面：检查结果、网站检查和日志](docs/img/diag.png)
 
+<p>
+  <img src="docs/img/zapret.png" alt="「Zapret」页面：状态、所有网站和 YouTube 的方法、选择方法与定期复查" width="49%">
+  <img src="docs/img/server.png" alt="「服务器」页面：粘贴链接、服务器数据，以及包含 TLS 指纹和 client_random 的高级参数" width="49%">
+</p>
+
 ## 工作原理
 
 1. dnsmasq 把列表中域名的地址加入 ipset 集合。
@@ -64,7 +69,7 @@ python install.py 192.168.31.1
 - 仅支持一个 TrustTunnel 服务器。
 - DoT 并非处处可用：许多运营商封锁了 853 端口。
 
-完整列表见[指南](docs/guide.md#ограничения)。
+完整列表见[指南](docs/guide.zh-CN.md#限制)。
 
 ## 开发者
 

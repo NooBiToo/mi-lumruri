@@ -8,7 +8,7 @@ Selective VPN and DPI bypass for the Xiaomi BE7000 on stock firmware. Paste a li
 
 **Router:** Xiaomi BE7000 (RC06), firmware 1.1.38. No reflashing: the package is installed over SSH into internal storage (about 5 MB) and runs on the stock iptables, ipset and dnsmasq.
 
-The panel and the detailed guide are in Russian. **[Install and set up](docs/guide.md)** · [Update or roll back](docs/guide.md#обновление-и-откат) · [Limitations](docs/guide.md#ограничения) · [Uninstall](docs/guide.md#удаление) · [Build the package](docs/build.md)
+The panel is in Russian; the guide names each Russian label. **[Install and set up](docs/guide.en.md)** · [Update or roll back](docs/guide.en.md#updating-and-rollback) · [Limitations](docs/guide.en.md#limitations) · [Uninstall](docs/guide.en.md#uninstalling) · [Build the package](docs/build.md) (in Russian)
 
 ## Install
 
@@ -18,7 +18,7 @@ Download three files from the [latest release](https://github.com/NooBiToo/mi-lu
 python install.py 192.168.31.1
 ```
 
-You need Python 3.8+, an OpenSSH client and root SSH access to the router ([how to get it](docs/guide.md#доступ-по-ssh-перед-установкой)). The installer asks for the root password and sets the panel password. The panel is at `https://192.168.31.1:8443/`.
+You need Python 3.8+, an OpenSSH client and root SSH access to the router ([how to get it](docs/guide.en.md#ssh-access-before-installation)). The installer asks for the root password and sets the panel password. The panel is at `https://192.168.31.1:8443/`.
 
 The router's internal storage is small: about 20 MB, of which the firmware uses about 9 MB. If space is tight, the installer installs the new version without keeping the previous one and warns that rollback will not be available.
 
@@ -43,6 +43,11 @@ Changes are saved automatically. The panel also works well on a phone.
 
 ![Diagnostics screen: check results, site check and logs](docs/img/diag.png)
 
+<p>
+  <img src="docs/img/zapret.png" alt="Zapret screen: status, method for all sites and for YouTube, method search and scheduled re-check" width="49%">
+  <img src="docs/img/server.png" alt="Server screen: link paste, server data and advanced parameters with TLS profile and client_random" width="49%">
+</p>
+
 ## How it works
 
 1. dnsmasq adds the addresses of listed domains to ipset sets.
@@ -64,7 +69,7 @@ The package runs on the BE7000 with firmware 1.1.38: tunnel, selective routing, 
 - One TrustTunnel server is supported.
 - DoT does not work everywhere: many ISPs block port 853.
 
-The full list is in the [guide](docs/guide.md#ограничения).
+The full list is in the [guide](docs/guide.en.md#limitations).
 
 ## For developers
 
