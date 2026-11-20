@@ -112,6 +112,41 @@ pub struct AdblockConfig {
     /// Домены-исключения: их вопросы не блокируются, даже если домен или родитель есть в списке.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exceptions: Vec<String>,
+    /// Откуда служба скачивает список: HaGeZi Light (по умолчанию), HaGeZi Normal или своя ссылка `url`.
+    #[serde(default, skip_serializing_if = "AdblockSource::is_default")]
+    pub source: AdblockSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdblockSource {
+    #[default]
+    Light,
+    Normal,
+    Url,
+}
+
+impl AdblockSource {
+    fn is_default(&self) -> bool {
+        *self == AdblockSource::Light
+    }
+}
+
+/// Списки HaGeZi (GPL-3.0) в виде «домен вместе с поддоменами» — как `address=/домен/` у dnsmasq.
+pub const HAGEZI_LIGHT: &str = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/light-onlydomains.txt";
+pub const HAGEZI_NORMAL: &str = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/multi-onlydomains.txt";
+
+impl AdblockConfig {
+    /// Ссылка, по которой служба скачивает список; None — своя ссылка не задана.
+    pub fn list_url(&self) -> Option<&str> {
+        match self.source {
+            AdblockSource::Light => Some(HAGEZI_LIGHT),
+            AdblockSource::Normal => Some(HAGEZI_NORMAL),
+            AdblockSource::Url => self.url.as_deref(),
+        }
+    }
 }
 
 /// Выбор стратегий Zapret из встроенного каталога (`zapret::catalog`): произвольные аргументы nfqws2 не принимаются.

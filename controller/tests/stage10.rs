@@ -113,7 +113,11 @@ fn adblock_update_is_atomic_and_keeps_previous_on_error() {
     assert_eq!(run(&["adblock-update", cfg.to_str().unwrap(), d.join("b.txt").to_str().unwrap()]).0, 0);
     assert_eq!(std::fs::read_to_string(d.join("adblock.list")).unwrap(), "b.example\nc.example\n");
     assert_eq!(std::fs::read_to_string(d.join("adblock.list.prev")).unwrap(), "a.example\n");
-    for bad in ["ok.example\nnot a domain\n", "", "# только комментарий\n", "-x-.example\n"] {
+    // одна кривая строка среди доменов пропускается (скачанный список не останавливается из-за неё)
+    std::fs::write(d.join("skip.txt"), "b.example\nc.example\nnot a domain\n").unwrap();
+    let (code, v) = run(&["adblock-update", cfg.to_str().unwrap(), d.join("skip.txt").to_str().unwrap()]);
+    assert_eq!((code, v["domains"].as_u64()), (0, Some(2)), "{v}");
+    for bad in ["", "# только комментарий\n", "-x-.example\n", "<html><body>404</body></html>\n"] {
         std::fs::write(d.join("bad.txt"), bad).unwrap();
         let (code, v) = run(&["adblock-update", cfg.to_str().unwrap(), d.join("bad.txt").to_str().unwrap()]);
         assert_eq!(code, 1, "{bad:?}: {v}");

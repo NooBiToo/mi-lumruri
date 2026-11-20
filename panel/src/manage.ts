@@ -1,6 +1,6 @@
 // Формы без DOM: профиль TrustTunnel ↔ Profile (экран «Сервер»), DNS (экран «Дополнительно»).
 
-import type { DnsConfig, Endpoint, HostRecord, Profile, ProfileSecret } from './api'
+import type { AdblockSource, DnsConfig, Endpoint, HostRecord, Profile, ProfileSecret } from './api'
 
 export interface ProfileForm {
   id: string
@@ -53,15 +53,16 @@ export function formToSecret(f: ProfileForm): ProfileSecret | null {
 /** Резолвер туннеля по умолчанию (controller/src/model.rs: DEFAULT_TUNNEL_RESOLVER). */
 export const DEFAULT_TUNNEL_RESOLVER = '1.1.1.1'
 
-export interface DnsForm { resolver: string; adblock: boolean; exceptions: string; hosts: HostRecord[] }
+export interface DnsForm { resolver: string; adblock: boolean; adblockSource: AdblockSource; adblockUrl: string; exceptions: string; hosts: HostRecord[] }
 
 export function dnsDefault(): DnsForm {
-  return { resolver: DEFAULT_TUNNEL_RESOLVER, adblock: false, exceptions: '', hosts: [] }
+  return { resolver: DEFAULT_TUNNEL_RESOLVER, adblock: false, adblockSource: 'light', adblockUrl: '', exceptions: '', hosts: [] }
 }
 
 export function dnsToForm(d: DnsConfig | undefined): DnsForm {
   if (!d) return dnsDefault()
-  return { resolver: d.tunnel_resolver ?? DEFAULT_TUNNEL_RESOLVER, adblock: !!d.adblock?.enabled, exceptions: (d.adblock?.exceptions ?? []).join('\n'),
+  return { resolver: d.tunnel_resolver ?? DEFAULT_TUNNEL_RESOLVER, adblock: !!d.adblock?.enabled, adblockSource: d.adblock?.source ?? 'light',
+    adblockUrl: d.adblock?.url ?? '', exceptions: (d.adblock?.exceptions ?? []).join('\n'),
     hosts: (d.hosts ?? []).map((h) => ({ domain: h.domain, address: h.address })) }
 }
 
@@ -71,7 +72,11 @@ export function formToDns(f: DnsForm): DnsConfig | null {
   const exceptions = f.exceptions.split(/[\s,]+/).filter(Boolean)
   const d: DnsConfig = {}
   if (resolver && resolver !== DEFAULT_TUNNEL_RESOLVER) d.tunnel_resolver = resolver
-  if (f.adblock || exceptions.length) d.adblock = { enabled: f.adblock, ...(exceptions.length ? { exceptions } : {}) }
+  // источник по умолчанию (Light) не пишется; ссылка — только для «Своя ссылка» (недописанная при другом источнике не сохраняется)
+  const url = f.adblockSource === 'url' ? f.adblockUrl.trim() : ''
+  if (f.adblock || exceptions.length || f.adblockSource !== 'light') {
+    d.adblock = { enabled: f.adblock, ...(exceptions.length ? { exceptions } : {}), ...(f.adblockSource !== 'light' ? { source: f.adblockSource } : {}), ...(url ? { url } : {}) }
+  }
   if (f.hosts.length) d.hosts = f.hosts.map((h) => ({ domain: h.domain, address: h.address }))
   return Object.keys(d).length ? d : null
 }

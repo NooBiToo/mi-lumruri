@@ -49,6 +49,7 @@ fn main() -> ExitCode {
         ["adblock-update", cfg, list] => cli(adblock_update(cfg, list)),
         ["category-update", cfg, id, list] => cli(category_update(cfg, id, list)),
         ["category-check", kind, list] => cli(category_check(kind, list)),
+        ["adblock-check", list] => cli(adblock_check(list)),
         ["zapret-list", kind] => match zapret_kind(kind) {
             Some(k) => lines(zapret::candidates(k).into_iter().map(str::to_string)),
             None => usage(),
@@ -199,6 +200,9 @@ fn render_cmd(cfg: &str, secrets: &str, out: &str) -> Response {
                 .and_then(|_| opt("client.toml", r.client_toml.clone(), true))
                 .and_then(|_| write_dns_file(&config, &r.dns, cfg_path, dir))
                 .and_then(|_| opt("schedule", Some(config.schedule.unwrap_or_default().file()), false))
+                // откуда служба скачивает список рекламы; нет файла — блокировка выключена
+                .and_then(|_| opt("adblock.url", config.dns.as_ref().and_then(|d| d.adblock.as_ref()).filter(|a| a.enabled)
+                    .and_then(|a| a.list_url()).map(|u| format!("{u}\n")), false))
                 .and_then(|_| opt("nfqws2.args", (!r.nfqws2_args.is_empty()).then(|| format!("{}\n", r.nfqws2_args.join("\n"))), false))
             {
                 return Response::error(500, "write_failed", m);
@@ -211,7 +215,8 @@ fn render_cmd(cfg: &str, secrets: &str, out: &str) -> Response {
     }
 }
 
-/// Файл dnsmasq: наборы ipset доменов правил, резолвер туннеля и блокировка рекламы (`adblock.list` рядом с настройками).
+/// Файл dnsmasq: наборы ipset доменов правил, резолвер туннеля и блокировка рекламы. Список рекламы — скачанный службой
+/// (`MI_TT_ADBLOCK_LIST`, копия в RAM), иначе `adblock.list` рядом с настройками (загрузка через CLI/API).
 /// Пустой — файла нет. Ошибочный список рекламы — отказ (действующие файлы не меняются).
 fn write_dns_file(config: &model::Config, plan: &mi_tt::dns::DnsPlan, cfg: &std::path::Path, dir: &std::path::Path) -> Result<(), String> {
     use mi_tt::dns;
@@ -219,11 +224,13 @@ fn write_dns_file(config: &model::Config, plan: &mi_tt::dns::DnsPlan, cfg: &std:
     let adblock = config.dns.as_ref().and_then(|d| d.adblock.as_ref());
     let mut blocked = Vec::new();
     if adblock.is_some_and(|a| a.enabled) {
-        let list = cfg.with_file_name("adblock.list");
+        let list = std::env::var("MI_TT_ADBLOCK_LIST").ok().filter(|s| !s.is_empty()).map(std::path::PathBuf::from)
+            .filter(|p| p.exists()).unwrap_or_else(|| cfg.with_file_name("adblock.list"));
         if list.exists() {
             let text = read_limited(&list.to_string_lossy(), dns::ADBLOCK_MAX_BYTES as u64)?;
             blocked = dns::parse_adblock_list(&String::from_utf8_lossy(&text))
-                .map_err(|i| format!("adblock.list не прошёл проверку: {}", i.iter().map(|x| format!("{} {}", x.path, x.message)).collect::<Vec<_>>().join("; ")))?;
+                .map_err(|i| format!("adblock.list не прошёл проверку: {}", i.iter().map(|x| format!("{} {}", x.path, x.message)).collect::<Vec<_>>().join("; ")))?
+                .0;
         }
     }
     let hosts = config.dns.as_ref().map(|d| d.hosts.as_slice()).unwrap_or_default();
@@ -236,6 +243,19 @@ fn write_dns_file(config: &model::Config, plan: &mi_tt::dns::DnsPlan, cfg: &std:
 }
 
 /// Проверка файла списка без записи: непустой список в формате `parse_category_list` (HTML и прочий мусор не проходит).
+/// Проверка скачанного списка рекламы (mitt-adblock.sh): тот же разбор, что при рендере.
+fn adblock_check(list: &str) -> Response {
+    use serde_json::json;
+    let text = match read_limited(list, mi_tt::dns::ADBLOCK_MAX_BYTES as u64) {
+        Ok(t) => t,
+        Err(m) => return Response::error(500, "unreadable", m),
+    };
+    match mi_tt::dns::parse_adblock_list(&String::from_utf8_lossy(&text)) {
+        Ok((d, skipped)) => Response { status: 200, body: json!({ "ok": true, "domains": d.len(), "skipped": skipped, "issues": [] }) },
+        Err(i) => Response { status: 422, body: json!({ "ok": false, "error": { "code": "adblock_invalid", "message": "список рекламы не прошёл проверку" }, "issues": i }) },
+    }
+}
+
 fn category_check(kind: &str, list: &str) -> Response {
     use serde_json::json;
     let kind = match kind {
@@ -303,7 +323,7 @@ fn adblock_update(cfg: &str, list: &str) -> Response {
         Err(m) => return Response::error(500, "unreadable", m),
     };
     let domains = match dns::parse_adblock_list(&String::from_utf8_lossy(&text)) {
-        Ok(d) if !d.is_empty() => d,
+        Ok((d, _)) if !d.is_empty() => d,
         Ok(_) => return Response::error(422, "adblock_empty", "пустой список не применяется; действующий список сохранён"),
         Err(i) => {
             return Response { status: 422, body: json!({ "ok": false, "error": { "code": "adblock_invalid", "message": "список не прошёл проверку; действующий список сохранён" }, "issues": i }) };

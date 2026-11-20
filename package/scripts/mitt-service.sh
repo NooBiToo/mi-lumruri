@@ -77,7 +77,13 @@ while [ -f "$STATE/service.wanted" ]; do
   # готовые списки: проверка обновлений в фоне — раз в сутки и по заявке панели (цикл службы не ждёт загрузку)
   if [ -f "$STATE/lists-update.request" ] || lists_due; then
     # идущая проверка: заявка остаётся до следующего прохода
-    pid_alive lists-update || { rm -f "$STATE/lists-update.request"; start_bg lists-update sh "$SCR/mitt-lists.sh" update; mlog "проверка обновлений списков запущена"; }
+    # кнопка «Обновить» обновляет и список рекламы: сброс его отсрочки
+    pid_alive lists-update || { [ -f "$STATE/lists-update.request" ] && rm -f "$STATE/adblock-next"; rm -f "$STATE/lists-update.request"
+      start_bg lists-update sh "$SCR/mitt-lists.sh" update; mlog "проверка обновлений списков запущена"; }
+  fi
+  # список рекламы: по расписанию списков сайтов, по кнопке «Обновить» и при смене ссылки — в фоне
+  if ! pid_alive adblock-update && adblock_due; then
+    start_bg adblock-update sh "$SCR/mitt-adblock.sh"
   fi
   for e in trusttunnel nfqws2; do
     if [ -f "$STATE/$e.wanted" ] && ! pid_alive "$e"; then

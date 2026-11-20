@@ -106,7 +106,11 @@ render_now() {
   [ ! -f "$SCR/mitt-lists.sh" ] || sh "$SCR/mitt-lists.sh" sync >>"$LOG/lists.log" 2>&1 || mlog "списки: синхронизация не прошла, действуют прежние"
   # client.toml содержит пароль TrustTunnel: каталог рендера доступен только root
   rm -rf "$RENDER.new"; mkdir -p "$RENDER.new"; chmod 700 "$RENDER.new"
-  if ctl render "$ETC/config.json" "$ETC/secrets.json" "$RENDER.new" >"$STATE/render.json" 2>&1; then
+  # список рекламы: рабочая копия в RAM; после загрузки роутера — из сжатой копии в /data (mitt-adblock.sh)
+  if [ ! -f "$RUN/adblock.list" ] && [ -f "$DATA/adblock.list.gz" ]; then
+    gzip -dc "$DATA/adblock.list.gz" >"$RUN/adblock.list.t" 2>/dev/null && mv -f "$RUN/adblock.list.t" "$RUN/adblock.list"       && cp -f "$DATA/adblock.src" "$RUN/adblock.src" 2>/dev/null || rm -f "$RUN/adblock.list.t"
+  fi
+  if MI_TT_ADBLOCK_LIST="$RUN/adblock.list" ctl render "$ETC/config.json" "$ETC/secrets.json" "$RENDER.new" >"$STATE/render.json" 2>&1; then
     rm -rf "$RENDER.prev"; [ -d "$RENDER" ] && mv "$RENDER" "$RENDER.prev"; mv "$RENDER.new" "$RENDER"
     printf '{"ok":true,"at":%s}\n' "$(date +%s)" >"$STATE/last-render.json"; return 0
   fi
@@ -212,6 +216,22 @@ lists_due() {
   case "$c" in ''|*[!0-9]*) return 0;; esac
   [ "$cm" = "$(lists_commit)" ] || return 0
   [ "$c" -gt "$now" ] || [ $((now - c)) -ge "$LISTS_PERIOD" ]
+}
+
+# --- список рекламы (mitt-adblock.sh) ---
+# пора скачивать, если блокировка включена (есть adblock.url) и: в этой загрузке роутера ещё не скачивали или нажата
+# «Обновить» (нет $STATE/adblock-next), сменилась ссылка, подошёл срок отсрочки (успех — период списков, сбой — час)
+# и при этом списка нет или он от другой ссылки; при «только вручную» служба сама не обновляет
+adblock_due() {
+  local n u now want
+  [ -f "$RENDER/adblock.url" ] || return 1
+  want="$(head -n 1 "$RENDER/adblock.url")"; now="$(date +%s)"
+  { read -r n u <"$STATE/adblock-next"; } 2>/dev/null
+  case "$n" in ''|*[!0-9]*) return 0;; esac
+  [ "$u" = "$want" ] || return 0
+  [ "$n" -le "$now" ] || return 1
+  [ -f "$RUN/adblock.list" ] && [ "$(cat "$RUN/adblock.src" 2>/dev/null)" = "$want" ] || return 0
+  [ "$(lists_period)" -gt 0 ]
 }
 
 # --- подбор стратегии Zapret (mitt-zapret-test.sh) ---

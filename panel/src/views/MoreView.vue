@@ -5,7 +5,8 @@ import ToggleSwitch from 'primevue/toggleswitch'
 import { ChevronDown, ChevronRight } from 'lucide-vue-next'
 import type { ListsUpdate } from '../api'
 import { CUSTOM_DNS, DNS_PRESETS, dnsPresetIp, dnsPresetOf, dnsToForm, formToDns, type DnsForm } from '../manage'
-import { config, save } from '../store'
+import { config, save, service } from '../store'
+import { when } from '../status'
 import { saveNow, useAutosave, type Blocker } from '../autosave'
 import { dnsIcon } from '../brand'
 import ServiceLogo from '../components/ServiceLogo.vue'
@@ -57,7 +58,34 @@ const resolverOk = computed(() => {
   const v = draft.value.dns.resolver.trim()
   return /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/.test(v)
 })
+// ---- блокировка рекламы ----
+const ADBLOCK_SOURCES = [
+  { value: 'light' as const, label: 'HaGeZi Light', desc: 'Реклама и трекеры, почти не мешает сайтам — около 90 тыс. доменов. Рекомендуется' },
+  { value: 'normal' as const, label: 'HaGeZi Normal', desc: 'Шире: больше трекеров и телеметрии, изредка может мешать отдельным сайтам — около 200 тыс. доменов' },
+  { value: 'url' as const, label: 'Своя ссылка', desc: 'Любой список доменов или hosts по ссылке https' },
+]
+const adblockUrlOk = computed(() => draft.value.dns.adblockSource !== 'url' || /^https:\/\/[^\s"'`\\$<>|;]+$/.test(draft.value.dns.adblockUrl.trim()))
+/** Итог загрузки — только если он про текущую ссылку (после смены списка ждём новую загрузку). */
+const adblockState = computed(() => {
+  const a = service.value?.adblock
+  return a && (!a.url || a.url === currentAdblockUrl.value) ? a : null
+})
+const HAGEZI = { light: 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/light-onlydomains.txt', normal: 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/multi-onlydomains.txt' }
+const currentAdblockUrl = computed(() => {
+  const a = config.value?.dns?.adblock
+  return !a ? null : a.source === 'url' ? (a.url ?? null) : HAGEZI[a.source ?? 'light']
+})
+const adblockText = computed(() => {
+  const a = adblockState.value
+  if (!adblockUrlOk.value) return 'Не сохранено: сначала укажите ссылку https://…'
+  if (dirty.value) return 'Сохраняется…'
+  if (!a) return 'Роутер скачает список в течение минуты'
+  if (a.error) return `Список не обновился: ${a.error}. Пока действует прежний, если он был`
+  return `${(a.domains ?? 0).toLocaleString('ru-RU')} доменов · список ${a.updated ? `от ${when(a.updated)}` : 'загружен'} · проверен ${when(a.checked)}`
+})
+
 function blocker(): Blocker | null {
+  if (!adblockUrlOk.value) return { text: 'Ссылка на список рекламы — https://…' }
   return resolverOk.value ? null : { text: 'Свой DNS-сервер — адрес IPv4, например 1.1.1.1.' }
 }
 useAutosave({
@@ -103,13 +131,32 @@ useAutosave({
     </nav>
 
     <div class="card card--flush settings">
-      <label class="setrow">
-        <span class="setrow__text">
-          <span class="setrow__title">Блокировка рекламы</span>
-          <span class="setrow__desc">Для всех устройств дома: рекламные сайты не открываются</span>
-        </span>
-        <ToggleSwitch v-model="draft.dns.adblock" input-id="adblock" />
-      </label>
+      <div class="setblock" role="group" aria-labelledby="adblock-title">
+        <label class="setrow setrow--bare">
+          <span class="setrow__text">
+            <span id="adblock-title" class="setrow__title">Блокировка рекламы</span>
+            <span class="setrow__desc">Работает через DNS роутера: на домены из списка рекламы и трекеров роутер отвечает «такого сайта нет».
+              Действует на все устройства, которые получают DNS от роутера</span>
+          </span>
+          <ToggleSwitch v-model="draft.dns.adblock" input-id="adblock" />
+        </label>
+        <template v-if="draft.dns.adblock">
+          <Segmented v-model="draft.dns.adblockSource" class="self-start" :options="ADBLOCK_SOURCES" label="Список рекламы" name="adblock-source" />
+          <span class="field__hint">{{ ADBLOCK_SOURCES.find((o) => o.value === draft.dns.adblockSource)?.desc }}</span>
+          <div v-if="draft.dns.adblockSource === 'url'" class="field dns__custom dns__custom--wide">
+            <label for="adblock-url" class="field__label">Ссылка на список</label>
+            <InputText id="adblock-url" v-model="draft.dns.adblockUrl" placeholder="https://…/list.txt" spellcheck="false" autocomplete="off"
+              :invalid="!adblockUrlOk" aria-describedby="adblock-url-hint" />
+            <span id="adblock-url-hint" :class="adblockUrlOk ? 'field__hint' : 'field__error'">{{ adblockUrlOk
+              ? 'По домену в строке или строки hosts (0.0.0.0 домен); # — комментарий'
+              : 'Нужна ссылка https://…' }}</span>
+          </div>
+          <span :class="['adblock__state', { 'adblock__state--bad': adblockState?.error }]">
+            <span :class="['led', adblockState ? (adblockState.error ? 'led--warn' : 'led--ok') : 'led--idle']" aria-hidden="true" />
+            <span class="meta">{{ adblockText }}</span>
+          </span>
+        </template>
+      </div>
 
       <div class="setblock" role="group" aria-labelledby="dns-title">
         <span class="setrow__text">

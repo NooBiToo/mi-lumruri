@@ -338,6 +338,10 @@ label.setrow { cursor: pointer; }
 .dns__desc { color: var(--muted); font-size: 0.8125rem; line-height: 1.35; }
 .dns__note { padding: 0.75rem 1rem; border-radius: 10px; background: var(--warn-soft); color: var(--warn-ink); font-size: 0.875rem; max-width: 72ch; }
 .dns__custom { max-width: 20rem; }
+.dns__custom--wide { max-width: 36rem; }
+.setrow--bare { padding: 0; }
+.adblock__state { display: inline-flex; align-items: center; gap: 0.5rem; }
+.adblock__state--bad .meta { color: var(--warn-ink); }
 
 /* ---------- «Обзор» ---------- */
 .state { grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 0.75rem 1rem; padding: 1.25rem 1.5rem; }

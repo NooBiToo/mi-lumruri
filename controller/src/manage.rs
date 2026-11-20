@@ -290,10 +290,11 @@ pub fn replace_list(target: &Path, entries: &[String]) -> Result<String, String>
 
 pub fn adblock_list(config_path: &str, text: &str) -> Response {
     match crate::dns::parse_adblock_list(text) {
-        Ok(d) if !d.is_empty() => match replace_list(&config_dir(config_path).join("adblock.list"), &d) {
-            Ok(sha) => Response { status: 200, body: json!({ "ok": true, "domains": d.len(), "sha256": sha, "issues": [] }) },
+        Ok((d, skipped)) if !d.is_empty() => match replace_list(&config_dir(config_path).join("adblock.list"), &d) {
+            Ok(sha) => Response { status: 200, body: json!({ "ok": true, "domains": d.len(), "skipped": skipped, "sha256": sha, "issues": [] }) },
             Err(m) => Response::error(500, "write_failed", m),
         },
+        Err(i) if i.iter().any(|x| x.code == "empty") => Response::error(422, "adblock_empty", "пустой список не применяется; действующий список сохранён"),
         Ok(_) => Response::error(422, "adblock_empty", "пустой список не применяется; действующий список сохранён"),
         Err(i) => Response { status: 422, body: json!({ "ok": false, "error": { "code": "adblock_invalid", "message": "список не прошёл проверку; действующий список сохранён" }, "issues": i }) },
     }
@@ -655,7 +656,9 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
         ("GET", "/status") => {
             let st = std::fs::read(run_dir().join("status.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
             let pending = run_dir().join("apply.request").exists();
-            Response { status: 200, body: json!({ "ok": true, "service": st, "apply_pending": pending, "max_rules": MAX_RULES, "issues": [] }) }
+            // итог последней загрузки списка рекламы (mitt-adblock.sh); до первой — null
+            let adblock = std::fs::read(run_dir().join("adblock.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
+            Response { status: 200, body: json!({ "ok": true, "service": st, "apply_pending": pending, "adblock": adblock, "max_rules": MAX_RULES, "issues": [] }) }
         }
         (_, x) if PATHS.contains(&x) => {
             Response::error(405, "method_not_allowed", format!("метод {method} не поддерживается"))

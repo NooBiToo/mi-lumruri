@@ -41,17 +41,23 @@ describe('профиль TrustTunnel', () => {
 
 describe('DNS', () => {
   it('по умолчанию — резолвер 1.1.1.1 без блокировки рекламы; сохраняется как null', () => {
-    expect(dnsDefault()).toEqual({ resolver: '1.1.1.1', adblock: false, exceptions: '', hosts: [] })
+    expect(dnsDefault()).toEqual({ resolver: '1.1.1.1', adblock: false, adblockSource: 'light', adblockUrl: '', exceptions: '', hosts: [] })
     expect(dnsToForm(undefined)).toEqual(dnsDefault())
     expect(formToDns(dnsDefault())).toBeNull()
     expect(formToDns({ ...dnsDefault(), resolver: '  ' })).toBeNull()
   })
   it('свой резолвер и блокировка рекламы с исключениями, туда и обратно', () => {
-    const d = formToDns({ resolver: ' 9.9.9.9 ', adblock: true, exceptions: 'ads.example.com\n\n  cdn.example.org ', hosts: [] })
+    const d = formToDns({ ...dnsDefault(), resolver: ' 9.9.9.9 ', adblock: true, exceptions: 'ads.example.com\n\n  cdn.example.org ' })
     expect(d).toEqual({ tunnel_resolver: '9.9.9.9', adblock: { enabled: true, exceptions: ['ads.example.com', 'cdn.example.org'] } })
-    expect(dnsToForm(d ?? undefined)).toEqual({ resolver: '9.9.9.9', adblock: true, exceptions: 'ads.example.com\ncdn.example.org', hosts: [] })
+    expect(dnsToForm(d ?? undefined)).toEqual({ ...dnsDefault(), resolver: '9.9.9.9', adblock: true, exceptions: 'ads.example.com\ncdn.example.org' })
     expect(formToDns({ ...dnsDefault(), adblock: true })).toEqual({ adblock: { enabled: true } })
     expect(dnsToForm({ adblock: { enabled: false } })).toEqual(dnsDefault())
+  })
+  it('список рекламы: Light не пишется, Normal и своя ссылка — туда и обратно', () => {
+    expect(formToDns({ ...dnsDefault(), adblock: true, adblockSource: 'normal' })).toEqual({ adblock: { enabled: true, source: 'normal' } })
+    const u = formToDns({ ...dnsDefault(), adblock: true, adblockSource: 'url', adblockUrl: ' https://example.org/ads.txt ' })
+    expect(u).toEqual({ adblock: { enabled: true, source: 'url', url: 'https://example.org/ads.txt' } })
+    expect(dnsToForm(u ?? undefined)).toMatchObject({ adblockSource: 'url', adblockUrl: 'https://example.org/ads.txt' })
   })
   it('свои DNS-записи, туда и обратно', () => {
     const h = formToDns({ ...dnsDefault(), hosts: [{ domain: 'home.example.com', address: '192.168.31.10' }] })

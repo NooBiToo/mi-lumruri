@@ -30,6 +30,9 @@ export type Destination =
 
 export interface Category { id: string; name: string; kind: 'domain' | 'ip'; source?: string }
 export interface HostRecord { domain: string; address: string }
+export type AdblockSource = 'light' | 'normal' | 'url'
+/** Итог последней загрузки списка рекламы службой; время — unix-секунды. */
+export interface AdblockStatus { ok: boolean; checked: number; updated: number | null; domains: number | null; url: string; error: string | null }
 export type ListsUpdate = '6h' | 'daily' | 'weekly' | 'manual'
 export type ZapretCheck = 'off' | 'daily' | 'weekly'
 export interface ScheduleConfig { lists?: ListsUpdate; zapret_check?: ZapretCheck }
@@ -37,7 +40,8 @@ export interface ScheduleConfig { lists?: ListsUpdate; zapret_check?: ZapretChec
 export interface DnsConfig {
   /** Публичный IPv4 DNS-сервера для доменов, идущих через TrustTunnel; запросы к нему идут через туннель. По умолчанию 1.1.1.1. */
   tunnel_resolver?: string
-  adblock?: { enabled: boolean; exceptions?: string[] }
+  /** Блокировка рекламы: список HaGeZi Light (по умолчанию), Normal или своя ссылка; скачивает служба. */
+  adblock?: { enabled: boolean; exceptions?: string[]; source?: AdblockSource; url?: string }
   /** Свои записи: домен вместе с поддоменами отвечает адресом (IPv4 или IPv6). */
   hosts?: HostRecord[]
 }
@@ -147,6 +151,7 @@ export interface Lease { mac: string; ip: string; hostname: string; device: stri
 
 export interface ManageResponse {
   ok: boolean
+  adblock?: AdblockStatus | null
   mode?: string
   revision?: string
   config?: Config

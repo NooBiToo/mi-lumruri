@@ -380,6 +380,11 @@ pub fn check_certificate(pem: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Ссылка на список для загрузки службой (curl в сценарии): только https, печатные ASCII без пробелов и кавычек.
+pub fn check_list_url(u: &str) -> bool {
+    u.len() <= 512 && u.starts_with("https://") && u.len() > "https://".len() && u.bytes().all(|c| c.is_ascii_graphic() && !b"\"'`\\$<>|;".contains(&c))
+}
+
 /// Строка для client.toml и аргументов: без кавычек, обратной косой черты и управляющих символов.
 pub fn plain_text(v: &str) -> bool {
     !v.chars().any(|c| c.is_control() || c == '"' || c == '\\')
@@ -431,6 +436,12 @@ fn check_dns(issues: &mut Vec<Issue>, d: &DnsConfig) {
         }
     }
     if let Some(a) = &d.adblock {
+        if a.source == AdblockSource::Url {
+            match a.url.as_deref() {
+                Some(u) if check_list_url(u) => {}
+                _ => issues.push(Issue::new("dns.adblock.url", "bad_url", "ссылка на список — https://…, без пробелов и кавычек, до 512 символов")),
+            }
+        }
         if a.exceptions.len() > 256 {
             issues.push(Issue::new("dns.adblock.exceptions", "too_many", "не больше 256 исключений"));
         }
