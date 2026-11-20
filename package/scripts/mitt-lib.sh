@@ -186,7 +186,11 @@ status_write() {
 }
 
 # --- готовые списки сайтов (mitt-lists.sh) ---
-LISTS_PERIOD="${MITT_LISTS_PERIOD:-86400}"   # проверка обновлений раз в сутки
+# частоты из настроек: рендер пишет $RENDER/schedule («lists=<секунд>», «zapret_check=<секунд>»; 0 — только вручную)
+sched() { sed -n "s/^$1=//p" "$RENDER/schedule" 2>/dev/null | head -n 1; }
+lists_period() { local v; v="${MITT_LISTS_PERIOD:-$(sched lists)}"; case "$v" in ''|*[!0-9]*) echo 86400;; *) echo "$v";; esac; }
+# для отсрочек после прогона: «только вручную» считается как сутки (сама служба тогда не проверяет, см. lists_due)
+LISTS_PERIOD="$(lists_period)"; [ "$LISTS_PERIOD" -gt 0 ] || LISTS_PERIOD=86400
 LISTS_RETRY="${MITT_LISTS_RETRY:-3600}"      # без связи или без каталога — повтор через час
 LISTS_CAT="$REL/payload/lists/catalog.json"
 lists_commit() { sed -n 's/^ *"commit": *"\([0-9a-f]*\)".*/\1/p' "$LISTS_CAT" 2>/dev/null | head -n 1; }
@@ -196,8 +200,10 @@ lists_commit() { sed -n 's/^ *"commit": *"\([0-9a-f]*\)".*/\1/p' "$LISTS_CAT" 2>
 # сбой — час). Она действует, даже если /data не записывается (нет .checked): иначе проверка шла бы каждые 5 с.
 # Отсрочка другого снимка или дальше суток вперёд (часы ушли назад) не в счёт.
 lists_due() {
-  local c cm now
+  local c cm now LISTS_PERIOD
   [ -f "$LISTS_CAT" ] || return 1
+  # частота могла смениться после запуска службы; 0 — проверка только по кнопке
+  LISTS_PERIOD="$(lists_period)"; [ "$LISTS_PERIOD" -gt 0 ] || return 1
   now="$(date +%s)"
   { read -r c cm <"$STATE/lists-next"; } 2>/dev/null
   case "$c" in ''|*[!0-9]*) ;; *) [ "$cm" != "$(lists_commit)" ] || [ "$c" -le "$now" ] || [ $((c - now)) -gt "$LISTS_PERIOD" ] || return 1;; esac
@@ -209,6 +215,17 @@ lists_due() {
 }
 
 # --- подбор стратегии Zapret (mitt-zapret-test.sh) ---
+# автопроверка способа по расписанию: Zapret используется, прошёл период с прошлой проверки ($ETC/zapret-check.last,
+# переживает перезагрузку) и роутер работает больше 10 минут — сеть и часы успели подняться
+zt_check_due() {
+  local p last now up
+  p="$(sched zapret_check)"; case "$p" in ''|0|*[!0-9]*) return 1;; esac
+  [ -f "$RENDER/nfqws2.args" ] || return 1
+  up="$(cut -d. -f1 /proc/uptime 2>/dev/null)"; [ "${up:-0}" -ge "${MITT_ZT_CHECK_UPTIME:-600}" ] || return 1
+  last="$(cat "$ETC/zapret-check.last" 2>/dev/null)"; case "$last" in ''|*[!0-9]*) last=0;; esac
+  now="$(date +%s)"
+  [ "$last" -gt "$now" ] || [ $((now - last)) -ge "$p" ]
+}
 # Метка отката в /data (переживает перезагрузку): строки «<general|youtube> <прежний id> <применённый id>» пишутся до смены
 # стратегии и снимаются, только когда подбор закончился (стратегия подтверждена или возвращена). Оставшуюся метку — подбор
 # убит сигналом, KILL или перезагрузкой — разбирают служба (zt_recover, zt_service_recover) и следующий подбор.

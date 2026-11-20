@@ -30,6 +30,9 @@ export type Destination =
 
 export interface Category { id: string; name: string; kind: 'domain' | 'ip'; source?: string }
 export interface HostRecord { domain: string; address: string }
+export type ListsUpdate = '6h' | 'daily' | 'weekly' | 'manual'
+export type ZapretCheck = 'off' | 'daily' | 'weekly'
+export interface ScheduleConfig { lists?: ListsUpdate; zapret_check?: ZapretCheck }
 
 export interface DnsConfig {
   /** Публичный IPv4 DNS-сервера для доменов, идущих через TrustTunnel; запросы к нему идут через туннель. По умолчанию 1.1.1.1. */
@@ -59,6 +62,8 @@ export interface Config {
   default_action: Action
   categories?: Category[]
   dns?: DnsConfig
+  /** Как часто служба сама обновляет списки сайтов и перепроверяет способ Zapret. */
+  schedule?: ScheduleConfig
   zapret?: ZapretConfig
 }
 

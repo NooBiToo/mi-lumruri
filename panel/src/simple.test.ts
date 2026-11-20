@@ -62,6 +62,13 @@ describe('simple', () => {
     expect(c.zapret).toBeUndefined()
     expect(roundTrip(s)).toEqual({ canonical: true, simple: s })
   })
+  it('расписание (schedule) переносится и не мешает простому виду', () => {
+    const s = simple({ services: ['youtube'] })
+    const withSchedule = { ...base, schedule: { lists: '6h' as const, zapret_check: 'weekly' as const } }
+    const c = toConfig(withSchedule, s, lan, catalog, known)
+    expect(c.schedule).toEqual(withSchedule.schedule)
+    expect(fromConfig(JSON.parse(JSON.stringify(c)) as Config)).toEqual({ canonical: true, simple: s })
+  })
 
   it('round_trip_all_mode_with_exceptions', () => {
     const s = simple({ mode: 'all', services: ['telegram'], exceptions: ['gosuslugi.ru', 'sberbank.ru'], rest: 'zapret' })

@@ -1,19 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import Button from 'primevue/button'
+import { computed, ref, watch } from 'vue'
 import InputText from 'primevue/inputtext'
 import ToggleSwitch from 'primevue/toggleswitch'
 import { ChevronDown, ChevronRight } from 'lucide-vue-next'
-import { api, type ZapretTestState } from '../api'
+import type { ListsUpdate } from '../api'
 import { CUSTOM_DNS, DNS_PRESETS, dnsPresetIp, dnsPresetOf, dnsToForm, formToDns, type DnsForm } from '../manage'
-import { AUTO, strategyLabel, usesZapret } from '../status'
-import { config, save, saveZapret, scrollTarget, simple } from '../store'
+import { config, save } from '../store'
 import { saveNow, useAutosave, type Blocker } from '../autosave'
 import { dnsIcon } from '../brand'
 import ServiceLogo from '../components/ServiceLogo.vue'
+import Segmented from '../components/Segmented.vue'
 
 defineProps<{ totp: boolean }>()
-const emit = defineEmits<{ navigate: [tab: 'sites' | 'hosts' | 'diag'] }>()
+const emit = defineEmits<{ navigate: [tab: 'zapret' | 'hosts' | 'diag'] }>()
 
 interface Draft { dns: DnsForm }
 const toDraft = (): Draft => ({ dns: dnsToForm(config.value?.dns) })
@@ -36,19 +35,21 @@ function chooseDns(id: string) {
   if (ip !== null) draft.value.dns.resolver = ip
 }
 
-const zapret = computed(() => config.value?.zapret)
-const zapretAuto = computed(() => (zapret.value?.strategy ?? AUTO) === AUTO && (zapret.value?.youtube ?? AUTO) === AUTO)
-const zapretOn = computed(() => usesZapret(simple.value))
-const test = ref<ZapretTestState | null>(null)
-onMounted(async () => { const r = await api.zapretTest(); if (r.body.ok && r.body.test) test.value = r.body.test })
-function openZapret() {
-  scrollTarget.value = 'zapret'
-  emit('navigate', 'sites')
-}
 const totpHelp = ref(false)
-function resetZapret() {
-  void saveNow(() => saveZapret({ strategy: AUTO, youtube: AUTO }))
-}
+
+// ---- обновление готовых списков сайтов: сохраняется сразу ----
+const LISTS_UPDATES = [
+  { value: '6h' as const, label: 'Каждые 6 часов' }, { value: 'daily' as const, label: 'Раз в сутки' },
+  { value: 'weekly' as const, label: 'Раз в неделю' }, { value: 'manual' as const, label: 'Вручную' },
+]
+const listsUpdate = ref<ListsUpdate>(config.value?.schedule?.lists ?? 'daily')
+watch(() => config.value?.schedule?.lists, (v) => { listsUpdate.value = v ?? 'daily' })
+watch(listsUpdate, async (v) => {
+  const c = config.value
+  if (!c || (c.schedule?.lists ?? 'daily') === v) return
+  const ok = await saveNow(() => save({ ...c, schedule: { ...c.schedule, lists: v } }, ''))
+  if (!ok) listsUpdate.value = config.value?.schedule?.lists ?? 'daily'
+})
 
 // ---- автосохранение ----
 /** Адрес DNS проверяем мягко до сохранения, чтобы не отправлять недописанный «1.1». Точнее проверит контроллер. */
@@ -87,6 +88,10 @@ useAutosave({
 
     <!-- телефон: разделы, которых нет в нижней панели -->
     <nav class="card card--flush settings more-links" aria-label="Другие разделы">
+      <button type="button" class="setrow more-link" @click="emit('navigate', 'zapret')">
+        <span class="setrow__text"><span class="setrow__title">Zapret</span><span class="setrow__desc">Способ обхода блокировок, подбор, автопроверка</span></span>
+        <ChevronRight :size="18" class="more-link__icon" aria-hidden="true" />
+      </button>
       <button type="button" class="setrow more-link" @click="emit('navigate', 'hosts')">
         <span class="setrow__text"><span class="setrow__title">Свои DNS-записи</span><span class="setrow__desc">Домашние серверы по своим именам</span></span>
         <ChevronRight :size="18" class="more-link__icon" aria-hidden="true" />
@@ -129,18 +134,12 @@ useAutosave({
         </div>
       </div>
 
-      <div class="setrow">
+      <div class="setblock" role="group" aria-labelledby="lists-title">
         <span class="setrow__text">
-          <span class="setrow__title">Обход блокировок (Zapret)</span>
-          <span class="setrow__desc">
-            Способ: {{ strategyLabel(zapret, test) }}.
-            <template v-if="!zapretOn">Сейчас выключен — включается на экране «Сайты».</template>
-          </span>
+          <span id="lists-title" class="setrow__title">Обновление списков сайтов</span>
+          <span class="setrow__desc">Как часто роутер проверяет новые версии готовых списков (allow-domains). «Вручную» — только по кнопке «Обновить» на «Обзоре»</span>
         </span>
-        <span class="setrow__actions">
-          <Button v-if="!zapretAuto" label="Вернуть автоматический" severity="secondary" variant="text" size="small" @click="resetZapret" />
-          <Button :label="zapretOn ? 'Выбрать способ' : 'Открыть «Сайты»'" severity="secondary" variant="outlined" size="small" @click="openZapret" />
-        </span>
+        <Segmented v-model="listsUpdate" class="self-start" :options="LISTS_UPDATES" label="Обновление списков сайтов" name="lists-update" />
       </div>
 
       <div class="setrow setrow--top">

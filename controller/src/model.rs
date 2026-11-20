@@ -27,6 +27,50 @@ pub struct Config {
     /// Резолвер туннельных доменов и блокировка рекламы. Без раздела — резолвер по умолчанию, без блокировки.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dns: Option<DnsConfig>,
+    /// Как часто служба сама обновляет списки сайтов и перепроверяет способ Zapret. Без раздела — по умолчанию.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<ScheduleConfig>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScheduleConfig {
+    #[serde(default)]
+    pub lists: ListsUpdate,
+    #[serde(default)]
+    pub zapret_check: ZapretCheck,
+}
+
+/// Проверка обновлений готовых списков сайтов.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ListsUpdate {
+    #[serde(rename = "6h")]
+    Hours6,
+    #[default]
+    Daily,
+    Weekly,
+    /// Только по кнопке в панели.
+    Manual,
+}
+
+/// Автоматическая перепроверка способа Zapret (тот же подбор, что по кнопке: новый способ — только если он лучше).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ZapretCheck {
+    #[default]
+    Off,
+    Daily,
+    Weekly,
+}
+
+impl ScheduleConfig {
+    /// Файл для службы: секунды между проверками, 0 — не проверять самой.
+    pub fn file(&self) -> String {
+        let lists = match self.lists { ListsUpdate::Hours6 => 6 * 3600, ListsUpdate::Daily => 86_400, ListsUpdate::Weekly => 7 * 86_400, ListsUpdate::Manual => 0 };
+        let zapret = match self.zapret_check { ZapretCheck::Off => 0, ZapretCheck::Daily => 86_400, ZapretCheck::Weekly => 7 * 86_400 };
+        format!("lists={lists}\nzapret_check={zapret}\n")
+    }
 }
 
 /// DNS роутера: штатный dnsmasq сохраняет DHCP и локальные имена. Домены правил «через TrustTunnel» он
@@ -285,5 +329,20 @@ impl Source {
             Source::Network { .. } => 2,
             Source::Lan => 3,
         }
+    }
+}
+
+#[cfg(test)]
+mod schedule_tests {
+    use super::*;
+
+    #[test]
+    fn schedule_file_for_service() {
+        assert_eq!(ScheduleConfig::default().file(), "lists=86400\nzapret_check=0\n");
+        let s: ScheduleConfig = serde_json::from_str(r#"{"lists":"6h","zapret_check":"weekly"}"#).unwrap();
+        assert_eq!(s.file(), "lists=21600\nzapret_check=604800\n");
+        assert_eq!(serde_json::from_str::<ScheduleConfig>(r#"{"lists":"manual"}"#).unwrap().file(), "lists=0\nzapret_check=0\n");
+        assert!(serde_json::from_str::<ScheduleConfig>(r#"{"lists":"hourly"}"#).is_err());
+        assert_eq!(serde_json::to_string(&s).unwrap(), r#"{"lists":"6h","zapret_check":"weekly"}"#);
     }
 }

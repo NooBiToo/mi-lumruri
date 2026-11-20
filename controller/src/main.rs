@@ -198,6 +198,7 @@ fn render_cmd(cfg: &str, secrets: &str, out: &str) -> Response {
                 .and_then(|_| store::write_atomic(&dir.join("routes.json"), &routes))
                 .and_then(|_| opt("client.toml", r.client_toml.clone(), true))
                 .and_then(|_| write_dns_file(&config, &r.dns, cfg_path, dir))
+                .and_then(|_| opt("schedule", Some(config.schedule.unwrap_or_default().file()), false))
                 .and_then(|_| opt("nfqws2.args", (!r.nfqws2_args.is_empty()).then(|| format!("{}\n", r.nfqws2_args.join("\n"))), false))
             {
                 return Response::error(500, "write_failed", m);

@@ -192,6 +192,7 @@ export function toConfig(base: Config, s: Simple, lan: Lan, catalog: ListCatalog
   }
   if (base.dns !== undefined) out.dns = base.dns
   if (base.zapret !== undefined) out.zapret = base.zapret
+  if (base.schedule !== undefined) out.schedule = base.schedule
   return out
 }
 

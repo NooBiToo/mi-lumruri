@@ -491,18 +491,14 @@ svg.lucide.logo__svg { fill: none; }
   .logo--brand { color: color-mix(in srgb, var(--brand) 70%, #fff); background: color-mix(in srgb, var(--brand) 16%, var(--surface)); }
 }
 
-.zapret { display: grid; gap: 0.875rem; padding-top: 1rem; border-top: 1px solid var(--line); }
-.zapret__line { display: flex; align-items: center; gap: 0.625rem; }
-.zapret__title { font-size: 0.9375rem; font-weight: 500; }
+.zapret__check { display: grid; gap: 0.75rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.zapret__check .seg { justify-self: start; }
 .pick { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: 1rem 1.25rem; }
 .pick__select { width: 100%; }
 .opt { display: grid; gap: 0.0625rem; }
 .opt__label { font-weight: 500; font-size: 0.9375rem; }
 .opt__desc { color: var(--muted); font-size: 0.8125rem; }
 .p-select-option.p-select-option-selected .opt__desc { color: inherit; opacity: 0.8; }
-.zapret__icon { color: var(--muted); flex: none; }
-.zapret__row { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
-.zapret__row .hint { flex: 1; min-width: 14rem; }
 .zapret__run { display: grid; gap: 0.5rem; }
 .bar { height: 0.5rem; border-radius: 999px; background: var(--idle-soft); overflow: hidden; }
 .bar__fill { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width 0.4s ease; }

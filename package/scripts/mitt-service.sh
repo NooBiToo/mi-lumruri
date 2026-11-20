@@ -69,6 +69,10 @@ while [ -f "$STATE/service.wanted" ]; do
   if [ -f "$STATE/zapret-test.request" ]; then
     rm -f "$STATE/zapret-test.request"
     pid_alive zapret-test || { start_bg zapret-test sh "$SCR/mitt-zapret-test.sh"; mlog "подбор стратегии Zapret запущен"; }
+  elif ! pid_alive zapret-test && zt_check_due; then
+    # автопроверка: тот же подбор, новый способ применяется, только если он лучше действующего
+    date +%s >"$ETC/zapret-check.last" 2>/dev/null
+    start_bg zapret-test sh "$SCR/mitt-zapret-test.sh"; mlog "автопроверка способа Zapret запущена"
   fi
   # готовые списки: проверка обновлений в фоне — раз в сутки и по заявке панели (цикл службы не ждёт загрузку)
   if [ -f "$STATE/lists-update.request" ] || lists_due; then
