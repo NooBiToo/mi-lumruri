@@ -200,7 +200,9 @@ impl DnsConfig {
         }
         let mut a = SecureDns { protocol, server, nextdns_id: None, url: None, ips: vec![] }.proxy_args()?;
         a[1] = format!("127.0.0.1:{DNS_TUNNEL_PORT}");
-        a.extend(["--mark".to_string(), format!("{:#x}", crate::plan::NF_MARK)]);
+        // привязка к TUN обязательна: прошивка в mangle OUTPUT переписывает метку, и пакет перемаршрутизируется мимо туннеля
+        // (EHOSTUNREACH); метка остаётся для правила fwmark, привязанный сокет из mitt0 не выйдет
+        a.extend(["--device".to_string(), crate::render::TUN_DEVICE.to_string(), "--mark".to_string(), format!("{:#x}", crate::plan::NF_MARK)]);
         Some(Ok(a))
     }
 }
@@ -518,7 +520,7 @@ mod tunnel_secure_tests {
     fn tunnel_proxy_args_mark_and_port() {
         assert!(dns(r#"{}"#).tunnel_proxy_args().is_none());
         let a = dns(r#"{"tunnel_secure":"doh"}"#).tunnel_proxy_args().unwrap().unwrap();
-        assert_eq!(a, ["--listen", "127.0.0.1:5454", "--doh", "https://cloudflare-dns.com/dns-query", "--ip", "1.1.1.1", "--ip", "1.0.0.1", "--mark", "0x4000"]);
+        assert_eq!(a, ["--listen", "127.0.0.1:5454", "--doh", "https://cloudflare-dns.com/dns-query", "--ip", "1.1.1.1", "--ip", "1.0.0.1", "--device", "mitt0", "--mark", "0x4000"]);
         let g = dns(r#"{"tunnel_resolver":"8.8.8.8","tunnel_secure":"dot"}"#).tunnel_proxy_args().unwrap().unwrap();
         assert_eq!(&g[2..4], ["--dot", "dns.google"]);
         assert!(dns(r#"{"tunnel_resolver":"9.9.9.9","tunnel_secure":"dot"}"#).tunnel_proxy_args().unwrap().is_ok());
