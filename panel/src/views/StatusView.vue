@@ -2,11 +2,12 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
-import { ArrowRight, MonitorSmartphone, RefreshCw, Router } from 'lucide-vue-next'
+import { ArrowRight, RefreshCw } from 'lucide-vue-next'
 import { api, type ZapretTestState } from '../api'
-import { catalog, config, leases, lists, loadLeases, loadLists, loadStatus, notify, profile, serverReady, simple, simpleState, tunnel } from '../store'
-import { AUTO, plural, when, zapretIdle } from '../status'
-import ServiceLogo from '../components/ServiceLogo.vue'
+import { catalog, config, leases, lists, loadLeases, loadLists, loadStatus, notify, profile, service, serverReady, simple, simpleState, tunnel } from '../store'
+import { AUTO, deviceRows, plural, when, zapretIdle } from '../status'
+import { avatarHue, initials } from '../ui'
+import TopoMap, { type TopoBranch, type Tone } from '../components/TopoMap.vue'
 
 const emit = defineEmits<{ navigate: [tab: 'server' | 'sites' | 'devices' | 'more'] }>()
 
@@ -29,6 +30,51 @@ const test = ref<ZapretTestState | null>(null)
 /** Способ Zapret коротко: подпись веток, которые идут с обходом блокировок. */
 const zapretWay = computed(() => (zapretAuto.value ? 'способ автоматический' : test.value?.finished ? `способ подобран ${when(test.value.finished)}` : 'способ выбран вручную'))
 const zapretUsed = computed(() => !!simple.value && !zapretIdle(simple.value))
+/** nfqws2 запущен по данным службы (до первого статуса считаем, что да). */
+const nfqwsUp = computed(() => ((service.value?.service as { engines?: Record<string, boolean> } | undefined)?.engines?.nfqws2) !== false)
+const cut = (ids: { id: string; name: string }[], domains: string[]) => {
+  const d = domains.slice(0, MAX_DOMAINS)
+  return { items: ids, domains: d, more: domains.length - d.length }
+}
+const branches = computed<TopoBranch[]>(() => {
+  const s = simple.value
+  if (!s) return []
+  const out: TopoBranch[] = []
+  const vpnTone: Tone = !s.enabled ? 'idle' : tunnel.value.tone === 'ok' ? 'vpn' : (tunnel.value.tone as Tone)
+  out.push({
+    key: 'vpn', kind: 'vpn', tone: vpnTone, live: s.enabled && vpnTone === 'vpn',
+    name: s.mode === 'all' ? 'Весь интернет через VPN' : 'Через VPN',
+    meta: s.enabled ? (host.value ?? 'сервер не настроен') : 'VPN выключен',
+    ...(s.mode === 'all' ? cut([], []) : cut(services.value, s.customDomains)),
+    note: s.mode === 'all' ? (s.exceptions.length ? `Кроме ${plural(s.exceptions.length, 'исключения', 'исключений', 'исключений')}` : 'Без исключений')
+      : !services.value.length && !s.customDomains.length ? 'Сайты не выбраны' : undefined,
+  })
+  if (zapretServices.value.length || s.zapretDomains.length) {
+    out.push({ key: 'zapret', kind: 'zapret', tone: nfqwsUp.value ? 'zapret' : 'bad', live: nfqwsUp.value,
+      name: 'С обходом блокировок', meta: zapretWay.value, ...cut(zapretServices.value, s.zapretDomains) })
+  }
+  if (s.mode === 'selected') {
+    // при выключенном VPN остальные сайты идут напрямую без обработки (default_action — direct)
+    const z = s.enabled && s.rest === 'zapret' && zapretUsed.value
+    out.push({ key: 'rest', kind: z ? 'zapret' : 'direct', tone: z ? (nfqwsUp.value ? 'zapret' : 'bad') : 'ok', live: z ? nfqwsUp.value : true,
+      name: 'Остальные сайты', meta: z ? `напрямую с обходом, ${zapretWay.value}` : 'напрямую', ...cut([], []) })
+  } else if (s.exceptions.length) {
+    out.push({ key: 'except', kind: 'direct', tone: 'ok', live: true, name: 'Исключения',
+      meta: `напрямую · ${plural(s.exceptions.length, 'сайт', 'сайта', 'сайтов')}`, ...cut([], []) })
+  }
+  return out
+})
+const devTopo = computed(() => {
+  const rows = config.value ? deviceRows(leases.value, config.value, {}, []).filter((d) => d.online) : []
+  const shown = rows.slice(0, 4)
+  return {
+    title: 'Устройства',
+    meta: `${devKpi.value.value.toLowerCase()} · ${devKpi.value.note}`,
+    avatars: shown.map((d) => ({ mac: d.mac, name: d.name, initials: initials(d.name) || '•', hue: avatarHue(d.mac) })),
+    extra: rows.length - shown.length,
+  }
+})
+const hubTopo = computed(() => ({ tone: tunnel.value.tone as Tone, meta: tunnel.value.title }))
 const zapretAuto = computed(() => (config.value?.zapret?.strategy ?? AUTO) === AUTO && (config.value?.zapret?.youtube ?? AUTO) === AUTO)
 
 // ---- списки сайтов ----
@@ -82,8 +128,8 @@ onBeforeUnmount(() => clearTimeout(listsTimer))
       </Button>
     </div>
 
-    <!-- туннель: индикатор, как на корпусе роутера -->
-    <div v-else :class="['card', 'state', `state--${tunnel.tone}`]">
+    <!-- туннель: карточка — только когда нужно пояснение или действие; «всё работает» показывает роутер на схеме -->
+    <div v-else-if="tunnel.tone !== 'ok' || (simple && nothingSelected && simple.enabled)" :class="['card', 'state', `state--${tunnel.tone}`]">
       <span :class="['led', 'led--lg', `led--${tunnel.tone}`]" aria-hidden="true" />
       <div class="state__text">
         <h2 class="state__title">{{ tunnel.title }}</h2>
@@ -103,69 +149,7 @@ onBeforeUnmount(() => clearTimeout(listsTimer))
         <button type="button" class="link-btn" @click="emit('navigate', 'sites')">Изменить</button>
       </div>
 
-      <div class="routes__map">
-        <div class="routes__src">
-          <button type="button" class="node" @click="emit('navigate', 'devices')">
-            <MonitorSmartphone :size="16" class="node__icon" aria-hidden="true" />
-            <span class="node__name">Устройства</span>
-            <span class="meta node__meta">{{ devKpi.value.toLowerCase() }} · {{ devKpi.note }}</span>
-          </button>
-          <span class="routes__wire" aria-hidden="true" />
-          <span class="node node--router">
-            <Router :size="16" class="node__icon" aria-hidden="true" />
-            <span class="node__name">Роутер</span>
-          </span>
-          <span class="routes__wire routes__wire--tail" aria-hidden="true" />
-        </div>
-
-        <ul class="routes__branches" aria-labelledby="routes-title">
-          <!-- через VPN -->
-          <li :class="['branch', 'branch--vpn', { 'branch--off': !simple.enabled }]">
-            <div class="branch__head">
-              <span class="branch__title"><span :class="['led', simple.enabled ? `led--${tunnel.tone === 'ok' ? 'vpn' : tunnel.tone}` : 'led--idle']" aria-hidden="true" />
-                <span class="branch__name">{{ simple.mode === 'all' ? 'Весь интернет через VPN' : 'Через VPN' }}</span></span>
-              <span class="meta">{{ simple.enabled ? (host ?? 'сервер не настроен') : 'VPN выключен' }}</span>
-            </div>
-            <p v-if="simple.mode === 'all'" class="branch__note">{{ simple.exceptions.length ? `Кроме ${plural(simple.exceptions.length, 'исключения', 'исключений', 'исключений')}` : 'Без исключений' }}</p>
-            <ul v-else-if="services.length || simple.customDomains.length" class="branch__items">
-              <li v-for="x in services" :key="x.id" class="branch__item"><ServiceLogo :id="x.id" size="sm" />{{ x.name }}</li>
-              <li v-for="d in simple.customDomains.slice(0, MAX_DOMAINS)" :key="d" class="branch__item meta">{{ d }}</li>
-              <li v-if="simple.customDomains.length > MAX_DOMAINS" class="branch__item meta">ещё {{ simple.customDomains.length - MAX_DOMAINS }}</li>
-            </ul>
-            <p v-else class="branch__note">Сайты не выбраны</p>
-          </li>
-
-          <!-- напрямую с обходом блокировок -->
-          <li v-if="zapretServices.length || simple.zapretDomains.length" class="branch branch--zapret">
-            <div class="branch__head">
-              <span class="branch__title"><span class="led led--zapret" aria-hidden="true" />
-                <span class="branch__name">Напрямую с обходом блокировок</span></span>
-              <span class="meta">{{ zapretWay }}</span>
-            </div>
-            <ul class="branch__items">
-              <li v-for="x in zapretServices" :key="x.id" class="branch__item"><ServiceLogo :id="x.id" size="sm" />{{ x.name }}</li>
-              <li v-for="d in simple.zapretDomains.slice(0, MAX_DOMAINS)" :key="d" class="branch__item meta">{{ d }}</li>
-              <li v-if="simple.zapretDomains.length > MAX_DOMAINS" class="branch__item meta">ещё {{ simple.zapretDomains.length - MAX_DOMAINS }}</li>
-            </ul>
-          </li>
-
-          <!-- остальное -->
-          <li v-if="simple.mode === 'selected'" :class="['branch', simple.rest === 'zapret' && zapretUsed ? 'branch--zapret' : 'branch--direct']">
-            <div class="branch__head">
-              <span class="branch__title"><span :class="['led', simple.rest === 'zapret' && zapretUsed ? 'led--zapret' : 'led--idle']" aria-hidden="true" />
-                <span class="branch__name">Остальные сайты</span></span>
-              <span class="meta">{{ simple.rest === 'zapret' ? `напрямую с обходом блокировок, ${zapretWay}` : 'напрямую' }}</span>
-            </div>
-          </li>
-          <li v-else-if="simple.exceptions.length" class="branch branch--direct">
-            <div class="branch__head">
-              <span class="branch__title"><span class="led led--idle" aria-hidden="true" />
-                <span class="branch__name">Исключения</span></span>
-              <span class="meta">напрямую · {{ plural(simple.exceptions.length, 'сайт', 'сайта', 'сайтов') }}</span>
-            </div>
-          </li>
-        </ul>
-      </div>
+      <TopoMap :branches="branches" :devices="devTopo" :hub="hubTopo" @devices="emit('navigate', 'devices')" />
 
       <div class="routes__foot">
         <span :class="['meta', { 'warn-text': listsStatus && !listsStatus.ok }]">

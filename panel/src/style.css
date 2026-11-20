@@ -347,41 +347,58 @@ label.setrow { cursor: pointer; }
 .state__detail { color: var(--muted); font-size: 0.9375rem; max-width: 60ch; }
 .state__host { overflow-wrap: anywhere; text-align: right; }
 
-/* схема: устройства → роутер → ветки маршрутов; цвет ветки — цвет маршрута */
+/* топология: устройства → роутер → маршруты. Провода — SVG поверх (TopoMap), цвет провода — цвет маршрута;
+   по действующим маршрутам бежит пунктир. --topo-svg: 0 — провода рисует CSS (телефон). */
 .routes { gap: 1.25rem; }
-.routes__map { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; }
-.routes__src { display: flex; align-items: center; height: 2.75rem; }
-.node {
-  display: inline-flex; align-items: center; gap: 0.5rem; height: 2.75rem; padding: 0 0.75rem; border: 1px solid var(--line); border-radius: 10px;
-  background: var(--surface-2); color: var(--ink); font: inherit; font-size: 0.9375rem; white-space: nowrap; min-width: 0;
+.topo {
+  --topo-svg: 1; position: relative; display: grid; grid-template-columns: minmax(11rem, 14rem) minmax(9rem, 11rem) minmax(0, 1fr);
+  column-gap: clamp(2.5rem, 6vw, 5rem); align-items: center; animation: topo-in 0.4s var(--ease) both;
 }
-button.node { cursor: pointer; transition: border-color 0.15s var(--ease); }
-button.node:hover { border-color: var(--line-strong); }
-.node__icon { color: var(--muted); flex: none; }
-.node__name { font-weight: 500; }
-.node--router { background: var(--surface); border-color: var(--line-strong); }
-.routes__wire { width: 1.5rem; height: 2px; background: var(--line-strong); flex: none; }
-.routes__branches { list-style: none; margin: 0; padding: 0; display: grid; min-width: 0; }
-.branch { position: relative; padding: 0 0 1rem 2rem; min-width: 0; display: grid; gap: 0.5rem; }
-.branch:last-child { padding-bottom: 0; }
-/* ствол слева и отвод к ветке; отвод — цвет маршрута */
-.branch::after { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--line-strong); }
-.branch:first-child::after { top: 1.3125rem; }
-.branch:last-child::after { bottom: auto; height: 1.375rem; }
-.branch:only-child::after { display: none; }
-.branch::before { content: ''; position: absolute; left: 0; top: 1.3125rem; width: 1.5rem; border-top: 2px solid var(--line-strong); }
-.branch--vpn::before { border-top-color: var(--accent); }
-.branch--zapret::before { border-top-color: var(--zap); }
-.branch--off::before { border-top: 2px dashed var(--line-strong); }
-.branch__head { display: flex; align-items: center; gap: 0.5rem 0.75rem; min-height: 2.75rem; flex-wrap: wrap; min-width: 0; }
-.branch__head .meta { min-width: 0; overflow-wrap: anywhere; }
-.branch__title { display: inline-flex; align-items: center; gap: 0.5rem; min-width: 0; }
-.branch__name { font-weight: 500; }
-.branch--off .branch__name { color: var(--muted); }
-.branch__items { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; }
-.branch__item { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; min-width: 0; }
-.branch__item.meta { font-size: 0.8125rem; }
-.branch__note { color: var(--muted); font-size: 0.9375rem; }
+@keyframes topo-in { from { opacity: 0; transform: translateY(8px); } }
+.topo__wires { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.wire { fill: none; stroke: var(--line-strong); stroke-width: 2; stroke-linecap: round; }
+.wire--vpn { stroke: var(--accent); }
+.wire--zapret { stroke: var(--zap); }
+.wire--direct { stroke: var(--faint); }
+.wire:not(.wire--off) { opacity: 0.28; }
+.wire--off { stroke: var(--line-strong); stroke-dasharray: 2 6; }
+.wire__flow { fill: none; stroke-width: 2; stroke-linecap: round; stroke-dasharray: 2 12; animation: wire-flow 1.4s linear infinite; }
+.wire__flow.wire--base { stroke: var(--muted); }
+.wire__flow.wire--direct { animation-duration: 2.2s; }
+@keyframes wire-flow { to { stroke-dashoffset: -28; } }
+.topo__col { position: relative; min-width: 0; display: grid; }
+.tnode {
+  display: grid; gap: 0.25rem; justify-items: start; padding: 0.75rem 1rem; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--surface-2); color: var(--ink); font: inherit; text-align: left; min-width: 0;
+}
+button.tnode { cursor: pointer; transition: border-color 0.15s var(--ease); }
+button.tnode:hover { border-color: var(--line-strong); }
+.tnode__head { display: inline-flex; align-items: center; gap: 0.5rem; }
+.tnode__icon { color: var(--muted); flex: none; }
+.tnode__name { font-weight: 500; }
+.tnode--hub { background: var(--surface); border-color: var(--line-strong); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); }
+.tnode__state { display: inline-flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.tnode__state .meta { overflow-wrap: anywhere; }
+.tnode__faces { display: flex; margin-top: 0.25rem; }
+.face {
+  --h: 220; width: 1.5rem; height: 1.5rem; border-radius: 50%; display: grid; place-items: center; margin-left: -0.25rem; font-size: 0.625rem; font-weight: 500; letter-spacing: 0;
+  background: hsl(var(--h) 22% 90%); color: hsl(var(--h) 30% 28%); box-shadow: 0 0 0 2px var(--surface-2);
+}
+.face:first-child { margin-left: 0; }
+.face--more { background: var(--idle-soft); color: var(--muted); font-family: var(--mono); }
+@media (prefers-color-scheme: dark) { .face { background: hsl(var(--h) 10% 24%); color: hsl(var(--h) 25% 82%); } }
+.topo__col--dst { list-style: none; margin: 0; padding: 0; gap: 0.75rem; }
+.tdst { display: grid; gap: 0.5rem; padding: 0.75rem 1rem; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); min-width: 0; }
+.tdst--off { border-style: dashed; }
+.tdst__head { display: flex; align-items: center; gap: 0.25rem 0.625rem; flex-wrap: wrap; min-width: 0; }
+.tdst__name { font-weight: 500; }
+.tdst--off .tdst__name { color: var(--muted); }
+.tdst__meta { min-width: 0; overflow-wrap: anywhere; }
+.tdst__note { color: var(--muted); font-size: 0.875rem; }
+.tdst__items { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; }
+.tdst__item { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; min-width: 0; }
+.tdst__item.meta { font-size: 0.75rem; }
+.led--idle { background: var(--line-strong); }
 .routes__foot { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; flex-wrap: wrap; padding-top: 1rem; border-top: 1px solid var(--line); }
 
 .onboard { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 1.5rem; padding: 1.5rem; }
@@ -604,17 +621,17 @@ svg.lucide.logo__svg { fill: none; }
   .state__act { grid-column: 1 / -1; }
   .onboard { grid-template-columns: minmax(0, 1fr); padding: 1.25rem; gap: 1rem; }
   .onboard__btn { width: 100%; }
-  /* схема на телефоне: узлы друг под другом, ствол — по левому краю под значками */
-  .routes__map { grid-template-columns: minmax(0, 1fr); }
-  .routes__src { flex-direction: column; align-items: stretch; height: auto; }
-  .node { width: 100%; }
-  .node__meta { margin-left: auto; overflow: hidden; text-overflow: ellipsis; }
-  .routes__wire { align-self: flex-start; width: 2px; height: 0.75rem; margin-left: 1.25rem; }
-  .routes__branches { margin-left: 1.25rem; }
-  .branch { padding-left: 1.5rem; }
-  .branch::before { width: 1rem; }
-  .branch:first-child::after { top: 0; }
-  .branch:only-child::after { display: block; bottom: auto; height: 1.375rem; }
+  /* топология на телефоне: узлы столбиком, провод — линия слева под значками, SVG не рисуется */
+  .topo { --topo-svg: 0; grid-template-columns: minmax(0, 1fr); row-gap: 1rem; }
+  .topo__wires { display: none; }
+  .topo__col + .topo__col::before { content: ''; position: absolute; left: 1.5rem; top: -1rem; height: 1rem; width: 2px; background: var(--line-strong); }
+  .topo__col--dst { padding-left: 1.5rem; margin-left: 1.5rem; border-left: 2px solid var(--line-strong); }
+  .topo__col--dst::before { display: none; }
+  .tdst { position: relative; }
+  .tdst::before { content: ''; position: absolute; left: calc(-1.5rem - 2px); top: 1.25rem; width: 1.5rem; border-top: 2px solid var(--line-strong); }
+  .tdst--vpn::before { border-top-color: var(--accent); }
+  .tdst--zapret::before { border-top-color: var(--zap); }
+  .tdst--off::before { border-top-style: dashed; border-top-color: var(--line-strong); }
   .dev { grid-template-columns: auto minmax(0, 1fr) auto; padding: 0.75rem 1.125rem; gap: 0.25rem 0.75rem; }
   .dev__ip, .dev__state { grid-column: 2; font-size: 0.75rem; }
   .dev__ip { grid-row: 2; }

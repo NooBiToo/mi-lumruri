@@ -2,6 +2,7 @@
 
 import { computed, ref } from 'vue'
 import { build, knownDevicesNow, notify, save, serverReady, simple } from './store'
+import { hasZapretSites } from './status'
 
 export const vpnBusy = ref(false)
 /** Выключатель доступен: сервер настроен и настройки простого вида. */
@@ -14,10 +15,11 @@ export async function toggleVpn(): Promise<void> {
   if (typeof cfg === 'string') { notify.show('error', 'Не получилось', cfg); return }
   vpnBusy.value = true
   try {
-    // выключенный VPN выключает и обход блокировок: правила с Zapret тоже выключаются, всё идёт напрямую
+    // выключенный VPN: остальные сайты — напрямую; «сайты с обходом блокировок» по-прежнему с Zapret (simple.ts)
     if ((await save(cfg, '')).ok) {
       notify.show('success', s.enabled ? 'VPN выключен' : 'VPN включён, применяю на роутере',
-        s.enabled ? (s.rest === 'zapret' ? 'Обход блокировок (Zapret) тоже выключен: все сайты открываются напрямую.' : 'Все сайты открываются напрямую.') : undefined)
+        s.enabled ? (hasZapretSites(s) ? 'Сайты открываются напрямую, сайты с обходом блокировок — по-прежнему с Zapret.'
+          : s.rest === 'zapret' ? 'Обход блокировок (Zapret) тоже выключен: все сайты открываются напрямую.' : 'Все сайты открываются напрямую.') : undefined)
     }
   } finally { vpnBusy.value = false }
 }
