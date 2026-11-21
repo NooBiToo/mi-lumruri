@@ -351,4 +351,15 @@ fn diag_api() {
     // перезапуск службы — заявка
     assert_eq!(call("POST", "/service/restart", Some(b"{}")).status, 202);
     assert!(run.join("restart.request").exists());
+    // обновление из релизов: до первой проверки — null; заявка; повтор, пока идёт, — 409; неверное действие — 400
+    assert_eq!(call("GET", "/update", None).body["update"], Value::Null);
+    assert_eq!(call("POST", "/update", Some(br#"{"action":"reboot"}"#)).status, 400);
+    assert_eq!(call("POST", "/update", Some(br#"{"action":"install","trust_official":true}"#)).status, 202);
+    let rq: Value = serde_json::from_slice(&std::fs::read(run.join("update.request")).unwrap()).unwrap();
+    assert_eq!((&rq["action"], &rq["trust_official"]), (&json!("install"), &json!(true)));
+    assert_eq!(call("POST", "/update", Some(br#"{"action":"check"}"#)).status, 409);
+    assert_eq!(call("GET", "/update", None).body["running"], true);
+    std::fs::remove_file(run.join("update.request")).unwrap();
+    std::fs::write(run.join("update.json"), r#"{"state":"ready","latest":"v0.4.0","newer":true}"#).unwrap();
+    assert_eq!(call("GET", "/update", None).body["update"]["latest"], "v0.4.0");
 }

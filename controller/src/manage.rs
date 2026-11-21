@@ -21,7 +21,7 @@ pub const MAX_LIST_BODY: usize = 8 * 1024 * 1024;
 
 pub const PATHS: &[&str] = &["/rules/delete", "/rules/move", "/profiles", "/profiles/delete", "/groups", "/groups/delete", "/categories",
     "/categories/delete", "/networks", "/networks/delete", "/devices", "/devices/delete", "/leases", "/dns", "/zapret", "/adblock/list",
-    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update", "/router", "/diag", "/service/restart"];
+    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update", "/router", "/diag", "/service/restart", "/update"];
 
 pub fn is_manage_path(path: &str) -> bool {
     PATHS.contains(&path.trim_end_matches('/'))
@@ -78,6 +78,15 @@ struct ListUpload {
     #[serde(default)]
     id: Option<String>,
     list: String,
+}
+
+/// Заявка обновления из релизов GitHub: проверить или установить; trust_official — разрешить смену ключа на ключ релизов.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UpdateRequest {
+    action: String,
+    #[serde(default)]
+    trust_official: bool,
 }
 
 /// Заявка диагностики: по желанию — сайт, который проверить (домен, без схемы и пути).
@@ -639,6 +648,31 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
                 }
                 let req = json!({ "requested_unix": crate::auth::now(), "site": site });
                 match std::fs::create_dir_all(&d).map_err(|e| e.to_string()).and_then(|_| store::write_atomic(&d.join("diag.request"), req.to_string().as_bytes())) {
+                    Ok(()) => Response { status: 202, body: json!({ "ok": true, "queued": true, "issues": [] }) },
+                    Err(m) => Response::error(500, "write_failed", m),
+                }
+            }
+            Err(i) => bad(i),
+        },
+        ("GET", "/update") => {
+            // итог последней проверки или установки (mitt-update.sh); до первой — null
+            let d = run_dir();
+            let st = std::fs::read(d.join("update.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
+            let running = d.join("update.request").exists() || d.join("update.request.run").exists();
+            Response { status: 200, body: json!({ "ok": true, "running": running, "update": st, "issues": [] }) }
+        }
+        ("POST", "/update") => match parse_json::<UpdateRequest>(b, "") {
+            Ok(q) => {
+                // CGI без привилегий: только заявка; загрузку и установку выполняет служба
+                if q.action != "check" && q.action != "install" {
+                    return Some(bad(vec![Issue::new("action", "bad_action", "действие — check или install")]));
+                }
+                let d = run_dir();
+                if d.join("update.request").exists() || d.join("update.request.run").exists() {
+                    return Some(Response::error(409, "update_running", "обновление уже идёт"));
+                }
+                let req = json!({ "requested_unix": crate::auth::now(), "action": q.action, "trust_official": q.trust_official });
+                match std::fs::create_dir_all(&d).map_err(|e| e.to_string()).and_then(|_| store::write_atomic(&d.join("update.request"), req.to_string().as_bytes())) {
                     Ok(()) => Response { status: 202, body: json!({ "ok": true, "queued": true, "issues": [] }) },
                     Err(m) => Response::error(500, "write_failed", m),
                 }

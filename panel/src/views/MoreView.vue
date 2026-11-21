@@ -10,6 +10,7 @@ import { useAutosave, type Blocker } from '../autosave'
 import { dnsIcon } from '../brand'
 import ServiceLogo from '../components/ServiceLogo.vue'
 import Segmented from '../components/Segmented.vue'
+import UpdateCard from '../components/UpdateCard.vue'
 
 defineProps<{ totp: boolean }>()
 const emit = defineEmits<{ navigate: [tab: 'zapret' | 'hosts' | 'diag'] }>()
@@ -277,6 +278,8 @@ useAutosave({
         </template>
       </div>
 
+
+      <UpdateCard />
 
       <div class="setrow setrow--top">
         <span class="setrow__text">

@@ -226,6 +226,24 @@ export interface ZapretTestState {
 }
 export interface ZapretTestResponse { ok: boolean; test?: ZapretTestState; requested?: boolean; queued?: boolean; issues: Issue[]; error?: ApiError }
 
+/** Обновление из релизов GitHub (mitt-update.sh); время — unix-секунды, ключи — отпечатки (16 знаков). */
+export interface UpdateState {
+  state: 'checking' | 'ready' | 'downloading' | 'installing' | 'restarting' | 'done' | 'error'
+  at: number
+  installed: string
+  latest: string
+  available: string
+  newer: boolean
+  page: string
+  published: string
+  error: string | null
+  /** Ключ пакета, если установщик отказал из-за другого ключа подписи. */
+  package_key: string | null
+  /** Отпечаток ключа релизов GitHub: только на него панель предлагает перейти. */
+  official_key: string
+}
+export interface UpdateResponse { ok: boolean; running?: boolean; update?: UpdateState | null; queued?: boolean; issues: Issue[]; error?: ApiError }
+
 /** Ответ замены настроек целиком: при успехе — новая ревизия, настройки и заявка на применение (`queued`). */
 export interface ReplaceResponse extends SaveResponse { queued?: boolean }
 
@@ -259,4 +277,7 @@ export const api = {
   diag: () => call<DiagResponse>('/diag'),
   runDiag: (site?: string) => call<DiagResponse>('/diag', json(site ? { site } : {})),
   restartService: () => call<DiagResponse>('/service/restart', json({})),
+  update: () => call<UpdateResponse>('/update'),
+  checkUpdate: () => call<UpdateResponse>('/update', json({ action: 'check' })),
+  installUpdate: (trust_official = false) => call<UpdateResponse>('/update', json({ action: 'install', trust_official })),
 }

@@ -81,6 +81,10 @@ while [ -f "$STATE/service.wanted" ]; do
   if [ -f "$STATE/diag.request" ] && ! pid_alive diag; then
     mv -f "$STATE/diag.request" "$STATE/diag.request.run"; start_bg diag sh "$SCR/mitt-diag.sh"
   fi
+  # обновление из релизов GitHub — в фоне, одно одновременно (проверка или установка; итог в $STATE/update.json)
+  if [ -f "$STATE/update.request" ] && ! pid_alive update; then
+    mv -f "$STATE/update.request" "$STATE/update.request.run"; start_bg update sh "$SCR/mitt-update.sh"
+  fi
   # подбор стратегии Zapret — в фоне, один одновременно (заявку повторного нажатия панель не ставит, пока идёт подбор);
   # сценарий умер без итога (KILL, сбой) — вернуть прежние стратегии и пометить подбор failed
   pid_alive zapret-test || zt_service_recover
