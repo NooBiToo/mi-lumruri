@@ -117,6 +117,8 @@ while [ -f "$STATE/service.wanted" ]; do
   done
   # запасной IP сервера-домена для следующего запуска клиента (см. server_addr_learn)
   pid_alive trusttunnel && server_addr_learn
+  # сторож: «подключён», но трафик не идёт — перезапуск клиента (движок перезапустит цикл ниже на следующем проходе)
+  [ -f "$STATE/trusttunnel.wanted" ] && pid_alive trusttunnel && tunnel_watch
   # полное применение не прошло (туннель не успел подняться) и действует только защита: повтор, когда mitt0 готов,
   # не чаще раза в минуту
   if [ "$(cat "$STATE/protection" 2>/dev/null)" = guard ] && [ -f "$STATE/trusttunnel.wanted" ] && tun_ready; then

@@ -148,6 +148,40 @@ server_addr_learn() {
   [ "$(head -n 1 "$f" 2>/dev/null)" = "$name $ip" ] && return 0
   { echo "$name $ip"; grep -v "^$name $ip\$" "$f" 2>/dev/null; } | head -n 3 >"$f.t" && mv -f "$f.t" "$f"
 }
+# Сторож туннеля: клиент жив и пишет «подключён», а трафик через туннель не идёт — перезапустить клиент.
+# Раз в MITT_WATCH_INTERVAL (60 с) короткий HTTPS-запрос через mitt0 к 1.1.1.1, при неудаче — к 8.8.8.8; три неудачи подряд
+# (MITT_WATCH_FAILS) — перезапуск клиента, не чаще раза в MITT_WATCH_GAP (5 мин). Пока клиент сам переподключается
+# (не VPN_SS_CONNECTED) — не вмешиваемся. Итог — $STATE/watch.json для диагностики.
+WATCH_CURL="${MITT_WATCH_CURL:-curl}"
+tunnel_probe() {
+  local u
+  for u in https://1.1.1.1/cdn-cgi/trace https://8.8.8.8/; do
+    "$WATCH_CURL" -sk --interface mitt0 --max-time 6 -o /dev/null "$u" 2>/dev/null && return 0
+  done
+  return 1
+}
+tunnel_watch() {
+  local now next fails last st
+  now=$(date +%s); next=$(cat "$STATE/watch-next" 2>/dev/null || echo 0)
+  [ "$now" -ge "$next" ] || return 0
+  echo $((now + ${MITT_WATCH_INTERVAL:-60})) >"$STATE/watch-next"
+  st="$(tail -n 200 "$LOG/trusttunnel.log" 2>/dev/null | grep -o 'VPN_SS_[A-Z_]*' | tail -n 1)"
+  [ "$st" = VPN_SS_CONNECTED ] && tun_ready || { echo 0 >"$STATE/watch-fails"; return 0; }
+  fails=$(cat "$STATE/watch-fails" 2>/dev/null || echo 0); last=$(cat "$STATE/watch-restart" 2>/dev/null || echo 0)
+  if tunnel_probe; then
+    echo 0 >"$STATE/watch-fails"
+    printf '{"ok":true,"checked":%s,"fails":0,"restarted":%s}\n' "$now" "$last" >"$STATE/watch.json"
+    return 0
+  fi
+  fails=$((fails + 1)); echo "$fails" >"$STATE/watch-fails"
+  printf '{"ok":false,"checked":%s,"fails":%s,"restarted":%s}\n' "$now" "$fails" "$last" >"$STATE/watch.json"
+  [ "$fails" -ge "${MITT_WATCH_FAILS:-3}" ] || return 0
+  [ $((now - last)) -ge "${MITT_WATCH_GAP:-300}" ] || return 0
+  mlog "сторож: клиент «подключён», но трафик через туннель не идёт ($fails проверки подряд) — перезапуск клиента"
+  echo "$now" >"$STATE/watch-restart"; echo 0 >"$STATE/watch-fails"
+  printf '{"ok":false,"checked":%s,"fails":%s,"restarted":%s}\n' "$now" "$fails" "$now" >"$STATE/watch.json"
+  pid_stop trusttunnel
+}
 # TUN клиента готов: есть, поднят и с IPv4-адресом (клиент настраивает его не сразу после создания)
 tun_ready() { ip link show mitt0 2>/dev/null | grep -q '[<,]UP[,>]' && ip -4 addr show dev mitt0 2>/dev/null | grep -q 'inet '; }
 pid_alive() { [ -f "$STATE/$1.pid" ] && kill -0 "$(cat "$STATE/$1.pid")" 2>/dev/null; }
