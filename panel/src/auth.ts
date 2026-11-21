@@ -1,6 +1,7 @@
 // Логика экрана входа без DOM: разбор ответов контроллера и подготовка второго фактора.
 
 import type { ApiResult, SecondFactor, SessionResponse } from './api'
+import { t } from './i18n'
 
 export type LoginStage = 'password' | 'second_factor'
 
@@ -31,28 +32,28 @@ export function loginMessage(r: ApiResult<SessionResponse>): string | null {
   const code = r.body.error?.code
   switch (code) {
     case 'invalid_credentials':
-      return 'Неверный пароль.'
+      return t('Неверный пароль.')
     case 'invalid_code':
-      return 'Код не подошёл.'
+      return t('Код не подошёл.')
     case 'code_reused':
-      return 'Этот код уже использован. Дождитесь следующего кода в приложении.'
+      return t('Этот код уже использован. Дождитесь следующего кода в приложении.')
     case 'clock_untrusted':
-      return 'Часы роутера ещё не синхронизированы, поэтому код из приложения не принимается. Войдите recovery-кодом или подождите синхронизации времени.'
+      return t('Часы роутера ещё не синхронизированы, поэтому код из приложения не принимается. Войдите recovery-кодом или подождите синхронизации времени.')
     case 'login_required':
-      return 'Время на ввод кода истекло. Введите пароль ещё раз.'
+      return t('Время на ввод кода истекло. Введите пароль ещё раз.')
     case 'too_many_attempts':
-      return `Слишком много неудачных попыток. Повторите через ${r.body.retry_after ?? 30} с.`
+      return t('Слишком много неудачных попыток. Повторите через {s} с.', { s: r.body.retry_after ?? 30 })
     case 'auth_not_configured':
-      return 'Вход не настроен. На роутере выполните mi-tt-admin auth init и auth confirm.'
+      return t('Вход не настроен. На роутере выполните mi-tt-admin auth init и auth confirm.')
     case 'https_required':
-      return 'Вход возможен только по HTTPS.'
+      return t('Вход возможен только по HTTPS.')
     case 'origin_forbidden':
     case 'origin_required':
     case 'cross_site':
     case 'write_disabled':
-      return 'Запрос отклонён: страница открыта не с адреса панели.'
+      return t('Запрос отклонён: страница открыта не с адреса панели.')
     default:
-      return r.body.error?.message ?? `Ошибка ${r.status}.`
+      return r.body.error?.message ?? t('Ошибка {s}.', { s: r.status })
   }
 }
 

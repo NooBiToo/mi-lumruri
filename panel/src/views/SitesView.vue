@@ -6,6 +6,7 @@ import { build, buildBlocker, catalog, knownDevicesNow, save, scrollTarget, serv
 import { usesZapret } from '../status'
 import { normalizeDomain, serviceRoute, setServiceRoute, type ServiceRoute, type Simple } from '../simple'
 import { useAutosave, type Blocker } from '../autosave'
+import { t } from '../i18n'
 import ManualBanner from './ManualBanner.vue'
 import Segmented from '../components/Segmented.vue'
 import ServiceLogo from '../components/ServiceLogo.vue'
@@ -40,13 +41,13 @@ const dirty = computed(() => {
 // настройки перечитаны (сохранение, другое окно): черновик без правок следует за ними
 watch(simple, (s) => { if (s && (!draft.value || !dirty.value)) draft.value = toDraft(s) })
 
-const MODES = [{ value: 'selected' as const, label: 'Только выбранные' }, { value: 'all' as const, label: 'Всё через VPN' }]
-const RESTS = [{ value: 'direct' as const, label: 'Напрямую' }, { value: 'zapret' as const, label: 'С обходом блокировок (Zapret)' }]
-const ROUTES: { value: ServiceRoute; label: string; title: string }[] = [
-  { value: 'vpn', label: 'VPN', title: 'через VPN' },
-  { value: 'zapret', label: 'Zapret', title: 'напрямую с обходом блокировок' },
-  { value: 'off', label: 'Выкл', title: 'как остальные сайты' },
-]
+const MODES = computed(() => [{ value: 'selected' as const, label: t('Только выбранные') }, { value: 'all' as const, label: t('Всё через VPN') }])
+const RESTS = computed(() => [{ value: 'direct' as const, label: t('Напрямую') }, { value: 'zapret' as const, label: t('С обходом блокировок (Zapret)') }])
+const ROUTES = computed<{ value: ServiceRoute; label: string; title: string }[]>(() => [
+  { value: 'vpn', label: 'VPN', title: t('через VPN') },
+  { value: 'zapret', label: 'Zapret', title: t('напрямую с обходом блокировок') },
+  { value: 'off', label: t('Выкл'), title: t('как остальные сайты') },
+])
 
 // ---- сервисы каталога ----
 const search = ref('')
@@ -62,7 +63,7 @@ const groups = computed(() => {
   const q = search.value.trim().toLowerCase()
   const all = catalog.value?.services ?? []
   return allGroups.value.filter((g) => !filter.value || g === filter.value)
-    .map((g) => ({ name: g, items: all.filter((s) => s.group === g && (!q || s.name.toLowerCase().includes(q) || s.id.includes(q))) }))
+    .map((g) => ({ name: g, items: all.filter((s) => s.group === g && (!q || s.name.toLowerCase().includes(q) || t(s.name).toLowerCase().includes(q) || s.id.includes(q))) }))
     .filter((g) => g.items.length)
 })
 const countIn = (g: string) => (catalog.value?.services ?? [])
@@ -76,16 +77,16 @@ const servicesSub = computed(() => {
   const d = draft.value
   if (!d) return ''
   const parts: string[] = []
-  if (d.services.length) parts.push(`через VPN: ${d.services.length}`)
-  if (d.zapretServices.length) parts.push(`с обходом блокировок: ${d.zapretServices.length}`)
-  return parts.length ? `Выбрано ${parts.join(', ')}` : 'Ничего не выбрано'
+  if (d.services.length) parts.push(t('через VPN: {n}', { n: d.services.length }))
+  if (d.zapretServices.length) parts.push(t('с обходом блокировок: {n}', { n: d.zapretServices.length }))
+  return parts.length ? t('Выбрано {list}', { list: parts.join(', ') }) : t('Ничего не выбрано')
 })
 
 // ---- автосохранение ----
 const usesVpn = computed(() => !!next.value && (next.value.mode === 'all' || next.value.services.length > 0 || next.value.customDomains.length > 0))
 function blocker(): Blocker | null {
   if (usesVpn.value && !serverReady.value) {
-    return { text: 'Сначала настройте сервер VPN — без него сайтам некуда идти.', action: { label: 'Открыть «Сервер»', run: () => emit('navigate', 'server') } }
+    return { text: t('Сначала настройте сервер VPN — без него сайтам некуда идти.'), action: { label: t('Открыть «Сервер»'), run: () => emit('navigate', 'server') } }
   }
   const b = buildBlocker()
   return b ? { text: b } : null
@@ -95,7 +96,7 @@ useAutosave({
   dirty: () => dirty.value,
   blocker,
   run: async () => {
-    if (!next.value) return 'Настройки ещё не загружены.'
+    if (!next.value) return t('Настройки ещё не загружены.')
     const cfg = build(next.value, knownDevicesNow())
     if (typeof cfg === 'string') return cfg
     return save(cfg, '')
@@ -117,56 +118,56 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="sect" aria-label="Сайты">
+  <section class="sect" :aria-label="t('Сайты')">
     <ManualBanner v-if="simpleState && !simpleState.canonical" :reason="simpleState.reason" />
 
     <template v-else-if="draft">
       <div class="card">
         <div class="card__head">
           <div>
-            <h2 class="card__title">Что открывать через VPN</h2>
+            <h2 class="card__title">{{ t('Что открывать через VPN') }}</h2>
             <p class="card__sub">{{ draft.mode === 'selected'
-              ? 'Рекомендуется. Через VPN идут только отмеченные сервисы и ваши сайты, остальное — как обычно.'
-              : 'Весь интернет через VPN. Сайты из «Не пускать через VPN» и сайты с обходом блокировок откроются напрямую.' }}</p>
+              ? t('Рекомендуется. Через VPN идут только отмеченные сервисы и ваши сайты, остальное — как обычно.')
+              : t('Весь интернет через VPN. Сайты из «Не пускать через VPN» и сайты с обходом блокировок откроются напрямую.') }}</p>
           </div>
-          <Segmented v-model="draft.mode" :options="MODES" label="Что пускать через VPN" name="mode" />
+          <Segmented v-model="draft.mode" :options="MODES" :label="t('Что пускать через VPN')" name="mode" />
         </div>
       </div>
 
       <div class="card">
         <div class="card__head">
           <div>
-            <h2 class="card__title">Сервисы</h2>
+            <h2 class="card__title">{{ t('Сервисы') }}</h2>
             <p class="card__sub">{{ servicesSub }}</p>
           </div>
           <div class="search">
             <Search :size="16" class="search__icon" aria-hidden="true" />
-            <label for="svc-search" class="sr-only">Найти сервис</label>
-            <InputText id="svc-search" v-model="search" placeholder="Найти сервис" type="search" />
+            <label for="svc-search" class="sr-only">{{ t('Найти сервис') }}</label>
+            <InputText id="svc-search" v-model="search" :placeholder="t('Найти сервис')" type="search" />
           </div>
         </div>
         <p class="legend">
-          <span class="legend__item"><span class="legend__mark legend__mark--vpn" />VPN — через VPN</span>
-          <span class="legend__item"><span class="legend__mark legend__mark--zapret" />Zapret — напрямую с обходом блокировок</span>
-          <span class="legend__item"><span class="legend__mark" />Выкл — как остальные сайты</span>
+          <span class="legend__item"><span class="legend__mark legend__mark--vpn" />{{ t('VPN — через VPN') }}</span>
+          <span class="legend__item"><span class="legend__mark legend__mark--zapret" />{{ t('Zapret — напрямую с обходом блокировок') }}</span>
+          <span class="legend__item"><span class="legend__mark" />{{ t('Выкл — как остальные сайты') }}</span>
         </p>
-        <p v-if="draft.mode === 'all'" class="hint">Сейчас всё идёт через VPN, отметка «VPN» понадобится, только если вернуться к режиму «Только выбранные».</p>
+        <p v-if="draft.mode === 'all'" class="hint">{{ t('Сейчас всё идёт через VPN, отметка «VPN» понадобится, только если вернуться к режиму «Только выбранные».') }}</p>
         <template v-if="catalog">
-          <div class="filters" role="group" aria-label="Группы сервисов">
-            <button type="button" :class="['filter', { 'filter--on': !filter }]" :aria-pressed="!filter" @click="filter = ''">Все</button>
+          <div class="filters" role="group" :aria-label="t('Группы сервисов')">
+            <button type="button" :class="['filter', { 'filter--on': !filter }]" :aria-pressed="!filter" @click="filter = ''">{{ t('Все') }}</button>
             <button v-for="g in allGroups" :key="g" type="button" :class="['filter', { 'filter--on': filter === g }]" :aria-pressed="filter === g" @click="filter = g">
-              {{ g }}<span v-if="countIn(g)" class="filter__n">{{ countIn(g) }}</span>
+              {{ t(g) }}<span v-if="countIn(g)" class="filter__n">{{ countIn(g) }}</span>
             </button>
           </div>
           <div v-for="g in groups" :key="g.name" class="svc-group">
-            <h3 v-if="!filter" class="svc-group__title">{{ g.name }}</h3>
-            <p v-if="g.name === EXPERT" class="hint">Целые сети хостингов — для специалистов. Нужны, только если вы точно знаете, что сайт работает у такого хостинга и без VPN не открывается.</p>
+            <h3 v-if="!filter" class="svc-group__title">{{ t(g.name) }}</h3>
+            <p v-if="g.name === EXPERT" class="hint">{{ t('Целые сети хостингов — для специалистов. Нужны, только если вы точно знаете, что сайт работает у такого хостинга и без VPN не открывается.') }}</p>
             <div class="tiles">
               <div v-for="s in g.items" :key="s.id" :class="['tile', `tile--${routeOf(s.id)}`]">
                 <ServiceLogo :id="s.id" />
-                <span :id="`svc-${s.id}`" class="tile__name" :title="s.name">{{ s.name }}</span>
+                <span :id="`svc-${s.id}`" class="tile__name" :title="t(s.name)">{{ t(s.name) }}</span>
                 <div class="route" role="radiogroup" :aria-labelledby="`svc-${s.id}`">
-                  <label v-for="o in ROUTES" :key="o.value" :class="['route__opt', `route__opt--${o.value}`, { 'route__opt--on': routeOf(s.id) === o.value }]" :title="`${s.name}: ${o.title}`">
+                  <label v-for="o in ROUTES" :key="o.value" :class="['route__opt', `route__opt--${o.value}`, { 'route__opt--on': routeOf(s.id) === o.value }]" :title="`${t(s.name)}: ${o.title}`">
                     <input type="radio" class="route__radio" :name="`route-${s.id}`" :value="o.value" :checked="routeOf(s.id) === o.value"
                       :aria-label="`${o.label}: ${o.title}`" @change="setRoute(s.id, o.value)" />
                     <span>{{ o.label }}</span>
@@ -175,33 +176,33 @@ onMounted(async () => {
               </div>
             </div>
           </div>
-          <p v-if="!groups.length" class="muted">Ничего не нашлось. Сайт можно добавить в свои списки ниже.</p>
-          <p class="hint">«Всё заблокированное в России» — большой общий список: его хватает, если не знаете, что выбрать.</p>
+          <p v-if="!groups.length" class="muted">{{ t('Ничего не нашлось. Сайт можно добавить в свои списки ниже.') }}</p>
+          <p class="hint">{{ t('«Всё заблокированное в России» — большой общий список: его хватает, если не знаете, что выбрать.') }}</p>
         </template>
-        <Message v-else severity="warn" :closable="false">Каталог сайтов не загрузился. Обновите страницу.</Message>
+        <Message v-else severity="warn" :closable="false">{{ t('Каталог сайтов не загрузился. Обновите страницу.') }}</Message>
       </div>
 
       <ListsCard />
 
-      <DomainList v-if="draft.mode === 'selected'" id="custom" v-model="draft.custom" title="Свои сайты через VPN" placeholder="example.com"
-        sub="Сайты, которых нет среди сервисов. Поддомены тоже пойдут через VPN." empty="Пока пусто. Добавьте адрес сайта, например example.com." />
-      <DomainList id="zapret-sites" v-model="draft.zapret" title="Сайты с обходом блокировок" placeholder="example.com"
-        sub="Открываются напрямую, без VPN, с обходом блокировок (Zapret). Работают и при выключенном VPN."
-        empty="Пока пусто. Подходит для сайтов, которые без VPN тормозят или не открываются." />
-      <DomainList id="except" v-model="draft.except" title="Не пускать через VPN" placeholder="gosuslugi.ru"
-        sub="Эти сайты всегда открываются напрямую — например, банки и госуслуги" empty="Пока пусто. Добавьте, например, сайт банка." />
+      <DomainList v-if="draft.mode === 'selected'" id="custom" v-model="draft.custom" :title="t('Свои сайты через VPN')" placeholder="example.com"
+        :sub="t('Сайты, которых нет среди сервисов. Поддомены тоже пойдут через VPN.')" :empty="t('Пока пусто. Добавьте адрес сайта, например example.com.')" />
+      <DomainList id="zapret-sites" v-model="draft.zapret" :title="t('Сайты с обходом блокировок')" placeholder="example.com"
+        :sub="t('Открываются напрямую, без VPN, с обходом блокировок (Zapret). Работают и при выключенном VPN.')"
+        :empty="t('Пока пусто. Подходит для сайтов, которые без VPN тормозят или не открываются.')" />
+      <DomainList id="except" v-model="draft.except" :title="t('Не пускать через VPN')" placeholder="gosuslugi.ru"
+        :sub="t('Эти сайты всегда открываются напрямую — например, банки и госуслуги')" :empty="t('Пока пусто. Добавьте, например, сайт банка.')" />
 
       <div id="zapret" class="card">
         <div class="card__head">
           <div>
-            <h2 class="card__title">{{ draft.mode === 'selected' ? 'Остальные сайты' : 'Сайты, которые не идут через VPN' }}</h2>
-            <p class="card__sub">Обход блокировок помогает, когда YouTube или Discord без VPN тормозят или не открываются</p>
+            <h2 class="card__title">{{ draft.mode === 'selected' ? t('Остальные сайты') : t('Сайты, которые не идут через VPN') }}</h2>
+            <p class="card__sub">{{ t('Обход блокировок помогает, когда YouTube или Discord без VPN тормозят или не открываются') }}</p>
           </div>
-          <Segmented v-model="draft.rest" :options="RESTS" label="Как открывать остальные сайты" name="rest" />
+          <Segmented v-model="draft.rest" :options="RESTS" :label="t('Как открывать остальные сайты')" name="rest" />
         </div>
 
-        <p v-if="zapretDraft" class="hint">Способ обхода, подбор под ваш интернет и автопроверка —
-          на странице <button type="button" class="link-btn" @click="emit('navigate', 'zapret')">Zapret</button></p>
+        <p v-if="zapretDraft" class="hint">{{ t('Способ обхода, подбор под ваш интернет и автопроверка — на странице') }}
+          <button type="button" class="link-btn" @click="emit('navigate', 'zapret')">Zapret</button></p>
       </div>
     </template>
   </section>

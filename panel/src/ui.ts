@@ -2,6 +2,7 @@
 
 import { normalizeDomain } from './simple'
 import { lines } from './status'
+import { t } from './i18n'
 
 /**
  * Похоже ли значение на адрес сайта: метки из букв (в том числе кириллицы), цифр и дефисов через точку, не меньше
@@ -58,8 +59,8 @@ export function isLikelyIp(raw: string): boolean {
 /** Новая своя DNS-запись из полей «домен» и «адрес»: запись или текст ошибки. */
 export function parseHostRecord(domain: string, address: string, have: { domain: string }[]): { domain: string; address: string } | string {
   const d = normalizeDomain(domain)
-  if (!d || !isLikelyDomain(d)) return 'Не похоже на домен. Пример: home.example.com'
-  if (have.some((h) => h.domain === d)) return `Для ${d} запись уже есть: уберите её, чтобы задать другой адрес.`
-  if (!isLikelyIp(address)) return 'Нужен IP-адрес, например 192.168.31.10.'
+  if (!d || !isLikelyDomain(d)) return t('Не похоже на домен. Пример: home.example.com')
+  if (have.some((h) => h.domain === d)) return t('Для {d} запись уже есть: уберите её, чтобы задать другой адрес.', { d })
+  if (!isLikelyIp(address)) return t('Нужен IP-адрес, например 192.168.31.10.')
   return { domain: d, address: address.trim().toLowerCase() }
 }

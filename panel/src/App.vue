@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, type Component } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue'
 import Button from 'primevue/button'
 import ConfirmDialog from 'primevue/confirmdialog'
 import Message from 'primevue/message'
@@ -8,6 +8,8 @@ import ToggleSwitch from 'primevue/toggleswitch'
 import Toast from 'primevue/toast'
 import { Activity, BookOpenText, Check, ShieldCheck, CircleAlert, Globe, LayoutDashboard, LoaderCircle, LogOut, MonitorSmartphone, Server, SlidersHorizontal, Waypoints } from 'lucide-vue-next'
 import { useToast } from 'primevue/usetoast'
+import { usePrimeVue } from 'primevue/config'
+import { lang, t } from './i18n'
 import { api, onAuthLost, setCsrf, type SessionResponse } from './api'
 import type { LoginStage } from './auth'
 import LoginView from './LoginView.vue'
@@ -25,6 +27,16 @@ import ZapretView from './views/ZapretView.vue'
 import ManualBanner from './views/ManualBanner.vue'
 
 const toast = useToast()
+// подписи встроенных элементов PrimeVue (диалог, пароль, списки) — на языке интерфейса
+const primevue = usePrimeVue()
+watch(lang, () => {
+  // подписи меняются на месте: тип PrimeVueLocaleOptions требует все поля, а нужны только эти
+  Object.assign(primevue.config.locale ?? {}, {
+    accept: t('Да'), reject: t('Нет'), emptyMessage: t('Нет вариантов'), emptyFilterMessage: t('Ничего не найдено'),
+    passwordPrompt: t('Введите пароль'), showPassword: t('Показать пароль'), hidePassword: t('Скрыть пароль'), // secret-scan: allow подписи интерфейса, не пароли
+    aria: { ...primevue.config.locale?.aria, close: t('Закрыть') },
+  })
+}, { immediate: true })
 notify.show = (kind, text, detail) => toast.add({ severity: kind, summary: text, detail, life: kind === 'error' ? 8000 : 4000 })
 
 /** checking — спрашиваем контроллер о сессии; login — нужен вход; ready — вошли. */
@@ -38,19 +50,19 @@ const loading = ref(false)
 
 type Tab = 'status' | 'sites' | 'devices' | 'server' | 'zapret' | 'hosts' | 'diag' | 'more'
 /** inBar — пункт нижней панели телефона; остальные открываются со страницы «Ещё». */
-const TABS: { value: Tab; label: string; short: string; icon: Component; inBar?: false }[] = [
-  { value: 'status', label: 'Обзор', short: 'Обзор', icon: LayoutDashboard },
-  { value: 'sites', label: 'Сайты', short: 'Сайты', icon: Globe },
-  { value: 'devices', label: 'Устройства', short: 'Устройства', icon: MonitorSmartphone },
-  { value: 'server', label: 'Сервер', short: 'Сервер', icon: Server },
+const TABS = computed<{ value: Tab; label: string; short: string; icon: Component; inBar?: false }[]>(() => [
+  { value: 'status', label: t('Обзор'), short: t('Обзор'), icon: LayoutDashboard },
+  { value: 'sites', label: t('Сайты'), short: t('Сайты'), icon: Globe },
+  { value: 'devices', label: t('Устройства'), short: t('Устройства'), icon: MonitorSmartphone },
+  { value: 'server', label: t('Сервер'), short: t('Сервер'), icon: Server },
   { value: 'zapret', label: 'Zapret', short: 'Zapret', icon: ShieldCheck, inBar: false },
-  { value: 'hosts', label: 'Свои DNS-записи', short: 'DNS', icon: BookOpenText, inBar: false },
-  { value: 'diag', label: 'Диагностика', short: 'Проверка', icon: Activity, inBar: false },
-  { value: 'more', label: 'Дополнительно', short: 'Ещё', icon: SlidersHorizontal },
-]
-const fromHash = (): Tab | null => TABS.find((t) => `#${t.value}` === location.hash)?.value ?? null
+  { value: 'hosts', label: t('Свои DNS-записи'), short: 'DNS', icon: BookOpenText, inBar: false },
+  { value: 'diag', label: t('Диагностика'), short: t('Проверка'), icon: Activity, inBar: false },
+  { value: 'more', label: t('Дополнительно'), short: t('Ещё'), icon: SlidersHorizontal },
+])
+const fromHash = (): Tab | null => TABS.value.find((x) => `#${x.value}` === location.hash)?.value ?? null
 const tab = ref<Tab>(fromHash() ?? 'status')
-const title = computed(() => TABS.find((t) => t.value === tab.value)?.label ?? '')
+const title = computed(() => TABS.value.find((x) => x.value === tab.value)?.label ?? '')
 const saveText = computed(() => saveLabel(saveStatus, !!service.value?.apply_pending))
 
 function go(t: Tab) {
@@ -85,7 +97,7 @@ async function checkSession() {
     clockTrusted.value = r.body.clock_trusted !== false
     auth.value = 'login'
   } else {
-    authError.value = r.body.error?.message ?? `контроллер ответил ${r.status}`
+    authError.value = r.body.error?.message ?? t('контроллер ответил {s}', { s: r.status })
     auth.value = 'error'
   }
 }
@@ -133,29 +145,29 @@ onBeforeUnmount(() => { removeEventListener('hashchange', onHash); clearInterval
   <div v-if="auth !== 'ready'" class="gate">
     <div class="gate__brand">
       <span class="gate__name">Mi Lumruri</span>
-      <span class="gate__sub">Вход в панель роутера</span>
+      <span class="gate__sub">{{ t('Вход в панель роутера') }}</span>
     </div>
     <div v-if="auth === 'checking'" class="gate__card" aria-busy="true">
-      <span class="sr-only">Проверяю вход</span>
+      <span class="sr-only">{{ t('Проверяю вход') }}</span>
       <Skeleton height="1rem" width="40%" />
       <Skeleton height="2.5rem" class="gate__skel" />
       <Skeleton height="2.5rem" />
     </div>
     <div v-else-if="auth === 'error'" class="gate__card">
       <Message severity="error" :closable="false">
-        <strong>Панель недоступна.</strong> {{ authError }}. Проверьте, что роутер включён, и повторите.
+        <strong>{{ t('Панель недоступна.') }}</strong> {{ authError }}. {{ t('Проверьте, что роутер включён, и повторите.') }}
       </Message>
-      <Button label="Повторить" class="gate__retry" @click="checkSession()" />
+      <Button :label="t('Повторить')" class="gate__retry" @click="checkSession()" />
     </div>
     <template v-else>
-      <Message v-if="lost" severity="warn" :closable="false" class="gate__lost">Сессия завершилась. Войдите снова.</Message>
+      <Message v-if="lost" severity="warn" :closable="false" class="gate__lost">{{ t('Сессия завершилась. Войдите снова.') }}</Message>
       <LoginView :initial-stage="loginStage" :clock-trusted="clockTrusted" @done="onLoggedIn" />
     </template>
   </div>
 
   <div v-else class="app">
-    <a href="#main" class="skip">К содержимому</a>
-    <aside class="side" aria-label="Разделы">
+    <a href="#main" class="skip">{{ t('К содержимому') }}</a>
+    <aside class="side" :aria-label="t('Разделы')">
       <div class="side__brand">
         <span class="side__mark" aria-hidden="true"><Waypoints :size="20" :stroke-width="1.75" /></span>
         <span class="side__name">Mi Lumruri</span>
@@ -185,18 +197,18 @@ onBeforeUnmount(() => { removeEventListener('hashchange', onHash); clearInterval
           <button v-if="saveStatus.action" type="button" class="save__act" @click="saveStatus.action.run()">{{ saveStatus.action.label }}</button>
         </div>
         <div class="top__end">
-          <label v-if="vpnAvailable && simple" class="master" :title="simple.enabled ? 'Выключить VPN' : 'Включить VPN'">
+          <label v-if="vpnAvailable && simple" class="master" :title="simple.enabled ? t('Выключить VPN') : t('Включить VPN')">
             <span class="master__label">VPN</span>
-            <ToggleSwitch :model-value="simple.enabled" input-id="vpn-master" :disabled="vpnBusy" :aria-label="simple.enabled ? 'Выключить VPN' : 'Включить VPN'"
+            <ToggleSwitch :model-value="simple.enabled" input-id="vpn-master" :disabled="vpnBusy" :aria-label="simple.enabled ? t('Выключить VPN') : t('Включить VPN')"
               @update:model-value="toggleVpn()" />
           </label>
-          <button type="button" class="out" title="Выйти" @click="logout"><LogOut :size="18" aria-hidden="true" /><span class="out__text">Выйти</span></button>
+          <button type="button" class="out" :title="t('Выйти')" @click="logout"><LogOut :size="18" aria-hidden="true" /><span class="out__text">{{ t('Выйти') }}</span></button>
         </div>
       </header>
 
       <main id="main" class="page" tabindex="-1">
         <div v-if="loading || (!config && !loadError)" class="loading" aria-busy="true">
-          <span class="sr-only">Читаю настройки</span>
+          <span class="sr-only">{{ t('Читаю настройки') }}</span>
           <Skeleton height="5rem" border-radius="14px" />
           <Skeleton height="16rem" border-radius="14px" />
         </div>
@@ -205,8 +217,8 @@ onBeforeUnmount(() => { removeEventListener('hashchange', onHash); clearInterval
           <ManualBanner broken :reason="issuesText(configIssues)" />
         </section>
         <section v-else-if="!config" class="sect">
-          <Message severity="error" :closable="false"><strong>Настройки не загружены.</strong> {{ loadError }}.</Message>
-          <Button label="Загрузить снова" class="self-start" @click="enter()" />
+          <Message severity="error" :closable="false"><strong>{{ t('Настройки не загружены.') }}</strong> {{ loadError }}.</Message>
+          <Button :label="t('Загрузить снова')" class="self-start" @click="enter()" />
         </section>
         <StatusView v-else-if="tab === 'status'" @navigate="go" />
         <SitesView v-else-if="tab === 'sites'" @navigate="go" />
@@ -219,7 +231,7 @@ onBeforeUnmount(() => { removeEventListener('hashchange', onHash); clearInterval
       </main>
     </div>
 
-    <nav class="tabbar" aria-label="Разделы">
+    <nav class="tabbar" :aria-label="t('Разделы')">
       <a v-for="t in TABS.filter((x) => x.inBar !== false)" :key="t.value" :href="`#${t.value}`"
         :class="['tabbar__item', { 'tabbar__item--on': tab === t.value || (t.value === 'more' && TABS.some((x) => x.value === tab && x.inBar === false)) }]"
         :aria-current="tab === t.value ? 'page' : undefined" :aria-label="t.label" @click.prevent="go(t.value)">

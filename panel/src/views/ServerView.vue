@@ -13,24 +13,25 @@ import { emptyProfileForm, formToProfile, formToSecret, profileToForm, type Prof
 import { parseServer, TLS_PROFILES } from '../serverConfig'
 import { config, hasPassword, hasSubscription, loadSecrets, notify, profile, save, simple, tunnel } from '../store'
 import { when } from '../status'
+import { t } from '../i18n'
 import Segmented from '../components/Segmented.vue'
 
 const emit = defineEmits<{ navigate: [tab: 'sites'] }>()
 
 const PROFILE_ID = 'tt'
-const formFrom = (): ProfileForm => (profile.value ? profileToForm(profile.value) : { ...emptyProfileForm(), id: PROFILE_ID, name: 'Мой сервер' })
+const formFrom = (): ProfileForm => (profile.value ? profileToForm(profile.value) : { ...emptyProfileForm(), id: PROFILE_ID, name: t('Мой сервер') })
 const form = ref<ProfileForm>(formFrom())
 const pristine = ref(JSON.stringify(form.value))
 const dirty = computed(() => JSON.stringify(form.value) !== pristine.value)
 watch(profile, () => { if (!dirty.value) { form.value = formFrom(); pristine.value = JSON.stringify(form.value) } })
 const firstTime = computed(() => !profile.value?.endpoint)
 const advanced = ref(false)
-const FAILURE = [{ value: 'block' as const, label: 'Не открывать' }, { value: 'direct' as const, label: 'Открывать напрямую' }]
-const TLS_LABEL: Record<TlsProfile, string> = {
-  chrome: 'Chrome (по умолчанию)', chrome_canary: 'Chrome Canary', safari: 'Safari', firefox: 'Firefox', okhttp: 'OkHttp (Android)',
-  openssl: 'OpenSSL', boringssl: 'Без маскировки (BoringSSL)',
-}
-const TLS_OPTIONS = TLS_PROFILES.map((id) => ({ id, label: TLS_LABEL[id] }))
+const FAILURE = computed(() => [{ value: 'block' as const, label: t('Не открывать') }, { value: 'direct' as const, label: t('Открывать напрямую') }])
+const tlsLabel = (id: TlsProfile): string => ({
+  chrome: t('Chrome (по умолчанию)'), chrome_canary: 'Chrome Canary', safari: 'Safari', firefox: 'Firefox', okhttp: 'OkHttp (Android)',
+  openssl: 'OpenSSL', boringssl: t('Без маскировки (BoringSSL)'),
+} satisfies Record<TlsProfile, string>)[id]
+const TLS_OPTIONS = computed(() => TLS_PROFILES.map((id) => ({ id, label: tlsLabel(id) })))
 
 // ---- вставка конфигурации ----
 const pasted = ref('')
@@ -38,9 +39,9 @@ interface Preview { rows: { label: string; value: string | null }[]; warnings: s
 const parsed = ref<Preview | { error: string } | null>(null)
 watch(pasted, (t) => { if (!t.trim()) parsed.value = null })
 function recognize() {
-  const t = pasted.value
-  if (!t.trim()) { parsed.value = null; return }
-  const r = parseServer(t)
+  const text = pasted.value
+  if (!text.trim()) { parsed.value = null; return }
+  const r = parseServer(text)
   if ('error' in r) { parsed.value = { error: r.error }; return }
   const e: Partial<Endpoint> = r.endpoint
   const f = form.value
@@ -59,18 +60,18 @@ function recognize() {
   if (r.name && !profile.value) f.name = r.name
   // необязательные параметры — только если они есть в ссылке
   const extra = [
-    ...(e.tls_profile ? [{ label: 'Профиль TLS', value: TLS_LABEL[e.tls_profile] }] : []),
-    ...(e.client_random_auth_key ? [{ label: 'Ключ client_random', value: 'есть' }] : e.client_random ? [{ label: 'Префикс client_random', value: 'есть' }] : []),
+    ...(e.tls_profile ? [{ label: t('Профиль TLS'), value: tlsLabel(e.tls_profile) }] : []),
+    ...(e.client_random_auth_key ? [{ label: t('Ключ client_random'), value: t('есть') }] : e.client_random ? [{ label: t('Префикс client_random'), value: t('есть') }] : []),
   ]
   parsed.value = {
     rows: [
-      { label: 'Сервер', value: e.server ? `${e.server}${e.port ? `:${e.port}` : ''}` : null },
-      { label: 'Имя сервера', value: e.sni ?? null },
-      { label: 'Логин', value: e.username ?? null },
-      { label: 'Пароль', value: r.password ? 'есть' : null },
-      { label: 'Сертификат', value: e.certificate ? 'есть' : null },
+      { label: t('Сервер'), value: e.server ? `${e.server}${e.port ? `:${e.port}` : ''}` : null },
+      { label: t('Имя сервера'), value: e.sni ?? null },
+      { label: t('Логин'), value: e.username ?? null },
+      { label: t('Пароль'), value: r.password ? t('есть') : null },
+      { label: t('Сертификат'), value: e.certificate ? t('есть') : null },
       ...extra,
-      ...(r.subscription ? [{ label: 'Подписка', value: e.server ? 'есть' : 'есть — адрес и пароль роутер получит по ней' }] : []),
+      ...(r.subscription ? [{ label: t('Подписка'), value: e.server ? t('есть') : t('есть — адрес и пароль роутер получит по ней') }] : []),
     ],
     warnings: r.warnings ?? [],
   }
@@ -89,8 +90,8 @@ const needPassword = computed(() => !hasPassword.value && !form.value.password &
 const blocker = computed(() => {
   const f = form.value
   if (subscriptionOnly.value) return null
-  if (!f.server.trim() || !f.username.trim()) return 'Укажите адрес сервера и логин — или вставьте ссылку.'
-  if (needPassword.value) return 'Укажите пароль.'
+  if (!f.server.trim() || !f.username.trim()) return t('Укажите адрес сервера и логин — или вставьте ссылку.')
+  if (needPassword.value) return t('Укажите пароль.')
   return null
 })
 async function submit() {
@@ -103,7 +104,7 @@ async function submit() {
     const secret = formToSecret(form.value)
     const writeSecret = async (): Promise<boolean> => {
       const s = await manage.setSecret(p.id, secret!)
-      if (s.status !== 200) error.value = `Пароль не записан: ${s.body.error?.message ?? s.status}`
+      if (s.status !== 200) error.value = t('Пароль не записан: {e}', { e: s.body.error?.message ?? s.status })
       return s.status === 200
     }
     // Пароль пишется до настроек: заявка на применение от POST /config уже застанет новый пароль. Но контроллер
@@ -116,7 +117,7 @@ async function submit() {
     if (secret && !known) {
       if (!(await writeSecret())) return
       await manage.applyRequest()
-      notify.show('success', 'Сохранено, применяю на роутере')
+      notify.show('success', t('Сохранено, применяю на роутере'))
     }
     // новая ссылка-подписка — сразу забрать параметры сервера
     if (secret?.subscription_url) void refreshSubscription(true)
@@ -140,24 +141,26 @@ async function loadSubscription() {
 }
 async function refreshSubscription(quiet = false) {
   const r = await api.updateSubscription()
-  if (r.status !== 202) { notify.show('error', 'Не получилось', r.body.error?.message); return }
-  if (!quiet) notify.show('info', 'Обновляю параметры по подписке')
+  if (r.status !== 202) { notify.show('error', t('Не получилось'), r.body.error?.message); return }
+  if (!quiet) notify.show('info', t('Обновляю параметры по подписке'))
   subTimer = window.setTimeout(() => void loadSubscription(), 1500)
 }
 async function dropSubscription() {
   const id = profile.value?.id
   if (!id) return
   const r = await manage.setSecret(id, { subscription_url: '' })
-  if (r.status !== 200) { notify.show('error', 'Не получилось', r.body.error?.message); return }
-  notify.show('success', 'Подписка удалена')
+  if (r.status !== 200) { notify.show('error', t('Не получилось'), r.body.error?.message); return }
+  notify.show('success', t('Подписка удалена'))
   await loadSecrets()
 }
 const subText = computed(() => {
   const s = sub.value?.subscription
-  if (sub.value?.running) return 'Обновляю по подписке…'
-  if (!s) return 'Роутер ещё не обращался к подписке'
-  if (!s.ok) return `Не получилось ${when(s.checked)}: ${s.error ?? 'ошибка'}. Действуют прежние параметры`
-  return `Проверено ${when(s.checked)}${s.updated ? `, параметры менялись ${when(s.updated)}` : ', изменений нет'}`
+  if (sub.value?.running) return t('Обновляю по подписке…')
+  if (!s) return t('Роутер ещё не обращался к подписке')
+  if (!s.ok) return t('Не получилось {when}: {e}. Действуют прежние параметры', { when: when(s.checked), e: s.error ?? t('ошибка') })
+  return s.updated
+    ? t('Проверено {when}, параметры менялись {changed}', { when: when(s.checked), changed: when(s.updated) })
+    : t('Проверено {when}, изменений нет', { when: when(s.checked) })
 })
 onMounted(() => void loadSubscription())
 onBeforeUnmount(() => clearTimeout(subTimer))
@@ -165,11 +168,11 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
 </script>
 
 <template>
-  <section class="sect" aria-label="Сервер VPN">
+  <section class="sect" :aria-label="t('Сервер VPN')">
     <Message v-if="done && nothingSelected" severity="success" :closable="false">
       <div class="next">
-        <span>Сервер сохранён. Теперь отметьте сайты, которые открывать через VPN.</span>
-        <Button label="Выбрать сайты" size="small" @click="emit('navigate', 'sites')" />
+        <span>{{ t('Сервер сохранён. Теперь отметьте сайты, которые открывать через VPN.') }}</span>
+        <Button :label="t('Выбрать сайты')" size="small" @click="emit('navigate', 'sites')" />
       </div>
     </Message>
 
@@ -177,114 +180,113 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
       <div class="cols__side">
         <div class="card">
           <div>
-            <h2 class="card__title">{{ firstTime ? 'Быстрая настройка' : 'Сменить сервер' }}</h2>
-            <p class="card__sub">Вставьте ссылку <span class="num">tt://</span> или файл конфигурации клиента — поля заполнятся сами</p>
+            <h2 class="card__title">{{ firstTime ? t('Быстрая настройка') : t('Сменить сервер') }}</h2>
+            <p class="card__sub">{{ t('Вставьте ссылку') }} <span class="num">tt://</span> {{ t('или файл конфигурации клиента — поля заполнятся сами') }}</p>
           </div>
           <div class="field">
-            <label for="paste" class="sr-only">Ссылка или конфигурация сервера</label>
-            <Textarea id="paste" v-model="pasted" rows="5" spellcheck="false" placeholder="tt://?… или содержимое client.toml" class="mono" @paste="onPaste" />
+            <label for="paste" class="sr-only">{{ t('Ссылка или конфигурация сервера') }}</label>
+            <Textarea id="paste" v-model="pasted" rows="5" spellcheck="false" :placeholder="t('tt://?… или содержимое client.toml')" class="mono" @paste="onPaste" />
           </div>
-          <Button label="Распознать" severity="secondary" variant="outlined" class="self-start" :disabled="!pasted.trim()" @click="recognize">
+          <Button :label="t('Распознать')" severity="secondary" variant="outlined" class="self-start" :disabled="!pasted.trim()" @click="recognize">
             <template #icon><ClipboardPaste :size="16" class="p-button-icon-left" aria-hidden="true" /></template>
           </Button>
-          <Message v-if="parsed && 'error' in parsed" severity="error" :closable="false">Не получилось прочитать: {{ parsed.error }}.</Message>
+          <Message v-if="parsed && 'error' in parsed" severity="error" :closable="false">{{ t('Не получилось прочитать: {e}.', { e: parsed.error }) }}</Message>
           <template v-else-if="parsed">
             <div class="preview" aria-live="polite">
-              <p class="preview__title">Распознано — проверьте поля и сохраните</p>
+              <p class="preview__title">{{ t('Распознано — проверьте поля и сохраните') }}</p>
               <dl class="preview__list">
                 <div v-for="r in parsed.rows" :key="r.label" :class="['preview__row', { 'preview__row--none': !r.value }]">
                   <dt><Check v-if="r.value" :size="14" aria-hidden="true" /><Minus v-else :size="14" aria-hidden="true" />{{ r.label }}</dt>
-                  <dd class="num">{{ r.value ?? 'нет' }}</dd>
+                  <dd class="num">{{ r.value ?? t('нет') }}</dd>
                 </div>
               </dl>
             </div>
-            <Message v-for="w in parsed.warnings" :key="w" severity="warn" :closable="false">Не поддерживается: {{ w }}.</Message>
+            <Message v-for="w in parsed.warnings" :key="w" severity="warn" :closable="false">{{ t('Не поддерживается: {w}.', { w }) }}</Message>
           </template>
         </div>
 
         <div v-if="!firstTime" class="card conn">
-          <h2 class="card__title">Подключение</h2>
+          <h2 class="card__title">{{ t('Подключение') }}</h2>
           <div :class="['pill', `pill--${tunnel.tone}`, 'pill--lg']"><span class="pill__dot" aria-hidden="true" /><span class="pill__text">{{ tunnel.title }}</span></div>
           <p v-if="tunnel.detail" class="hint">{{ tunnel.detail }}</p>
         </div>
       </div>
 
       <form class="card" @submit.prevent="submit">
-        <h2 class="card__title">Данные сервера</h2>
+        <h2 class="card__title">{{ t('Данные сервера') }}</h2>
         <div class="row2">
           <div class="field">
-            <label for="srv-host" class="field__label">Адрес сервера</label>
+            <label for="srv-host" class="field__label">{{ t('Адрес сервера') }}</label>
             <InputText id="srv-host" v-model="form.server" placeholder="203.0.113.10" spellcheck="false" class="num" />
           </div>
           <div class="field field--port">
-            <label for="srv-port" class="field__label">Порт</label>
+            <label for="srv-port" class="field__label">{{ t('Порт') }}</label>
             <InputText id="srv-port" v-model="form.port" inputmode="numeric" class="num" />
           </div>
         </div>
         <div class="field">
-          <label for="srv-sni" class="field__label">Имя сервера</label>
+          <label for="srv-sni" class="field__label">{{ t('Имя сервера') }}</label>
           <InputText id="srv-sni" v-model="form.sni" placeholder="vpn.example.com" spellcheck="false" />
-          <span class="field__hint">Доменное имя из сертификата сервера. Если его нет — оставьте пустым.</span>
+          <span class="field__hint">{{ t('Доменное имя из сертификата сервера. Если его нет — оставьте пустым.') }}</span>
         </div>
         <div class="row2">
           <div class="field">
-            <label for="srv-user" class="field__label">Логин</label>
+            <label for="srv-user" class="field__label">{{ t('Логин') }}</label>
             <InputText id="srv-user" v-model="form.username" autocomplete="off" spellcheck="false" />
           </div>
           <div class="field">
-            <label for="srv-pass" class="field__label">Пароль</label>
+            <label for="srv-pass" class="field__label">{{ t('Пароль') }}</label>
             <Password v-model="form.password" input-id="srv-pass" :feedback="false" toggle-mask fluid autocomplete="new-password"
-              :placeholder="hasPassword ? 'Сохранён. Оставьте пустым' : ''" />
-            <span class="field__hint">{{ hasPassword ? 'Пароль сохранён на роутере и сюда не возвращается. Введите новый, чтобы сменить.' : 'Хранится только на роутере' }}</span>
+              :placeholder="hasPassword ? t('Сохранён. Оставьте пустым') : ''" />
+            <span class="field__hint">{{ hasPassword ? t('Пароль сохранён на роутере и сюда не возвращается. Введите новый, чтобы сменить.') : t('Хранится только на роутере') }}</span>
           </div>
         </div>
 
         <div class="field">
-          <span id="srv-fail-label" class="field__label">Если сервер недоступен, сайты из списка</span>
-          <Segmented v-model="form.onFailure" :options="FAILURE" label="Если сервер недоступен" name="onfail" />
-          <span class="field__hint">{{ form.onFailure === 'block' ? 'Рекомендуется. Сайты подождут, пока сервер снова заработает.' : 'Сайты откроются без VPN, если смогут.' }}</span>
+          <span id="srv-fail-label" class="field__label">{{ t('Если сервер недоступен, сайты из списка') }}</span>
+          <Segmented v-model="form.onFailure" :options="FAILURE" :label="t('Если сервер недоступен')" name="onfail" />
+          <span class="field__hint">{{ form.onFailure === 'block' ? t('Рекомендуется. Сайты подождут, пока сервер снова заработает.') : t('Сайты откроются без VPN, если смогут.') }}</span>
         </div>
 
         <button type="button" class="disclose" :aria-expanded="advanced" aria-controls="srv-adv" @click="advanced = !advanced">
           <ChevronDown :size="16" :class="['disclose__icon', { 'disclose__icon--open': advanced }]" aria-hidden="true" />
-          Дополнительные параметры
+          {{ t('Дополнительные параметры') }}
         </button>
         <div v-show="advanced" id="srv-adv" class="adv">
           <label class="setrow">
-            <span class="setrow__text"><span class="setrow__title">HTTP/3</span><span class="setrow__desc">Включайте, только если так сказано в настройках сервера</span></span>
+            <span class="setrow__text"><span class="setrow__title">HTTP/3</span><span class="setrow__desc">{{ t('Включайте, только если так сказано в настройках сервера') }}</span></span>
             <ToggleSwitch v-model="form.quic" input-id="srv-quic" />
           </label>
           <label class="setrow">
-            <span class="setrow__text"><span class="setrow__title">Маскировка от блокировок (anti-DPI)</span><span class="setrow__desc">Помогает, если провайдер мешает подключению к серверу.</span></span>
+            <span class="setrow__text"><span class="setrow__title">{{ t('Маскировка от блокировок (anti-DPI)') }}</span><span class="setrow__desc">{{ t('Помогает, если провайдер мешает подключению к серверу.') }}</span></span>
             <ToggleSwitch v-model="form.antiDpi" input-id="srv-dpi" />
           </label>
           <div class="field">
-            <label for="srv-cert" class="field__label">Сертификат сервера</label>
+            <label for="srv-cert" class="field__label">{{ t('Сертификат сервера') }}</label>
             <Textarea id="srv-cert" v-model="form.certificate" rows="4" spellcheck="false" class="mono" placeholder="-----BEGIN CERTIFICATE-----" />
-            <span class="field__hint">Нужен, только если сервер использует свой сертификат. Обычно приходит вместе со ссылкой.</span>
+            <span class="field__hint">{{ t('Нужен, только если сервер использует свой сертификат. Обычно приходит вместе со ссылкой.') }}</span>
           </div>
           <div class="field">
-            <label for="srv-tls" class="field__label">Профиль TLS</label>
+            <label for="srv-tls" class="field__label">{{ t('Профиль TLS') }}</label>
             <Select v-model="form.tlsProfile" input-id="srv-tls" :options="TLS_OPTIONS" option-label="label" option-value="id" fluid />
-            <span class="field__hint">Под какой браузер или приложение маскируется подключение. Меняйте, если так сказано в настройках сервера или провайдер мешает подключению.</span>
+            <span class="field__hint">{{ t('Под какой браузер или приложение маскируется подключение. Меняйте, если так сказано в настройках сервера или провайдер мешает подключению.') }}</span>
           </div>
           <div class="row2">
             <div class="field">
-              <label for="srv-cr" class="field__label">Префикс client_random</label>
-              <InputText id="srv-cr" v-model="form.clientRandom" spellcheck="false" autocomplete="off" class="mono" placeholder="префикс/маска" />
+              <label for="srv-cr" class="field__label">{{ t('Префикс client_random') }}</label>
+              <InputText id="srv-cr" v-model="form.clientRandom" spellcheck="false" autocomplete="off" class="mono" :placeholder="t('префикс/маска')" />
             </div>
             <div class="field">
-              <label for="srv-crk" class="field__label">Ключ client_random</label>
+              <label for="srv-crk" class="field__label">{{ t('Ключ client_random') }}</label>
               <InputText id="srv-crk" v-model="form.clientRandomAuthKey" spellcheck="false" autocomplete="off" class="mono" />
             </div>
           </div>
-          <span class="field__hint">Нужны, только если сервер пускает подключения по client_random. Обычно приходят вместе со ссылкой; задаётся что-то одно — префикс или ключ.</span>
+          <span class="field__hint">{{ t('Нужны, только если сервер пускает подключения по client_random. Обычно приходят вместе со ссылкой; задаётся что-то одно — префикс или ключ.') }}</span>
           <div class="field">
-            <label for="srv-sub" class="field__label">Ссылка-подписка</label>
+            <label for="srv-sub" class="field__label">{{ t('Ссылка-подписка') }}</label>
             <Password v-model="form.subscriptionUrl" input-id="srv-sub" :feedback="false" toggle-mask fluid autocomplete="off"
-              :placeholder="hasSubscription ? 'Сохранена. Оставьте пустым' : 'https://…'" />
-            <span class="field__hint">Подписка TrustTunnel 1.3: по ней роутер сам забирает адрес, логин, пароль и сертификат сервера —
-              по расписанию списков сайтов и по кнопке. В ссылке есть логин и пароль, поэтому она хранится только на роутере</span>
+              :placeholder="hasSubscription ? t('Сохранена. Оставьте пустым') : 'https://…'" />
+            <span class="field__hint">{{ t('Подписка TrustTunnel 1.3: по ней роутер сам забирает адрес, логин, пароль и сертификат сервера — по расписанию списков сайтов и по кнопке. В ссылке есть логин и пароль, поэтому она хранится только на роутере') }}</span>
           </div>
           <template v-if="hasSubscription">
             <span :class="['adblock__state', { 'adblock__state--bad': sub?.subscription && !sub.subscription.ok }]" aria-live="polite">
@@ -292,16 +294,16 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
               <span class="meta">{{ subText }}</span>
             </span>
             <div class="sub__actions">
-              <Button label="Обновить по подписке" size="small" severity="secondary" variant="outlined" :loading="!!sub?.running" :disabled="!!sub?.running" @click="refreshSubscription()" />
-              <Button label="Удалить подписку" size="small" severity="secondary" variant="text" @click="dropSubscription" />
+              <Button :label="t('Обновить по подписке')" size="small" severity="secondary" variant="outlined" :loading="!!sub?.running" :disabled="!!sub?.running" @click="refreshSubscription()" />
+              <Button :label="t('Удалить подписку')" size="small" severity="secondary" variant="text" @click="dropSubscription" />
             </div>
           </template>
         </div>
 
         <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
         <div class="formfoot">
-          <span class="formfoot__text" aria-live="polite">{{ blocker && dirty ? blocker : dirty ? 'Есть несохранённые изменения' : profile?.endpoint ? 'Всё сохранено' : 'Вставьте ссылку на сервер' }}</span>
-          <Button type="submit" label="Сохранить" :loading="saving" :disabled="!dirty || !!blocker || saving" />
+          <span class="formfoot__text" aria-live="polite">{{ blocker && dirty ? blocker : dirty ? t('Есть несохранённые изменения') : profile?.endpoint ? t('Всё сохранено') : t('Вставьте ссылку на сервер') }}</span>
+          <Button type="submit" :label="t('Сохранить')" :loading="saving" :disabled="!dirty || !!blocker || saving" />
         </div>
       </form>
     </div>

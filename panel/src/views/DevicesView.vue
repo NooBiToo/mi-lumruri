@@ -7,6 +7,7 @@ import { deviceRows, plural } from '../status'
 import { normalizeMac, type Simple } from '../simple'
 import { useAutosave, type Blocker } from '../autosave'
 import { avatarHue, initials } from '../ui'
+import { t } from '../i18n'
 import ManualBanner from './ManualBanner.vue'
 import Segmented from '../components/Segmented.vue'
 
@@ -18,7 +19,7 @@ const draft = ref<Draft | null>(simple.value ? toDraft(simple.value) : null)
 /** Переименования этого сеанса: MAC → новое имя. Без них имена из настроек не трогаем. */
 const renames = ref<Record<string, string>>({})
 
-const MODES = [{ value: 'all' as const, label: 'Все устройства' }, { value: 'selected' as const, label: 'Только выбранные' }]
+const MODES = computed(() => [{ value: 'all' as const, label: t('Все устройства') }, { value: 'selected' as const, label: t('Только выбранные') }])
 
 const rows = computed(() => (config.value && draft.value ? deviceRows(leases.value, config.value, renames.value, draft.value.macs) : []))
 const search = ref('')
@@ -67,8 +68,8 @@ function finishRename() {
 // ---- автосохранение ----
 const vpnUsed = computed(() => !!simple.value && (simple.value.mode === 'all' || simple.value.services.length > 0 || simple.value.customDomains.length > 0))
 function blocker(): Blocker | null {
-  if (draft.value?.mode === 'selected' && !draft.value.macs.length) return { text: 'Отметьте хотя бы одно устройство — или выберите «Все устройства».' }
-  if (vpnUsed.value && !serverReady.value) return { text: 'Сначала настройте сервер VPN.', action: { label: 'Открыть «Сервер»', run: () => emit('navigate', 'server') } }
+  if (draft.value?.mode === 'selected' && !draft.value.macs.length) return { text: t('Отметьте хотя бы одно устройство — или выберите «Все устройства».') }
+  if (vpnUsed.value && !serverReady.value) return { text: t('Сначала настройте сервер VPN.'), action: { label: t('Открыть «Сервер»'), run: () => emit('navigate', 'server') } }
   const b = buildBlocker()
   return b ? { text: b } : null
 }
@@ -77,7 +78,7 @@ useAutosave({
   dirty: () => dirty.value,
   blocker,
   run: async () => {
-    if (!simple.value || !draft.value) return 'Настройки ещё не загружены.'
+    if (!simple.value || !draft.value) return t('Настройки ещё не загружены.')
     const s: Simple = { ...simple.value, devices: draft.value.mode === 'all' ? 'all' : [...draft.value.macs] }
     const cfg = build(s, knownDevicesNow(renames.value))
     if (typeof cfg === 'string') return cfg
@@ -90,37 +91,37 @@ onMounted(() => void loadLeases())
 </script>
 
 <template>
-  <section class="sect" aria-label="Устройства">
+  <section class="sect" :aria-label="t('Устройства')">
     <ManualBanner v-if="simpleState && !simpleState.canonical" :reason="simpleState.reason" />
 
     <template v-else-if="draft">
       <div class="card">
         <div class="card__head">
           <div>
-            <h2 class="card__title">Для каких устройств работает VPN</h2>
+            <h2 class="card__title">{{ t('Для каких устройств работает VPN') }}</h2>
             <p class="card__sub">{{ draft.mode === 'all'
-              ? 'Рекомендуется. Настройки сайтов действуют для всех устройств дома, новые подключатся сами.'
-              : 'Например, только телевизор и ноутбук. Остальные устройства открывают все сайты напрямую.' }}</p>
+              ? t('Рекомендуется. Настройки сайтов действуют для всех устройств дома, новые подключатся сами.')
+              : t('Например, только телевизор и ноутбук. Остальные устройства открывают все сайты напрямую.') }}</p>
           </div>
-          <Segmented v-model="draft.mode" :options="MODES" label="Устройства" name="devmode" />
+          <Segmented v-model="draft.mode" :options="MODES" :label="t('Устройства')" name="devmode" />
         </div>
       </div>
 
       <div class="card card--flush">
         <div class="card__head card__head--pad">
           <div>
-            <h2 class="card__title">Устройства дома</h2>
+            <h2 class="card__title">{{ t('Устройства дома') }}</h2>
             <p class="card__sub">
-              {{ rows.length ? `${plural(rows.length, 'устройство', 'устройства', 'устройств')}, в сети ${online}` : 'Пока никого' }}<template v-if="draft.mode === 'selected'"> · {{ draft.macs.length ? `выбрано: ${draft.macs.length}` : 'ничего не выбрано' }}</template>
+              {{ rows.length ? t('{devices}, в сети {online}', { devices: plural(rows.length, 'устройство', 'устройства', 'устройств'), online }) : t('Пока никого') }}<template v-if="draft.mode === 'selected'"> · {{ draft.macs.length ? t('выбрано: {n}', { n: draft.macs.length }) : t('ничего не выбрано') }}</template>
             </p>
           </div>
           <div v-if="rows.length > 4" class="search">
             <Search :size="16" class="search__icon" aria-hidden="true" />
-            <label for="dev-search" class="sr-only">Найти устройство</label>
-            <InputText id="dev-search" v-model="search" placeholder="Имя, IP или MAC" type="search" />
+            <label for="dev-search" class="sr-only">{{ t('Найти устройство') }}</label>
+            <InputText id="dev-search" v-model="search" :placeholder="t('Имя, IP или MAC')" type="search" />
           </div>
         </div>
-        <p v-if="!rows.length" class="muted pad">Роутер пока не видит подключённых устройств. Подключите устройство к Wi‑Fi и обновите страницу.</p>
+        <p v-if="!rows.length" class="muted pad">{{ t('Роутер пока не видит подключённых устройств. Подключите устройство к Wi‑Fi и обновите страницу.') }}</p>
         <ul v-else class="devs">
           <li v-for="d in shown" :key="d.mac" :class="['dev', { 'dev--on': draft.mode === 'selected' && draft.macs.includes(d.mac) }]">
             <span class="avatar" :style="{ '--h': avatarHue(d.mac) }" aria-hidden="true">
@@ -129,27 +130,27 @@ onMounted(() => void loadLeases())
             </span>
             <div class="dev__body">
               <form v-if="editing === d.mac" class="dev__rename" @submit.prevent="finishRename">
-                <label :for="`rename-${d.mac}`" class="sr-only">Новое имя</label>
+                <label :for="`rename-${d.mac}`" class="sr-only">{{ t('Новое имя') }}</label>
                 <InputText :id="`rename-${d.mac}`" v-model="editText" maxlength="64" size="small" @keydown.esc="editing = null" @blur="finishRename" />
               </form>
               <span v-else class="dev__name">
-                <span class="dev__label">{{ d.name || 'Устройство без имени' }}</span>
-                <button v-if="draft.mode === 'selected'" type="button" class="icon-btn" :aria-label="`Переименовать ${d.name || 'устройство'}`" title="Переименовать"
+                <span class="dev__label">{{ d.name || t('Устройство без имени') }}</span>
+                <button v-if="draft.mode === 'selected'" type="button" class="icon-btn" :aria-label="t('Переименовать {name}', { name: d.name || t('устройство') })" :title="t('Переименовать')"
                   @click="startRename(d.mac, d.name)"><Pencil :size="14" aria-hidden="true" /></button>
               </span>
               <span class="dev__meta"><span class="num">{{ d.mac }}</span></span>
             </div>
             <span class="dev__ip num">{{ d.ip ?? '—' }}</span>
-            <span :class="['dev__state', { 'dev__state--off': !d.online }]"><span class="dot" aria-hidden="true" />{{ d.online ? 'В сети' : 'Не в сети' }}</span>
+            <span :class="['dev__state', { 'dev__state--off': !d.online }]"><span class="dot" aria-hidden="true" />{{ d.online ? t('В сети') : t('Не в сети') }}</span>
             <button v-if="draft.mode === 'selected'" type="button" role="switch" :aria-checked="draft.macs.includes(d.mac)"
-              :aria-label="`Через VPN: ${d.name || d.mac}`" class="dev__sw" @click="toggle(d.mac)">
-              <span class="dev__sw-label">Через VPN</span>
+              :aria-label="t('Через VPN: {name}', { name: d.name || d.mac })" class="dev__sw" @click="toggle(d.mac)">
+              <span class="dev__sw-label">{{ t('Через VPN') }}</span>
               <span class="sw" aria-hidden="true"><span class="sw__knob" /></span>
             </button>
           </li>
-          <li v-if="!shown.length" class="muted pad">Ничего не нашлось.</li>
+          <li v-if="!shown.length" class="muted pad">{{ t('Ничего не нашлось.') }}</li>
         </ul>
-        <p v-if="draft.mode === 'selected'" class="hint pad">Имя нужно только вам, чтобы узнавать устройство в списке. Переименованное устройство отмечается само.</p>
+        <p v-if="draft.mode === 'selected'" class="hint pad">{{ t('Имя нужно только вам, чтобы узнавать устройство в списке. Переименованное устройство отмечается само.') }}</p>
       </div>
     </template>
   </section>

@@ -1,4 +1,5 @@
 // Типы повторяют схему v1 контроллера (controller/src/model.rs).
+import { t } from './i18n'
 
 /** Единственный вид VPN — TrustTunnel (официальный клиент). Профиль может быть только один. */
 export type ProfileKind = 'trusttunnel'
@@ -145,13 +146,13 @@ async function call<T extends { ok: boolean; issues: Issue[]; error?: ApiError }
     // cookie сессии HttpOnly: браузер отправляет его сам только на тот же origin
     res = await fetch(`${BASE}${path}`, { ...init, headers, cache: 'no-store', credentials: 'same-origin' })
   } catch (e) {
-    return { status: 0, body: { ok: false, issues: [], error: { code: 'network', message: `контроллер недоступен: ${String(e)}` } } as unknown as T }
+    return { status: 0, body: { ok: false, issues: [], error: { code: 'network', message: t('контроллер недоступен: {e}', { e: String(e) }) } } as unknown as T }
   }
   let body: T
   try {
     body = (await res.json()) as T
   } catch {
-    return { status: res.status, body: { ok: false, issues: [], error: { code: 'bad_response', message: `ответ ${res.status} не является JSON` } } as unknown as T }
+    return { status: res.status, body: { ok: false, issues: [], error: { code: 'bad_response', message: t('ответ {s} не является JSON', { s: res.status }) } } as unknown as T }
   }
   if (res.status === 401 && !path.startsWith('/auth/')) {
     csrf = null

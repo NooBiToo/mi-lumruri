@@ -5,6 +5,7 @@
 
 import { getCurrentInstance, onBeforeUnmount, reactive, watch, type WatchSource } from 'vue'
 import { loadStatus, service, type SaveResult } from './store'
+import { t } from './i18n'
 
 export const DEBOUNCE_MS = 1500
 
@@ -23,9 +24,9 @@ function set(tone: SaveTone, text = '', action: SaveAction | null = null) {
 
 /** Текст строки сохранения: после сохранения, пока роутер применяет настройки, — «Применяю на роутере». */
 export function saveLabel(s: { tone: SaveTone; text: string }, applyPending: boolean): string {
-  if (s.tone === 'saved') return applyPending ? 'Применяю на роутере' : 'Сохранено'
-  if (s.tone === 'saving') return 'Сохраняю…'
-  if (s.tone === 'pending') return 'Есть изменения'
+  if (s.tone === 'saved') return applyPending ? t('Применяю на роутере') : t('Сохранено')
+  if (s.tone === 'saving') return t('Сохраняю…')
+  if (s.tone === 'pending') return t('Есть изменения')
   return s.text
 }
 
@@ -98,7 +99,7 @@ export function useAutosave(o: AutosaveOptions) {
     }
     if (typeof r === 'string' || !r.ok) {
       const message = typeof r === 'string' ? r : r.message
-      set('error', message, { label: 'Повторить', run: () => void flush() })
+      set('error', message, { label: t('Повторить'), run: () => void flush() })
       again = false
       return
     }
@@ -136,7 +137,7 @@ export async function saveNow(run: () => Promise<SaveResult>): Promise<boolean> 
     r = { ok: false, conflict: false, message: String(e) }
   }
   if (!r.ok) {
-    set('error', r.message, { label: 'Повторить', run: () => void saveNow(run) })
+    set('error', r.message, { label: t('Повторить'), run: () => void saveNow(run) })
     return false
   }
   set('saved')

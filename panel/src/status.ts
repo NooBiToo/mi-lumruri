@@ -3,6 +3,7 @@
 import type { Config, Lease, ListCatalog, ManageResponse, ZapretConfig, ZapretTestState } from './api'
 import { defaultSimple, fromConfig, normalizeMac, type KnownDevice, type Simple } from './simple'
 import { AUTO, pickedByTest, strategyName } from './zapret'
+import { dateTag, plural, t } from './i18n'
 
 export { AUTO }
 
@@ -21,19 +22,14 @@ export interface ServiceStatus {
 
 /** Почему последние настройки не применены (рендер или полное применение не прошли), иначе null. */
 export function applyFailure(svc: ServiceStatus | null): string | null {
-  const cut = (t: string) => (t.length > 200 ? `${t.slice(0, 200)}…` : t)
-  if (svc?.render?.ok === false) return cut(svc.render.error || 'настройки не удалось подготовить')
-  if (svc?.apply && typeof svc.apply.exit === 'number' && svc.apply.exit !== 0) return cut(svc.apply.error || `ошибка применения (код ${svc.apply.exit})`)
+  const cut = (x: string) => (x.length > 200 ? `${x.slice(0, 200)}…` : x)
+  if (svc?.render?.ok === false) return cut(svc.render.error || t('настройки не удалось подготовить'))
+  if (svc?.apply && typeof svc.apply.exit === 'number' && svc.apply.exit !== 0) return cut(svc.apply.error || t('ошибка применения (код {c})', { c: svc.apply.exit }))
   return null
 }
 
-/** Число и слово в нужной форме: 1 сайт, 2 сайта, 5 сайтов. */
-export function plural(n: number, one: string, few: string, many: string): string {
-  const m10 = n % 10
-  const m100 = n % 100
-  const w = m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many
-  return `${n} ${w}`
-}
+/** Число и слово в нужной форме (1 сайт, 2 сайта, 5 сайтов) — с переводом, см. i18n. */
+export { plural } from './i18n'
 
 /**
  * Ответы пользователя из настроек. Свежая установка (ничего не настроено, кроме, может быть, сервера) — простые
@@ -52,36 +48,36 @@ export interface TunnelState { tone: Tone; title: string; detail: string | null 
 /** Состояние для строки вверху и экрана «Состояние»: простыми словами, без названий служб. */
 export function tunnelState(s: ManageResponse | null, c: Config | null, simple: Simple | null): TunnelState {
   const profile = c?.profiles[0]
-  if (c && !profile?.endpoint) return { tone: 'idle', title: 'Сервер VPN не настроен', detail: 'Откройте «Сервер» и вставьте ссылку от своего сервера.' }
+  if (c && !profile?.endpoint) return { tone: 'idle', title: t('Сервер VPN не настроен'), detail: t('Откройте «Сервер» и вставьте ссылку от своего сервера.') }
   const svc = s?.ok ? ((s.service ?? null) as ServiceStatus | null) : null
   // сбой применения важнее всего остального (и выключенного VPN): роутер работает не так, как показано на экранах
   const failed = svc && svc.engines?.service !== false && !s?.apply_pending ? applyFailure(svc) : null
   if (failed) {
     const guard = svc?.protection === 'guard'
-    return { tone: 'bad', title: 'Настройки не применены', detail: `${failed.charAt(0).toUpperCase()}${failed.slice(1)}. `
-      + (guard ? 'Действует защита: сайты из списка не откроются, пока настройки не применятся.' : 'Роутер работает по прежним настройкам.') }
+    return { tone: 'bad', title: t('Настройки не применены'), detail: `${failed.charAt(0).toUpperCase()}${failed.slice(1)}. `
+      + (guard ? t('Действует защита: сайты из списка не откроются, пока настройки не применятся.') : t('Роутер работает по прежним настройкам.')) }
   }
   if (simple && !simple.enabled) {
-    return { tone: 'idle', title: 'VPN выключен', detail: hasZapretSites(simple)
-      ? 'Все сайты открываются напрямую. Сайты с обходом блокировок по-прежнему открываются с Zapret.'
-      : 'Все сайты открываются напрямую, обход блокировок (Zapret) тоже выключен.' }
+    return { tone: 'idle', title: t('VPN выключен'), detail: hasZapretSites(simple)
+      ? t('Все сайты открываются напрямую. Сайты с обходом блокировок по-прежнему открываются с Zapret.')
+      : t('Все сайты открываются напрямую, обход блокировок (Zapret) тоже выключен.') }
   }
-  if (!s || !s.ok) return { tone: 'idle', title: 'Проверяю состояние…', detail: null }
+  if (!s || !s.ok) return { tone: 'idle', title: t('Проверяю состояние…'), detail: null }
   if (!svc || svc.engines?.service === false) {
-    return { tone: 'bad', title: 'Служба роутера не запущена', detail: 'Настройки сохраняются, но не действуют. Перезагрузите роутер.' }
+    return { tone: 'bad', title: t('Служба роутера не запущена'), detail: t('Настройки сохраняются, но не действуют. Перезагрузите роутер.') }
   }
-  if (s.apply_pending) return { tone: 'warn', title: 'Применяю настройки…', detail: 'Обычно это занимает несколько секунд.' }
+  if (s.apply_pending) return { tone: 'warn', title: t('Применяю настройки…'), detail: t('Обычно это занимает несколько секунд.') }
   const tt = svc.engines?.trusttunnel
-  if (tt === true) return { tone: 'ok', title: 'VPN работает', detail: null }
+  if (tt === true) return { tone: 'ok', title: t('VPN работает'), detail: null }
   if (tt === false || svc.protection === 'guard') {
     return profile?.on_failure === 'direct'
-      ? { tone: 'warn', title: 'Нет связи с сервером VPN', detail: 'Сайты из списка пока открываются напрямую.' }
-      : { tone: 'bad', title: 'Нет связи с сервером VPN', detail: 'Сайты из списка не откроются, пока связь не восстановится.' }
+      ? { tone: 'warn', title: t('Нет связи с сервером VPN'), detail: t('Сайты из списка пока открываются напрямую.') }
+      : { tone: 'bad', title: t('Нет связи с сервером VPN'), detail: t('Сайты из списка не откроются, пока связь не восстановится.') }
   }
   if (simple && !simple.services.length && !simple.customDomains.length && simple.mode === 'selected') {
-    return { tone: 'idle', title: 'VPN готов', detail: 'Выберите сайты, которые открывать через VPN.' }
+    return { tone: 'idle', title: t('VPN готов'), detail: t('Выберите сайты, которые открывать через VPN.') }
   }
-  return { tone: 'warn', title: 'VPN ещё не запущен', detail: 'Роутер применит настройки в течение минуты.' }
+  return { tone: 'warn', title: t('VPN ещё не запущен'), detail: t('Роутер применит настройки в течение минуты.') }
 }
 
 /**
@@ -130,17 +126,17 @@ export function lines(text: string): string[] {
 /** Что идёт через VPN — одной строкой для экрана «Состояние». */
 export function sitesSummary(s: Simple, catalog: ListCatalog | null): string {
   if (s.mode === 'all') {
-    return s.exceptions.length ? `Все сайты, кроме ${plural(s.exceptions.length, 'исключения', 'исключений', 'исключений')}` : 'Все сайты'
+    return s.exceptions.length ? t('Все сайты, кроме {n}', { n: plural(s.exceptions.length, 'исключения', 'исключений', 'исключений') }) : t('Все сайты')
   }
-  const names = s.services.map((id) => catalog?.services.find((x) => x.id === id)?.name ?? id)
+  const names = s.services.map((id) => t(catalog?.services.find((x) => x.id === id)?.name ?? id))
   const parts: string[] = []
-  if (names.length) parts.push(names.length <= 3 ? names.join(', ') : `${names.slice(0, 3).join(', ')} и ещё ${names.length - 3}`)
+  if (names.length) parts.push(names.length <= 3 ? names.join(', ') : t('{names} и ещё {n}', { names: names.slice(0, 3).join(', '), n: names.length - 3 }))
   if (s.customDomains.length) parts.push(plural(s.customDomains.length, 'свой сайт', 'своих сайта', 'своих сайтов'))
-  return parts.length ? parts.join(' · ') : 'Пока ничего не выбрано'
+  return parts.length ? parts.join(' · ') : t('Пока ничего не выбрано')
 }
 
 export function devicesSummary(s: Simple): string {
-  return s.devices === 'all' ? 'Все устройства дома' : `Только ${plural(s.devices.length, 'выбранное устройство', 'выбранных устройства', 'выбранных устройств')}`
+  return s.devices === 'all' ? t('Все устройства дома') : t('Только {n}', { n: plural(s.devices.length, 'выбранное устройство', 'выбранных устройства', 'выбранных устройств') })
 }
 
 /** Есть сайты с обходом блокировок без VPN и устройства, для которых они действуют (правила `zapret-<src>`). */
@@ -160,10 +156,9 @@ export function usesZapret(s: Simple | null): boolean {
  */
 export function zapretIdle(s: Simple | null): string | null {
   if (!s || s.rest !== 'zapret' || hasZapretSites(s)) return null
-  if (!s.enabled) return 'Сейчас VPN выключен, а с ним и обход блокировок: все сайты открываются напрямую. Подобрать способ можно, когда VPN включён.'
+  if (!s.enabled) return t('Сейчас VPN выключен, а с ним и обход блокировок: все сайты открываются напрямую. Подобрать способ можно, когда VPN включён.')
   if (s.mode === 'all' && s.devices === 'all' && !s.exceptions.length) {
-    return 'Сейчас все сайты всех устройств идут через VPN, поэтому обход блокировок не используется и подбирать способ не на чем. '
-      + 'Он заработает для сайтов из «Не пускать через VPN» или для устройств, которые не идут через VPN.'
+    return t('Сейчас все сайты всех устройств идут через VPN, поэтому обход блокировок не используется и подбирать способ не на чем. Он заработает для сайтов из «Не пускать через VPN» или для устройств, которые не идут через VPN.')
   }
   return null
 }
@@ -175,12 +170,12 @@ export function zapretIdle(s: Simple | null): string | null {
 export function strategyLabel(z: ZapretConfig | undefined, test?: ZapretTestState | null): string {
   const general = z?.strategy ?? AUTO
   const youtube = z?.youtube ?? AUTO
-  if (general === AUTO && youtube === AUTO) return 'Автоматически (рекомендуется)'
+  if (general === AUTO && youtube === AUTO) return t('Автоматически (рекомендуется)')
   const parts: string[] = []
   if (general !== AUTO) parts.push(strategyName('general', general))
   if (youtube !== AUTO) parts.push(strategyName('youtube', youtube))
   const p = pickedByTest(z, test)
-  return p.general || p.youtube ? `${parts.join(', ')} — подобран автоматически ${when(testedAt(test))}` : parts.join(', ')
+  return p.general || p.youtube ? t('{s} — подобран автоматически {d}', { s: parts.join(', '), d: when(testedAt(test)) }) : parts.join(', ')
 }
 
 /** Когда последний подбор применил способ (для подписи «Подобран автоматически …»), иначе null. */
@@ -189,29 +184,29 @@ export function testedAt(t: ZapretTestState | null | undefined): number | null {
 }
 
 /** Строка прогресса подбора: «Проверяю способы обхода: 5 из 11». */
-export function zapretProgress(t: ZapretTestState): string {
-  const p = t.progress
-  if (!p || !p.total) return 'Готовлю проверку…'
-  const what = p.current === 'control' ? 'Проверяю, что открывается без обхода' : 'Проверяю способы обхода'
-  return `${what}: ${Math.min(p.done + 1, p.total)} из ${p.total}`
+export function zapretProgress(st: ZapretTestState): string {
+  const p = st.progress
+  if (!p || !p.total) return t('Готовлю проверку…')
+  const n = { n: Math.min(p.done + 1, p.total), total: p.total }
+  return p.current === 'control' ? t('Проверяю, что открывается без обхода: {n} из {total}', n) : t('Проверяю способы обхода: {n} из {total}', n)
 }
 
 /**
  * Итог последнего подбора: «Открылось 47 из 54, без обхода — 12» и что сделано — без id стратегий. Если применён только
  * способ для YouTube, цифры — прохода YouTube: результат для всех сайтов тогда не применялся.
  */
-export function zapretResult(t: ZapretTestState): { summary: string | null; message: string } {
-  const c = t.control
-  const y = t.youtube
-  const ytOnly = t.state === 'done' && t.applied && t.general === false && !!y
+export function zapretResult(st: ZapretTestState): { summary: string | null; message: string } {
+  const c = st.control
+  const y = st.youtube
+  const ytOnly = st.state === 'done' && st.applied && st.general === false && !!y
   let summary: string | null
-  if (ytOnly && y) summary = `YouTube: открылось ${y.opened} из ${y.total}` + (y.control !== undefined ? `, без обхода — ${y.control}` : '')
-  else summary = t.best && c ? `Открылось ${t.best.opened} из ${c.total}, без обхода — ${c.opened}` : null
+  if (ytOnly && y) summary = t('YouTube: открылось {o} из {n}', { o: y.opened, n: y.total }) + (y.control !== undefined ? t(', без обхода — {c}', { c: y.control }) : '')
+  else summary = st.best && c ? t('Открылось {o} из {n}, без обхода — {c}', { o: st.best.opened, n: c.total, c: c.opened }) : null
   let message: string
-  if (t.state === 'done') {
-    message = ytOnly ? 'Для всех сайтов лучше не нашлось — оставлен прежний способ; для YouTube применён лучший.'
-      : t.applied ? 'Лучший способ применён.' : 'Способа лучше, чем без обхода, не нашлось — оставлен прежний.'
-  } else message = failureText(t.message)
+  if (st.state === 'done') {
+    message = ytOnly ? t('Для всех сайтов лучше не нашлось — оставлен прежний способ; для YouTube применён лучший.')
+      : st.applied ? t('Лучший способ применён.') : t('Способа лучше, чем без обхода, не нашлось — оставлен прежний.')
+  } else message = failureText(st.message)
   return { summary, message }
 }
 
@@ -220,7 +215,7 @@ export function zapretResult(t: ZapretTestState): { summary: string | null; mess
  * «general=v3 youtube=yv2»). «Способ» — мужского рода: «прежний способ», «вернуть прежний».
  */
 export function failureText(raw: string | undefined): string {
-  const m = (raw ?? 'Подбор не удался.')
+  const m = (raw ?? t('Подбор не удался.'))
     .replace(/:?(?:\s*\b(?:general|youtube)=\S+)+/g, '')
     .replace(/восстановлена/g, 'восстановлен').replace(/она оставлена/g, 'он оставлен')
     .replace(/прежн\S*\s+стратеги\S*/gi, 'прежний способ').replace(/прежнюю/g, 'прежний')
@@ -232,5 +227,5 @@ export function failureText(raw: string | undefined): string {
 /** Дата и время по-русски: «18 ноября, 14:05». */
 export function when(sec: number | null | undefined): string {
   if (!sec) return '—'
-  return new Date(sec * 1000).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
+  return new Date(sec * 1000).toLocaleString(dateTag(), { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
 }

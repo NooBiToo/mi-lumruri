@@ -6,6 +6,7 @@ import { dnsToForm, formToDns } from '../manage'
 import { config, save } from '../store'
 import { useAutosave } from '../autosave'
 import HostList from '../components/HostList.vue'
+import { t } from '../i18n'
 
 const toDraft = (): HostRecord[] => dnsToForm(config.value?.dns).hosts
 const draft = ref<HostRecord[]>(toDraft())
@@ -20,7 +21,7 @@ useAutosave({
   dirty: () => dirty.value,
   blocker: () => null,
   run: async () => {
-    if (!config.value) return 'Настройки ещё не загружены.'
+    if (!config.value) return t('Настройки ещё не загружены.')
     const sent = JSON.stringify(draft.value)
     const next = { ...config.value }
     // остальные настройки DNS (сервер для VPN, реклама) — как сохранены
@@ -38,7 +39,7 @@ useAutosave({
 </script>
 
 <template>
-  <section class="sect" aria-label="Свои DNS-записи">
+  <section class="sect" :aria-label="t('Свои DNS-записи')">
     <HostList v-model="draft" />
   </section>
 </template>

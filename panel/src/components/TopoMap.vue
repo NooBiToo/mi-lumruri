@@ -5,6 +5,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { MonitorSmartphone, Router } from 'lucide-vue-next'
 import ServiceLogo from './ServiceLogo.vue'
+import { t } from '../i18n'
 
 export type Tone = 'vpn' | 'zapret' | 'idle' | 'ok' | 'warn' | 'bad'
 export interface TopoBranch {
@@ -92,12 +93,12 @@ watch(() => props.branches, () => void nextTick(layout), { deep: true })
 
     <div class="topo__col topo__col--hub">
       <div ref="hubEl" class="tnode tnode--hub">
-        <span class="tnode__head"><Router :size="16" class="tnode__icon" aria-hidden="true" /><span class="tnode__name">Роутер</span></span>
+        <span class="tnode__head"><Router :size="16" class="tnode__icon" aria-hidden="true" /><span class="tnode__name">{{ t('Роутер') }}</span></span>
         <span class="tnode__state"><span :class="['led', `led--${hub.tone}`]" aria-hidden="true" /><span class="meta">{{ hub.meta }}</span></span>
       </div>
     </div>
 
-    <ul class="topo__col topo__col--dst" aria-label="Маршруты">
+    <ul class="topo__col topo__col--dst" :aria-label="t('Маршруты')">
       <li v-for="b in branches" :key="b.key" ref="dst" :data-key="b.key" :class="['tdst', `tdst--${b.kind}`, { 'tdst--off': !b.live }]">
         <div class="tdst__head">
           <span :class="['led', `led--${b.tone}`]" aria-hidden="true" />
@@ -108,7 +109,7 @@ watch(() => props.branches, () => void nextTick(layout), { deep: true })
         <ul v-if="b.items.length || b.domains.length" class="tdst__items">
           <li v-for="x in b.items" :key="x.id" class="tdst__item"><ServiceLogo :id="x.id" size="sm" />{{ x.name }}</li>
           <li v-for="d in b.domains" :key="d" class="tdst__item meta">{{ d }}</li>
-          <li v-if="b.more" class="tdst__item meta">ещё {{ b.more }}</li>
+          <li v-if="b.more" class="tdst__item meta">{{ t('ещё {n}', { n: b.more }) }}</li>
         </ul>
       </li>
     </ul>

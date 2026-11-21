@@ -1,6 +1,7 @@
 // Формы без DOM: профиль TrustTunnel ↔ Profile (экран «Сервер»), DNS (экран «Дополнительно»).
 
 import type { AdblockSource, DnsConfig, Endpoint, HostRecord, SecureDns, SecureServer, Profile, ProfileSecret, TlsProfile } from './api'
+import { t } from './i18n'
 
 export interface ProfileForm {
   id: string
@@ -45,7 +46,7 @@ export function formToProfile(f: ProfileForm, subscription = false): Profile | s
   // только подписка: адрес и логин сервер пришлёт сам — профиль без точки подключения
   if (subscription && !f.server.trim() && !f.username.trim()) return { id: f.id.trim(), name: f.name.trim(), kind: 'trusttunnel', on_failure: f.onFailure }
   const port = Number(f.port.trim())
-  if (!Number.isInteger(port) || port < 1 || port > 65535) return 'Порт — целое число от 1 до 65535.'
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return t('Порт — целое число от 1 до 65535.')
   const endpoint: Endpoint = { server: f.server.trim(), port, username: f.username.trim(), quic: f.quic, anti_dpi: f.antiDpi }
   if (f.sni.trim()) endpoint.sni = f.sni.trim()
   // PEM из textarea: переводы строк приводим к \n, пустые строки по краям убираем
@@ -137,14 +138,15 @@ export function formToDns(f: DnsForm): DnsConfig | null {
 /** Готовый DNS-сервер для сайтов через VPN; значок — `dnsIcon(id)` в brand.ts. */
 export interface DnsPreset { id: string; name: string; ip: string; desc: string; note?: string }
 
+// desc и note — геттеры: текст на текущем языке интерфейса в момент чтения
 export const DNS_PRESETS: DnsPreset[] = [
-  { id: 'cloudflare', name: 'Cloudflare', ip: '1.1.1.1', desc: 'Быстрый, без фильтров. Выбран по умолчанию.' },
-  { id: 'quad9', name: 'Quad9', ip: '9.9.9.9', desc: 'Не открывает опасные и мошеннические сайты' },
-  { id: 'google', name: 'Google', ip: '8.8.8.8', desc: 'Надёжный, без фильтров' },
-  { id: 'adguard', name: 'AdGuard DNS', ip: '94.140.14.14', desc: 'Блокирует рекламу и трекеры' },
+  { id: 'cloudflare', name: 'Cloudflare', ip: '1.1.1.1', get desc() { return t('Быстрый, без фильтров. Выбран по умолчанию.') } },
+  { id: 'quad9', name: 'Quad9', ip: '9.9.9.9', get desc() { return t('Не открывает опасные и мошеннические сайты') } },
+  { id: 'google', name: 'Google', ip: '8.8.8.8', get desc() { return t('Надёжный, без фильтров') } },
+  { id: 'adguard', name: 'AdGuard DNS', ip: '94.140.14.14', get desc() { return t('Блокирует рекламу и трекеры') } },
   {
-    id: 'nextdns', name: 'NextDNS', ip: '45.90.28.0', desc: 'Свои фильтры в личном кабинете',
-    note: 'Привяжите IP вашего VPN-сервера в кабинете NextDNS (Linked IP), иначе фильтры не применятся.',
+    id: 'nextdns', name: 'NextDNS', ip: '45.90.28.0', get desc() { return t('Свои фильтры в личном кабинете') },
+    get note() { return t('Привяжите IP вашего VPN-сервера в кабинете NextDNS (Linked IP), иначе фильтры не применятся.') },
   },
 ]
 export const CUSTOM_DNS = 'custom'

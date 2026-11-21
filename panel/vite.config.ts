@@ -13,8 +13,8 @@ export default defineConfig({
     sourcemap: false,
     modulePreload: { polyfill: false },
     reportCompressedSize: false,
-    // один бандл с PrimeVue (~0,6 МБ, ~0,15 МБ в gzip) — осознанно: панель грузится один раз по LAN
-    chunkSizeWarningLimit: 700,
+    // один бандл с PrimeVue и словарями трёх языков (~0,75 МБ, ~0,2 МБ в gzip) — осознанно: панель грузится один раз по LAN
+    chunkSizeWarningLimit: 850,
   },
   server: {
     host: '127.0.0.1',

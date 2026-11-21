@@ -11,6 +11,8 @@ import { dnsIcon } from '../brand'
 import ServiceLogo from '../components/ServiceLogo.vue'
 import Segmented from '../components/Segmented.vue'
 import UpdateCard from '../components/UpdateCard.vue'
+import LangSwitch from '../components/LangSwitch.vue'
+import { dateTag, t } from '../i18n'
 
 defineProps<{ totp: boolean }>()
 const emit = defineEmits<{ navigate: [tab: 'zapret' | 'hosts' | 'diag'] }>()
@@ -28,7 +30,7 @@ watch(config, () => {
 /** «Свой адрес» выбран явно: пока адрес не дописан, он может совпасть с готовым или быть пустым. */
 const custom = ref(dnsPresetOf(draft.value.dns.resolver) === CUSTOM_DNS)
 const dnsChoice = computed(() => (custom.value ? CUSTOM_DNS : dnsPresetOf(draft.value.dns.resolver)))
-const DNS_OPTIONS = [...DNS_PRESETS, { id: CUSTOM_DNS, name: 'Свой адрес', ip: '', desc: 'Любой публичный DNS-сервер (IPv4)' }]
+const DNS_OPTIONS = computed(() => [...DNS_PRESETS, { id: CUSTOM_DNS, name: t('Свой адрес'), ip: '', desc: t('Любой публичный DNS-сервер (IPv4)') }])
 const dnsNote = computed(() => DNS_PRESETS.find((p) => p.id === dnsChoice.value)?.note ?? null)
 function chooseDns(id: string) {
   const ip = dnsPresetIp(id)
@@ -46,11 +48,11 @@ const resolverOk = computed(() => {
   return /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/.test(v)
 })
 // ---- блокировка рекламы ----
-const ADBLOCK_SOURCES = [
-  { value: 'light' as const, label: 'HaGeZi Light', desc: 'Реклама и трекеры, почти не мешает сайтам — около 90 тыс. доменов. Рекомендуется' },
-  { value: 'normal' as const, label: 'HaGeZi Normal', desc: 'Шире: больше трекеров и телеметрии, изредка может мешать отдельным сайтам — около 200 тыс. доменов' },
-  { value: 'url' as const, label: 'Своя ссылка', desc: 'Любой список доменов или hosts по ссылке https' },
-]
+const ADBLOCK_SOURCES = computed(() => [
+  { value: 'light' as const, label: 'HaGeZi Light', desc: t('Реклама и трекеры, почти не мешает сайтам — около 90 тыс. доменов. Рекомендуется') },
+  { value: 'normal' as const, label: 'HaGeZi Normal', desc: t('Шире: больше трекеров и телеметрии, изредка может мешать отдельным сайтам — около 200 тыс. доменов') },
+  { value: 'url' as const, label: t('Своя ссылка'), desc: t('Любой список доменов или hosts по ссылке https') },
+])
 const adblockUrlOk = computed(() => draft.value.dns.adblockSource !== 'url' || /^https:\/\/[^\s"'`\\$<>|;]+$/.test(draft.value.dns.adblockUrl.trim()))
 /** Итог загрузки — только если он про текущую ссылку (после смены списка ждём новую загрузку). */
 const adblockState = computed(() => {
@@ -64,45 +66,48 @@ const currentAdblockUrl = computed(() => {
 })
 const adblockText = computed(() => {
   const a = adblockState.value
-  if (!adblockUrlOk.value) return 'Не сохранено: сначала укажите ссылку https://…'
-  if (dirty.value) return 'Сохраняется…'
-  if (!a) return 'Роутер скачает список в течение минуты'
-  if (a.error) return `Список не обновился: ${a.error}. Пока действует прежний, если он был`
-  return `${(a.domains ?? 0).toLocaleString('ru-RU')} доменов · список ${a.updated ? `от ${when(a.updated)}` : 'загружен'} · проверен ${when(a.checked)}`
+  if (!adblockUrlOk.value) return t('Не сохранено: сначала укажите ссылку https://…')
+  if (dirty.value) return t('Сохраняется…')
+  if (!a) return t('Роутер скачает список в течение минуты')
+  if (a.error) return t('Список не обновился: {e}. Пока действует прежний, если он был', { e: a.error })
+  const n = (a.domains ?? 0).toLocaleString(dateTag())
+  return a.updated
+    ? t('{n} доменов · список от {updated} · проверен {checked}', { n, updated: when(a.updated), checked: when(a.checked) })
+    : t('{n} доменов · список загружен · проверен {checked}', { n, checked: when(a.checked) })
 })
 
 // ---- шифрование DNS через VPN (DoH/DoT поверх туннеля) ----
 const tunnelModes = computed(() => tunnelSecureModes(draft.value.dns.resolver.trim()))
-const TUNNEL_SECURE_LABELS = { off: 'Обычный', doh: 'DoH', dot: 'DoT' } as const
-const TUNNEL_SECURE_MODES = computed(() => tunnelModes.value.map((m) => ({ value: m, label: TUNNEL_SECURE_LABELS[m] })))
+const tunnelSecureLabel = (m: 'off' | 'doh' | 'dot'): string => (m === 'off' ? t('Обычный') : m === 'doh' ? 'DoH' : 'DoT')
+const TUNNEL_SECURE_MODES = computed(() => tunnelModes.value.map((m) => ({ value: m, label: tunnelSecureLabel(m) })))
 // выбранный сервер не поддерживает текущее шифрование — сбросить на доступное
 watch(tunnelModes, (m) => { if (!m.includes(draft.value.dns.tunnelSecure)) draft.value.dns.tunnelSecure = 'off' })
 const tunnelSecureHint = computed(() => {
   const m = tunnelModes.value
-  if (m.length === 1) return 'Для этого сервера доступен только обычный режим: шифрование есть для Cloudflare, Google, AdGuard и Quad9 (DoT)'
-  if (!m.includes('doh')) return 'У Quad9 — только DoT: его DoH работает лишь через HTTP/2'
+  if (m.length === 1) return t('Для этого сервера доступен только обычный режим: шифрование есть для Cloudflare, Google, AdGuard и Quad9 (DoT)')
+  if (!m.includes('doh')) return t('У Quad9 — только DoT: его DoH работает лишь через HTTP/2')
   return draft.value.dns.tunnelSecure === 'off'
-    ? 'Обычно не нужно: вопросы и так внутри туннеля'
-    : 'Если туннель не работает, вопросы не уходят к провайдеру — сайты из списка ждут, пока VPN снова заработает'
+    ? t('Обычно не нужно: вопросы и так внутри туннеля')
+    : t('Если туннель не работает, вопросы не уходят к провайдеру — сайты из списка ждут, пока VPN снова заработает')
 })
 const tunnelState = computed(() => {
   const p = service.value?.dns_tunnel
   if (!p || !config.value?.dns?.tunnel_secure || dirty.value) return null
-  if (p.upstream_ok) return { tone: 'ok', text: `Работает: шифрованных ответов через туннель — ${p.upstream_ok}` }
-  if (p.failed) return { tone: 'bad', text: `Сервер не отвечает через туннель${p.last_error ? `: ${p.last_error}` : ''}` }
-  return { tone: 'ok', text: 'Включено, вопросов пока не было' }
+  if (p.upstream_ok) return { tone: 'ok', text: t('Работает: шифрованных ответов через туннель — {n}', { n: p.upstream_ok }) }
+  if (p.failed) return { tone: 'bad', text: p.last_error ? t('Сервер не отвечает через туннель: {e}', { e: p.last_error }) : t('Сервер не отвечает через туннель') }
+  return { tone: 'ok', text: t('Включено, вопросов пока не было') }
 })
 
 // ---- защищённый DNS (DoH/DoT) ----
-const SECURE_MODES = [{ value: 'off' as const, label: 'Выключен' }, { value: 'doh' as const, label: 'DoH' }, { value: 'dot' as const, label: 'DoT' }]
-const SECURE_SERVERS = [
-  { id: 'cloudflare' as const, name: 'Cloudflare', desc: 'Быстрый, без фильтров' },
-  { id: 'quad9' as const, name: 'Quad9', desc: 'Не открывает опасные сайты' },
-  { id: 'google' as const, name: 'Google', desc: 'Надёжный, без фильтров' },
-  { id: 'adguard' as const, name: 'AdGuard DNS', desc: 'Блокирует рекламу и трекеры' },
-  { id: 'nextdns' as const, name: 'NextDNS', desc: 'Свои фильтры, нужен ID профиля' },
-  { id: 'custom' as const, name: 'Свой сервер', desc: 'Ссылка или имя и IP-адреса' },
-]
+const SECURE_MODES = computed(() => [{ value: 'off' as const, label: t('Выключен') }, { value: 'doh' as const, label: 'DoH' }, { value: 'dot' as const, label: 'DoT' }])
+const SECURE_SERVERS = computed(() => [
+  { id: 'cloudflare' as const, name: 'Cloudflare', desc: t('Быстрый, без фильтров') },
+  { id: 'quad9' as const, name: 'Quad9', desc: t('Не открывает опасные сайты') },
+  { id: 'google' as const, name: 'Google', desc: t('Надёжный, без фильтров') },
+  { id: 'adguard' as const, name: 'AdGuard DNS', desc: t('Блокирует рекламу и трекеры') },
+  { id: 'nextdns' as const, name: 'NextDNS', desc: t('Свои фильтры, нужен ID профиля') },
+  { id: 'custom' as const, name: t('Свой сервер'), desc: t('Ссылка или имя и IP-адреса') },
+])
 // DoH у Quad9 не работает (только HTTP/2): при переключении на DoH — Cloudflare
 watch(() => draft.value.dns.secure, (m) => { if (m === 'doh' && draft.value.dns.secureServer === 'quad9') draft.value.dns.secureServer = 'cloudflare' })
 /** Мягкая проверка до сохранения: NextDNS — 6 символов, свой — ссылка/имя и хотя бы один IP. Точнее проверит контроллер. */
@@ -120,24 +125,24 @@ const secureState = computed(() => {
   const p = service.value?.dns_proxy
   if (!p || !config.value?.dns?.secure || dirty.value) return null
   const via = p.upstream.startsWith('dot') ? 'DoT' : 'DoH'
-  if (!p.upstream_ok && p.fallback) return { tone: 'warn', text: `Сервер недоступен — ответы идут через DNS провайдера${p.last_error ? `: ${p.last_error}` : ''}` }
+  if (!p.upstream_ok && p.fallback) return { tone: 'warn', text: p.last_error ? t('Сервер недоступен — ответы идут через DNS провайдера: {e}', { e: p.last_error }) : t('Сервер недоступен — ответы идут через DNS провайдера') }
   // единичные сбои (например, при загрузке, пока часы роутера не выставлены) — не повод для предупреждения
   if (p.fallback) return { tone: p.fallback * 20 > p.upstream_ok + p.fallback ? 'warn' : 'ok',
-    text: `Работает (${via}): ответов ${p.upstream_ok}, через провайдера при сбоях — ${p.fallback}${p.last_error ? ` · последняя ошибка: ${p.last_error}` : ''}` }
-  return { tone: 'ok', text: p.queries ? `Работает (${via}): ответов через защищённый сервер — ${p.upstream_ok}` : `Включён (${via}), вопросов пока не было` }
+    text: t('Работает ({via}): ответов {ok}, через провайдера при сбоях — {fallback}', { via, ok: p.upstream_ok, fallback: p.fallback }) + (p.last_error ? t(' · последняя ошибка: {e}', { e: p.last_error }) : '') }
+  return { tone: 'ok', text: p.queries ? t('Работает ({via}): ответов через защищённый сервер — {ok}', { via, ok: p.upstream_ok }) : t('Включён ({via}), вопросов пока не было', { via }) }
 })
 
 function blocker(): Blocker | null {
-  if (!secureOk.value) return { text: 'Защищённый DNS: проверьте ID NextDNS или адрес своего сервера' }
-  if (!adblockUrlOk.value) return { text: 'Ссылка на список рекламы — https://…' }
-  return resolverOk.value ? null : { text: 'Свой DNS-сервер — адрес IPv4, например 1.1.1.1.' }
+  if (!secureOk.value) return { text: t('Защищённый DNS: проверьте ID NextDNS или адрес своего сервера') }
+  if (!adblockUrlOk.value) return { text: t('Ссылка на список рекламы — https://…') }
+  return resolverOk.value ? null : { text: t('Свой DNS-сервер — адрес IPv4, например 1.1.1.1.') }
 }
 useAutosave({
   source: draft,
   dirty: () => dirty.value,
   blocker,
   run: async () => {
-    if (!config.value) return 'Настройки ещё не загружены.'
+    if (!config.value) return t('Настройки ещё не загружены.')
     const sent = JSON.stringify(draft.value)
     const next = { ...config.value }
     const dns = formToDns(draft.value.dns)
@@ -155,21 +160,21 @@ useAutosave({
 </script>
 
 <template>
-  <section class="sect" aria-label="Дополнительно">
-    <p class="lead">Обычно здесь ничего менять не нужно. Изменения сохраняются сами</p>
+  <section class="sect" :aria-label="t('Дополнительно')">
+    <p class="lead">{{ t('Обычно здесь ничего менять не нужно. Изменения сохраняются сами') }}</p>
 
     <!-- телефон: разделы, которых нет в нижней панели -->
-    <nav class="card card--flush settings more-links" aria-label="Другие разделы">
+    <nav class="card card--flush settings more-links" :aria-label="t('Другие разделы')">
       <button type="button" class="setrow more-link" @click="emit('navigate', 'zapret')">
-        <span class="setrow__text"><span class="setrow__title">Zapret</span><span class="setrow__desc">Способ обхода блокировок, подбор, автопроверка</span></span>
+        <span class="setrow__text"><span class="setrow__title">Zapret</span><span class="setrow__desc">{{ t('Способ обхода блокировок, подбор, автопроверка') }}</span></span>
         <ChevronRight :size="18" class="more-link__icon" aria-hidden="true" />
       </button>
       <button type="button" class="setrow more-link" @click="emit('navigate', 'hosts')">
-        <span class="setrow__text"><span class="setrow__title">Свои DNS-записи</span><span class="setrow__desc">Домашние серверы по своим именам</span></span>
+        <span class="setrow__text"><span class="setrow__title">{{ t('Свои DNS-записи') }}</span><span class="setrow__desc">{{ t('Домашние серверы по своим именам') }}</span></span>
         <ChevronRight :size="18" class="more-link__icon" aria-hidden="true" />
       </button>
       <button type="button" class="setrow more-link" @click="emit('navigate', 'diag')">
-        <span class="setrow__text"><span class="setrow__title">Диагностика</span><span class="setrow__desc">Проверка работы, журналы, перезапуск службы</span></span>
+        <span class="setrow__text"><span class="setrow__title">{{ t('Диагностика') }}</span><span class="setrow__desc">{{ t('Проверка работы, журналы, перезапуск службы') }}</span></span>
         <ChevronRight :size="18" class="more-link__icon" aria-hidden="true" />
       </button>
     </nav>
@@ -178,22 +183,21 @@ useAutosave({
       <div class="setblock" role="group" aria-labelledby="adblock-title">
         <label class="setrow setrow--bare">
           <span class="setrow__text">
-            <span id="adblock-title" class="setrow__title">Блокировка рекламы</span>
-            <span class="setrow__desc">Работает через DNS роутера: на домены из списка рекламы и трекеров роутер отвечает «такого сайта нет».
-              Действует на все устройства, которые получают DNS от роутера</span>
+            <span id="adblock-title" class="setrow__title">{{ t('Блокировка рекламы') }}</span>
+            <span class="setrow__desc">{{ t('Работает через DNS роутера: на домены из списка рекламы и трекеров роутер отвечает «такого сайта нет». Действует на все устройства, которые получают DNS от роутера') }}</span>
           </span>
           <ToggleSwitch v-model="draft.dns.adblock" input-id="adblock" />
         </label>
         <template v-if="draft.dns.adblock">
-          <Segmented v-model="draft.dns.adblockSource" class="self-start" :options="ADBLOCK_SOURCES" label="Список рекламы" name="adblock-source" />
+          <Segmented v-model="draft.dns.adblockSource" class="self-start" :options="ADBLOCK_SOURCES" :label="t('Список рекламы')" name="adblock-source" />
           <span class="field__hint">{{ ADBLOCK_SOURCES.find((o) => o.value === draft.dns.adblockSource)?.desc }}</span>
           <div v-if="draft.dns.adblockSource === 'url'" class="field dns__custom dns__custom--wide">
-            <label for="adblock-url" class="field__label">Ссылка на список</label>
+            <label for="adblock-url" class="field__label">{{ t('Ссылка на список') }}</label>
             <InputText id="adblock-url" v-model="draft.dns.adblockUrl" placeholder="https://…/list.txt" spellcheck="false" autocomplete="off"
               :invalid="!adblockUrlOk" aria-describedby="adblock-url-hint" />
             <span id="adblock-url-hint" :class="adblockUrlOk ? 'field__hint' : 'field__error'">{{ adblockUrlOk
-              ? 'По домену в строке или строки hosts (0.0.0.0 домен); # — комментарий'
-              : 'Нужна ссылка https://…' }}</span>
+              ? t('По домену в строке или строки hosts (0.0.0.0 домен); # — комментарий')
+              : t('Нужна ссылка https://…') }}</span>
           </div>
           <span :class="['adblock__state', { 'adblock__state--bad': adblockState?.error }]">
             <span :class="['led', adblockState ? (adblockState.error ? 'led--warn' : 'led--ok') : 'led--idle']" aria-hidden="true" />
@@ -204,9 +208,8 @@ useAutosave({
 
       <div class="setblock" role="group" aria-labelledby="dns-title">
         <span class="setrow__text">
-          <span id="dns-title" class="setrow__title">DNS для сайтов через VPN</span>
-          <span class="setrow__desc">Через него узнаются адреса сайтов из ваших списков. Вопросы идут внутри VPN-туннеля — провайдер их не видит.
-            Шифрование DoH/DoT защищает ещё и участок от VPN-сервера до DNS-сервера</span>
+          <span id="dns-title" class="setrow__title">{{ t('DNS для сайтов через VPN') }}</span>
+          <span class="setrow__desc">{{ t('Через него узнаются адреса сайтов из ваших списков. Вопросы идут внутри VPN-туннеля — провайдер их не видит. Шифрование DoH/DoT защищает ещё и участок от VPN-сервера до DNS-сервера') }}</span>
         </span>
         <div class="dns" role="radiogroup" aria-labelledby="dns-title">
           <label v-for="o in DNS_OPTIONS" :key="o.id" :class="['dns__opt', { 'dns__opt--on': dnsChoice === o.id }]">
@@ -220,8 +223,8 @@ useAutosave({
         </div>
         <p v-if="dnsNote" class="dns__note">{{ dnsNote }}</p>
         <div class="field">
-          <span id="tunnel-secure-title" class="field__label">Шифрование</span>
-          <Segmented v-model="draft.dns.tunnelSecure" class="self-start" :options="TUNNEL_SECURE_MODES" label="Шифрование DNS через VPN" name="tunnel-secure" />
+          <span id="tunnel-secure-title" class="field__label">{{ t('Шифрование') }}</span>
+          <Segmented v-model="draft.dns.tunnelSecure" class="self-start" :options="TUNNEL_SECURE_MODES" :label="t('Шифрование DNS через VPN')" name="tunnel-secure" />
           <span class="field__hint">{{ tunnelSecureHint }}</span>
           <span v-if="tunnelState" :class="['adblock__state', { 'adblock__state--bad': tunnelState.tone === 'bad' }]">
             <span :class="['led', `led--${tunnelState.tone}`]" aria-hidden="true" />
@@ -229,72 +232,77 @@ useAutosave({
           </span>
         </div>
         <div v-if="dnsChoice === 'custom'" class="field dns__custom">
-          <label for="dns" class="field__label">Адрес DNS-сервера</label>
-          <InputText id="dns" v-model="draft.dns.resolver" class="num" placeholder="например, 1.0.0.1" inputmode="decimal" :invalid="!resolverOk" aria-describedby="dns-hint" />
-          <span id="dns-hint" :class="resolverOk ? 'field__hint' : 'field__error'">{{ resolverOk ? 'Публичный адрес IPv4.' : 'Нужен адрес IPv4, например 1.0.0.1.' }}</span>
+          <label for="dns" class="field__label">{{ t('Адрес DNS-сервера') }}</label>
+          <InputText id="dns" v-model="draft.dns.resolver" class="num" :placeholder="t('например, 1.0.0.1')" inputmode="decimal" :invalid="!resolverOk" aria-describedby="dns-hint" />
+          <span id="dns-hint" :class="resolverOk ? 'field__hint' : 'field__error'">{{ resolverOk ? t('Публичный адрес IPv4.') : t('Нужен адрес IPv4, например 1.0.0.1.') }}</span>
         </div>
       </div>
 
       <div class="setblock" role="group" aria-labelledby="secure-title">
         <span class="setrow__text">
-          <span id="secure-title" class="setrow__title">Защищённый DNS для остальных сайтов</span>
-          <span class="setrow__desc">Адреса сайтов не через VPN (в том числе с обходом блокировок) роутер узнаёт по шифрованному каналу —
-            провайдер не видит и не подменяет ответы. Если сервер недоступен, роутер временно спрашивает DNS провайдера, чтобы интернет не пропадал</span>
+          <span id="secure-title" class="setrow__title">{{ t('Защищённый DNS для остальных сайтов') }}</span>
+          <span class="setrow__desc">{{ t('Адреса сайтов не через VPN (в том числе с обходом блокировок) роутер узнаёт по шифрованному каналу — провайдер не видит и не подменяет ответы. Если сервер недоступен, роутер временно спрашивает DNS провайдера, чтобы интернет не пропадал') }}</span>
         </span>
-        <Segmented v-model="draft.dns.secure" class="self-start" :options="SECURE_MODES" label="Защищённый DNS" name="secure-mode" />
+        <Segmented v-model="draft.dns.secure" class="self-start" :options="SECURE_MODES" :label="t('Защищённый DNS')" name="secure-mode" />
         <template v-if="draft.dns.secure !== 'off'">
-          <p v-if="draft.dns.secure === 'dot'" class="dns__note">Провайдеры в России часто блокируют DoT (порт 853). Если в состоянии ниже ответы идут через провайдера — выберите DoH</p>
-          <div class="dns" role="radiogroup" aria-label="Сервер защищённого DNS">
+          <p v-if="draft.dns.secure === 'dot'" class="dns__note">{{ t('Провайдеры в России часто блокируют DoT (порт 853). Если в состоянии ниже ответы идут через провайдера — выберите DoH') }}</p>
+          <div class="dns" role="radiogroup" :aria-label="t('Сервер защищённого DNS')">
             <label v-for="o in SECURE_SERVERS" :key="o.id" :class="['dns__opt', { 'dns__opt--on': draft.dns.secureServer === o.id, 'dns__opt--off': o.id === 'quad9' && draft.dns.secure === 'doh' }]">
               <input v-model="draft.dns.secureServer" type="radio" name="secure-server" class="dns__radio" :value="o.id" :disabled="o.id === 'quad9' && draft.dns.secure === 'doh'" />
               <ServiceLogo :icon="dnsIcon(o.id)" />
               <span class="dns__text">
                 <span class="dns__name">{{ o.name }}</span>
-                <span class="dns__desc">{{ o.id === 'quad9' && draft.dns.secure === 'doh' ? 'Только DoT: DoH у Quad9 — HTTP/2' : o.desc }}</span>
+                <span class="dns__desc">{{ o.id === 'quad9' && draft.dns.secure === 'doh' ? t('Только DoT: DoH у Quad9 — HTTP/2') : o.desc }}</span>
               </span>
             </label>
           </div>
           <div v-if="draft.dns.secureServer === 'nextdns'" class="field dns__custom">
-            <label for="nextdns-id" class="field__label">ID профиля NextDNS</label>
+            <label for="nextdns-id" class="field__label">{{ t('ID профиля NextDNS') }}</label>
             <InputText id="nextdns-id" v-model="draft.dns.nextdnsId" class="num" placeholder="abc123" spellcheck="false" autocomplete="off" :invalid="!secureOk" />
-            <span class="field__hint">6 символов из личного кабинета NextDNS (раздел «Настройка»)</span>
+            <span class="field__hint">{{ t('6 символов из личного кабинета NextDNS (раздел «Настройка»)') }}</span>
           </div>
           <div v-if="draft.dns.secureServer === 'custom'" class="row2 dns__custom--wide">
             <div class="field">
-              <label for="secure-url" class="field__label">{{ draft.dns.secure === 'doh' ? 'Ссылка DoH' : 'Имя сервера DoT' }}</label>
+              <label for="secure-url" class="field__label">{{ draft.dns.secure === 'doh' ? t('Ссылка DoH') : t('Имя сервера DoT') }}</label>
               <InputText id="secure-url" v-model="draft.dns.secureUrl" :placeholder="draft.dns.secure === 'doh' ? 'https://dns.example/dns-query' : 'dns.example'"
                 spellcheck="false" autocomplete="off" :invalid="!secureOk" />
             </div>
             <div class="field">
-              <label for="secure-ips" class="field__label">IP-адреса сервера</label>
+              <label for="secure-ips" class="field__label">{{ t('IP-адреса сервера') }}</label>
               <InputText id="secure-ips" v-model="draft.dns.secureIps" class="num" placeholder="203.0.113.5, 203.0.113.6" spellcheck="false" autocomplete="off" :invalid="!secureOk" />
             </div>
-            <span class="field__hint">IP нужны, чтобы подключаться к серверу без DNS: до 4 адресов через запятую</span>
+            <span class="field__hint">{{ t('IP нужны, чтобы подключаться к серверу без DNS: до 4 адресов через запятую') }}</span>
           </div>
           <span :class="['adblock__state', { 'adblock__state--bad': secureState?.tone === 'warn' }]">
             <span :class="['led', `led--${secureState?.tone ?? 'idle'}`]" aria-hidden="true" />
-            <span class="meta">{{ secureState?.text ?? (dirty ? 'Сохраняется…' : 'Роутер включит защищённый DNS в течение минуты') }}</span>
+            <span class="meta">{{ secureState?.text ?? (dirty ? t('Сохраняется…') : t('Роутер включит защищённый DNS в течение минуты')) }}</span>
           </span>
         </template>
       </div>
 
 
+      <div class="setblock" role="group" aria-labelledby="lang-title">
+        <span class="setrow__text"><span id="lang-title" class="setrow__title">{{ t('Язык интерфейса') }}</span>
+          <span class="setrow__desc">{{ t('По умолчанию — язык браузера. Выбор запоминается в этом браузере') }}</span></span>
+        <LangSwitch />
+      </div>
+
       <UpdateCard />
 
       <div class="setrow setrow--top">
         <span class="setrow__text">
-          <span class="setrow__title">Вход в панель</span>
-          <span class="setrow__desc">{{ totp ? 'По паролю и коду из приложения-аутентификатора.' : 'Только по паролю. Можно добавить второй шаг: код из приложения на телефоне (Google Authenticator и подобные).' }}</span>
+          <span class="setrow__title">{{ t('Вход в панель') }}</span>
+          <span class="setrow__desc">{{ totp ? t('По паролю и коду из приложения-аутентификатора.') : t('Только по паролю. Можно добавить второй шаг: код из приложения на телефоне (Google Authenticator и подобные).') }}</span>
           <template v-if="!totp">
             <button type="button" class="disclose" :aria-expanded="totpHelp" aria-controls="totp-help" @click="totpHelp = !totpHelp">
-              <ChevronDown :size="16" :class="['disclose__icon', { 'disclose__icon--open': totpHelp }]" aria-hidden="true" />Как включить
+              <ChevronDown :size="16" :class="['disclose__icon', { 'disclose__icon--open': totpHelp }]" aria-hidden="true" />{{ t('Как включить') }}
             </button>
-            <span v-show="totpHelp" id="totp-help" class="setrow__desc">Подключитесь к роутеру по SSH и выполните
-              <code>sh /data/mi-trusttunnel/mitt-boot.sh auth reset-totp</code>, отсканируйте QR-код приложением, затем
-              <code>sh /data/mi-trusttunnel/mitt-boot.sh auth confirm</code>. Подробнее — в инструкции, раздел «Второй фактор».</span>
+            <span v-show="totpHelp" id="totp-help" class="setrow__desc">{{ t('Подключитесь к роутеру по SSH и выполните') }}
+              <code>sh /data/mi-trusttunnel/mitt-boot.sh auth reset-totp</code>{{ t(', отсканируйте QR-код приложением, затем') }}
+              <code>sh /data/mi-trusttunnel/mitt-boot.sh auth confirm</code>{{ t('. Подробнее — в инструкции, раздел «Второй фактор».') }}</span>
           </template>
         </span>
-        <span :class="['badge', totp ? 'badge--ok' : 'badge--idle']">{{ totp ? 'Пароль и код' : 'Только пароль' }}</span>
+        <span :class="['badge', totp ? 'badge--ok' : 'badge--idle']">{{ totp ? t('Пароль и код') : t('Только пароль') }}</span>
       </div>
     </div>
 

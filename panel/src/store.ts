@@ -5,6 +5,7 @@ import { computed, ref } from 'vue'
 import { api, manage, type ApiResult, type Config, type Issue, type Lan, type Lease, type ListsResponse, type ManageResponse, type ReplaceResponse, type SaveResponse, type ZapretConfig } from './api'
 import { knownDevices, readSimple, tunnelState } from './status'
 import { HOME, toConfig, type KnownDevice, type Simple } from './simple'
+import { t } from './i18n'
 
 export const config = ref<Config | null>(null)
 export const revision = ref<string | null>(null)
@@ -30,7 +31,7 @@ export const catalog = computed(() => lists.value?.catalog ?? null)
 export const broken = computed(() => !config.value && !!revision.value && configIssues.value.length > 0)
 export const simpleState = computed(() => {
   if (!config.value) return null
-  if (configIssues.value.length) return { canonical: false as const, reason: `настройки не проходят проверку: ${issuesText(configIssues.value)}` }
+  if (configIssues.value.length) return { canonical: false as const, reason: t('настройки не проходят проверку: {e}', { e: issuesText(configIssues.value) }) }
   return readSimple(config.value)
 })
 export const simple = computed<Simple | null>(() => (simpleState.value?.canonical ? simpleState.value.simple : null))
@@ -56,7 +57,7 @@ export function reset() {
 
 /** Первые замечания одной строкой для пользователя. */
 export function issuesText(issues: Issue[]): string {
-  return issues.slice(0, 3).map((i) => i.message).join('; ') || 'причина не указана'
+  return issues.slice(0, 3).map((i) => i.message).join('; ') || t('причина не указана')
 }
 
 /**
@@ -70,11 +71,11 @@ export async function loadConfig(): Promise<boolean> {
     config.value = b.config ?? null
     revision.value = b.revision
     configIssues.value = b.ok ? [] : b.issues
-    loadError.value = b.config ? null : `настройки на роутере не читаются: ${issuesText(b.issues)}`
+    loadError.value = b.config ? null : t('настройки на роутере не читаются: {e}', { e: issuesText(b.issues) })
     return !!b.config
   }
   configIssues.value = []
-  loadError.value = b.error?.message ?? `контроллер ответил ${r.status}`
+  loadError.value = b.error?.message ?? t('контроллер ответил {s}', { s: r.status })
   return false
 }
 
@@ -97,7 +98,7 @@ async function loadLan() {
   if (r.body.ok && r.body.lan) {
     lan.value = r.body.lan
     lanError.value = null
-  } else lanError.value = r.body.error?.message ?? 'сеть роутера не прочитана'
+  } else lanError.value = r.body.error?.message ?? t('сеть роутера не прочитана')
 }
 
 export async function loadSecrets() {
@@ -141,9 +142,9 @@ export function recoveryBase(cfg: Config | null, issues: Issue[]): Config {
 
 /** Почему нельзя собрать простые настройки прямо сейчас (или null, если можно). */
 export function buildBlocker(): string | null {
-  if (!config.value && !broken.value) return 'Настройки ещё не загружены.'
-  if (!catalog.value) return 'Каталог сайтов ещё не загружен — подождите или обновите страницу.'
-  if (!currentLan()) return `Не удалось узнать домашнюю сеть роутера${lanError.value ? ` (${lanError.value})` : ''}.`
+  if (!config.value && !broken.value) return t('Настройки ещё не загружены.')
+  if (!catalog.value) return t('Каталог сайтов ещё не загружен — подождите или обновите страницу.')
+  if (!currentLan()) return lanError.value ? t('Не удалось узнать домашнюю сеть роутера ({e}).', { e: lanError.value }) : t('Не удалось узнать домашнюю сеть роутера.')
   return null
 }
 
@@ -162,17 +163,17 @@ export function build(s: Simple, known: KnownDevice[], base: Config | null = con
   try {
     return toConfig(base ?? emptyConfig(), s, currentLan()!, catalog.value!, known)
   } catch (e) {
-    return e instanceof Error && /сервер/.test(e.message) ? 'Сначала настройте сервер VPN на экране «Сервер».' : String(e)
+    return e instanceof Error && /сервер/.test(e.message) ? t('Сначала настройте сервер VPN на экране «Сервер».') : String(e)
   }
 }
 
 export type SaveResult = { ok: true } | { ok: false; conflict: boolean; message: string }
 
-const SAVED = 'Сохранено, применяю на роутере'
+const SAVED = () => t('Сохранено, применяю на роутере')
 
 /** Замена настроек целиком. Конфликт ревизий — перечитываем настройки и говорим об этом. */
-export async function save(next: Config, done = SAVED): Promise<SaveResult> {
-  if (!revision.value) return { ok: false, conflict: false, message: 'Настройки ещё не загружены.' }
+export async function save(next: Config, done = SAVED()): Promise<SaveResult> {
+  if (!revision.value) return { ok: false, conflict: false, message: t('Настройки ещё не загружены.') }
   const r: ApiResult<ReplaceResponse> = await api.replaceConfig(revision.value, next)
   return saved(r, done)
 }
@@ -182,14 +183,14 @@ export async function save(next: Config, done = SAVED): Promise<SaveResult> {
  * ставим её сами (POST /apply-request).
  */
 export async function saveZapret(z: ZapretConfig | null): Promise<SaveResult> {
-  if (!revision.value) return { ok: false, conflict: false, message: 'Настройки ещё не загружены.' }
-  const res = await saved(await api.setZapret(revision.value, z), '', false)
+  if (!revision.value) return { ok: false, conflict: false, message: t('Настройки ещё не загружены.') }
+  const res =await saved(await api.setZapret(revision.value, z), '', false)
   if (!res.ok) return res
   const q = await manage.applyRequest()
   await loadStatus()
   if (q.status !== 202) {
-    const message = `Сохранено, но роутер не принял заявку на применение: ${q.body.error?.message ?? `ошибка ${q.status}`}`
-    notify.show('error', 'Не применено', message)
+    const message = t('Сохранено, но роутер не принял заявку на применение: {e}', { e: q.body.error?.message ?? t('ошибка {s}', { s: q.status }) })
+    notify.show('error', t('Не применено'), message)
     return { ok: false, conflict: false, message }
   }
   return res
@@ -207,12 +208,12 @@ async function saved(r: ApiResult<SaveResponse>, done: string, status = true): P
   }
   if (r.status === 409 && r.body.error?.code === 'revision_conflict') {
     await loadConfig()
-    const message = 'Настройки только что изменились в другом окне. Я загрузил новые — проверьте и сохраните ещё раз.'
-    notify.show('error', 'Не сохранено', message)
+    const message = t('Настройки только что изменились в другом окне. Я загрузил новые — проверьте и сохраните ещё раз.')
+    notify.show('error', t('Не сохранено'), message)
     return { ok: false, conflict: true, message }
   }
   const details = r.body.issues.map((i) => i.message).slice(0, 3).join('; ')
-  const message = `${r.body.error?.message ?? `Ошибка ${r.status}`}${details ? `: ${details}` : ''}`
-  notify.show('error', 'Не сохранено', message)
+  const message = `${r.body.error?.message ?? t('Ошибка {s}', { s: r.status })}${details ? `: ${details}` : ''}`
+  notify.show('error', t('Не сохранено'), message)
   return { ok: false, conflict: false, message }
 }

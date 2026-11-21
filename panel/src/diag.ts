@@ -2,23 +2,24 @@
 
 import type { DiagCheck, DiagResponse, DiagSite, DiagStatus } from './api'
 import { when } from './status'
+import { lang, t } from './i18n'
 
-/** Проверки службы (mitt-diag.sh) по порядку и их названия в панели. */
-export const CHECK_TITLES: Record<string, string> = {
-  service: 'Служба роутера',
-  client: 'Клиент TrustTunnel',
-  exit: 'Выход в интернет через туннель',
-  route: 'Маршрут в туннель',
-  firewall: 'Сортировка трафика',
-  dns: 'DNS роутера',
-  secure: 'Защищённый DNS (DoH/DoT)',
-  tunnelsecure: 'Шифрованный DNS через VPN',
-  zapret: 'Обход блокировок (Zapret)',
-  restarts: 'Стабильность программ',
-  watch: 'Сторож туннеля',
-}
+/** Проверки службы (mitt-diag.sh) по порядку и их названия в панели (на текущем языке — функцией). */
+export const checkTitles = (): Record<string, string> => ({
+  service: t('Служба роутера'),
+  client: t('Клиент TrustTunnel'),
+  exit: t('Выход в интернет через туннель'),
+  route: t('Маршрут в туннель'),
+  firewall: t('Сортировка трафика'),
+  dns: t('DNS роутера'),
+  secure: t('Защищённый DNS (DoH/DoT)'),
+  tunnelsecure: t('Шифрованный DNS через VPN'),
+  zapret: t('Обход блокировок (Zapret)'),
+  restarts: t('Стабильность программ'),
+  watch: t('Сторож туннеля'),
+})
 
-export const checkTitle = (c: DiagCheck) => CHECK_TITLES[c.id] ?? c.id
+export const checkTitle = (c: DiagCheck) => checkTitles()[c.id] ?? c.id
 
 /** Общий итог: худший из итогов проверок (пропущенные не считаются). */
 export function overall(checks: DiagCheck[]): DiagStatus | null {
@@ -30,30 +31,33 @@ export function overall(checks: DiagCheck[]): DiagStatus | null {
 export function overallText(checks: DiagCheck[]): string {
   const bad = checks.filter((c) => c.status === 'bad').length
   const warn = checks.filter((c) => c.status === 'warn').length
-  if (bad) return bad === 1 ? 'Одна проверка не прошла' : `Не прошли проверки: ${bad}`
-  if (warn) return 'Работает, но есть замечания'
-  return 'Всё работает'
+  if (bad) return bad === 1 ? t('Одна проверка не прошла') : t('Не прошли проверки: {n}', { n: bad })
+  if (warn) return t('Работает, но есть замечания')
+  return t('Всё работает')
 }
 
-const ROUTES: Record<string, string> = { tunnel: 'через VPN', zapret: 'напрямую с обходом блокировок', direct: 'напрямую', block: 'заблокирован' }
+const routes = (): Record<string, string> => ({ tunnel: t('через VPN'), zapret: t('напрямую с обходом блокировок'), direct: t('напрямую'), block: t('заблокирован') })
 
 /** Что показать по проверке сайта: маршрут и ответ сайта по этому маршруту. */
 export function siteVerdict(s: DiagSite): { status: DiagStatus; title: string; detail: string } {
-  if (!s.ip) return { status: 'bad', title: `${s.domain}: адрес не найден`, detail: 'DNS роутера не вернул адрес. Проверьте написание или подождите и повторите' }
+  const domain = s.domain
+  if (!s.ip) return { status: 'bad', title: t('{domain}: адрес не найден', { domain }), detail: t('DNS роутера не вернул адрес. Проверьте написание или подождите и повторите') }
+  const ip = s.ip
   const route = s.route ?? 'direct'
   const probe = route === 'tunnel' ? s.tunnel : s.direct
-  const way = ROUTES[route] ?? route
-  if (route === 'block') return { status: 'warn', title: `${s.domain} — ${way}`, detail: `Адрес ${s.ip}. Так задано в настройках` }
-  const how = route === 'zapret' ? '. Проверено с роутера напрямую: обход блокировок работает для устройств, а не для самого роутера' : ''
-  if (!probe) return { status: 'warn', title: `${s.domain} — ${way}`, detail: `Адрес ${s.ip}. Ответ сайта не проверен: туннель не поднят${how}` }
-  if (!probe.code) return { status: 'bad', title: `${s.domain} — ${way}, не отвечает`, detail: `Адрес ${s.ip}. Сайт не ответил за 10 секунд${how}` }
-  const secs = probe.seconds != null ? `, ${probe.seconds.toFixed(1).replace('.', ',')} с` : ''
-  return { status: 'ok', title: `${s.domain} — ${way}, открывается`, detail: `Адрес ${s.ip}. Ответ ${probe.code}${secs}${how}` }
+  const way = routes()[route] ?? route
+  if (route === 'block') return { status: 'warn', title: t('{domain} — {way}', { domain, way }), detail: t('Адрес {ip}. Так задано в настройках', { ip }) }
+  const how = route === 'zapret' ? t('. Проверено с роутера напрямую: обход блокировок работает для устройств, а не для самого роутера') : ''
+  if (!probe) return { status: 'warn', title: t('{domain} — {way}', { domain, way }), detail: t('Адрес {ip}. Ответ сайта не проверен: туннель не поднят{how}', { ip, how }) }
+  if (!probe.code) return { status: 'bad', title: t('{domain} — {way}, не отвечает', { domain, way }), detail: t('Адрес {ip}. Сайт не ответил за 10 секунд{how}', { ip, how }) }
+  const num = probe.seconds?.toFixed(1)
+  const secs = num != null ? t(', {s} с', { s: lang.value === 'ru' ? num.replace('.', ',') : num }) : ''
+  return { status: 'ok', title: t('{domain} — {way}, открывается', { domain, way }), detail: t('Адрес {ip}. Ответ {code}{secs}{how}', { ip, code: probe.code, secs, how }) }
 }
 
 /** Текст для копирования в сообщение: итоги, сайт и журналы. Секретов в журналах службы нет. */
 export function reportText(d: DiagResponse): string {
-  const out = [`Mi Lumruri — диагностика ${when(d.finished ?? null)}`, '']
+  const out = [t('Mi Lumruri — диагностика {when}', { when: when(d.finished ?? null) }), '']
   for (const c of d.checks ?? []) out.push(`[${c.status}] ${checkTitle(c)}: ${c.detail}`)
   if (d.site) {
     const v = siteVerdict(d.site)
@@ -61,7 +65,7 @@ export function reportText(d: DiagResponse): string {
   }
   const logs = d.logs
   if (logs) {
-    for (const [name, lines] of [['Служба', logs.service], ['TrustTunnel', logs.trusttunnel], ['Zapret', logs.nfqws2]] as const) {
+    for (const [name, lines] of [[t('Служба'), logs.service], ['TrustTunnel', logs.trusttunnel], ['Zapret', logs.nfqws2]] as const) {
       if (lines.length) out.push('', `--- ${name} ---`, ...lines)
     }
   }

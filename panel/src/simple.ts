@@ -21,6 +21,7 @@
 // `fromConfig` считает настройки простыми, только если `toConfig` от разобранных ответов даёт ровно их же.
 
 import type { Action, Category, Config, Destination, Device, Group, Lan, ListCatalog, Network, Rule, Source } from './api'
+import { t } from './i18n'
 
 export interface Simple {
   enabled: boolean
@@ -212,15 +213,15 @@ const notSimple = (reason: string): FromConfig => ({ canonical: false, reason })
 export function fromConfig(cfg: Config): FromConfig {
   const home = cfg.networks[0]
   if (cfg.networks.length !== 1 || home?.id !== HOME || !home.bridge || !home.subnet) {
-    return notSimple('сети настроены вручную: простой вид использует одну домашнюю сеть роутера')
+    return notSimple(t('сети настроены вручную: простой вид использует одну домашнюю сеть роутера'))
   }
-  if (cfg.profiles.length > 1) return notSimple('настроено несколько профилей VPN')
+  if (cfg.profiles.length > 1) return notSimple(t('настроено несколько профилей VPN'))
   const groups = new Map(cfg.groups.map((g) => [g.id, g]))
   const marker = cfg.rules.find((r) => r.id === REST_ON || r.id === REST_OFF)
-  if (!marker) return notSimple('правила изменены вручную')
+  if (!marker) return notSimple(t('правила изменены вручную'))
   const action = (r: Rule | undefined) => r?.action.type
   const restFrom = action(marker)
-  if (restFrom !== 'direct' && restFrom !== 'direct_zapret') return notSimple('правила изменены вручную')
+  if (restFrom !== 'direct' && restFrom !== 'direct_zapret') return notSimple(t('правила изменены вручную'))
 
   /** Сервисы и домены группы сайтов; ошибка — текстом. */
   const readSites = (id: string, services: string[], domains: string[]): string | null => {
@@ -229,9 +230,9 @@ export function fromConfig(cfg: Config): FromConfig {
       else if (d.type === 'category') {
         const m = /^svc-(.+)$/.exec(d.id)
         const cat = cfg.categories?.find((c) => c.id === d.id)
-        if (!m || !cat) return `в списке сайтов есть категория «${d.id}», добавленная вручную`
+        if (!m || !cat) return t('в списке сайтов есть категория «{id}», добавленная вручную', { id: d.id })
         if (cat.kind === 'domain') services.push(m[1]!)
-      } else return 'в списке сайтов есть записи, добавленные вручную'
+      } else return t('в списке сайтов есть записи, добавленные вручную')
     }
     return null
   }
@@ -243,7 +244,7 @@ export function fromConfig(cfg: Config): FromConfig {
   if (bad) return notSimple(bad)
   const exceptions: string[] = []
   for (const d of groups.get(EXCEPT)?.destinations ?? []) {
-    if (d.type !== 'domain_suffix') return notSimple('в исключениях есть записи, добавленные вручную')
+    if (d.type !== 'domain_suffix') return notSimple(t('в исключениях есть записи, добавленные вручную'))
     exceptions.push(d.value)
   }
 
@@ -255,7 +256,7 @@ export function fromConfig(cfg: Config): FromConfig {
   for (const id of devIds) {
     const d = cfg.devices.find((x) => x.id === id)
     const mac = d && normalizeMac(d.mac)
-    if (!mac) return notSimple(`устройство «${id}» настроено вручную`)
+    if (!mac) return notSimple(t('устройство «{id}» настроено вручную', { id }))
     macs.push(mac)
   }
   const mode = working.some((r) => r.destination.type === 'group' && r.destination.id === ALL) || cfg.default_action.type === 'profile' ? 'all' : 'selected'
@@ -284,8 +285,8 @@ export function fromConfig(cfg: Config): FromConfig {
   try {
     again = toConfig(cfg, simple, { bridge: home.bridge, subnet: home.subnet, address: '' }, catalog, known)
   } catch {
-    return notSimple('правила ссылаются на профиль VPN, которого нет')
+    return notSimple(t('правила ссылаются на профиль VPN, которого нет'))
   }
-  if (canonicalJson(again) !== canonicalJson(cfg)) return notSimple('настройки изменены вручную и отличаются от простого вида')
+  if (canonicalJson(again) !== canonicalJson(cfg)) return notSimple(t('настройки изменены вручную и отличаются от простого вида'))
   return { canonical: true, simple }
 }

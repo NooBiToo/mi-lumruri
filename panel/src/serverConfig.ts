@@ -4,6 +4,8 @@
 // видов, логические, числа, массивы строк) и таблицы; берутся ключи верхнего уровня и [endpoint].
 
 import type { Endpoint, TlsProfile } from './api'
+// i18n.t: внутри разбора имя `t` занято разбираемым текстом
+import * as i18n from './i18n'
 
 /** Отпечатки TLS в порядке тега 0x10 ссылки tt:// (DEEP_LINK.md: 0x00 = chrome … 0x06 = boringssl). */
 export const TLS_PROFILES: TlsProfile[] = ['chrome', 'chrome_canary', 'safari', 'firefox', 'okhttp', 'openssl', 'boringssl']
@@ -37,7 +39,7 @@ const ESCAPES: Record<string, string> = { b: '\b', t: '\t', n: '\n', f: '\f', r:
 function value(t: string, i: number): [Value, number] {
   const multi = (q: string): [string, number] => {
     const end = t.indexOf(q, i + 3)
-    if (end < 0) throw new TomlError('не закрыта многострочная строка')
+    if (end < 0) throw new TomlError(i18n.t('не закрыта многострочная строка'))
     let s = t.slice(i + 3, end)
     if (s.startsWith('\r\n')) s = s.slice(2)
     else if (s.startsWith('\n')) s = s.slice(1)
@@ -48,13 +50,13 @@ function value(t: string, i: number): [Value, number] {
   const c = t[i]
   if (c === "'") {
     const end = t.indexOf("'", i + 1)
-    if (end < 0 || t.slice(i + 1, end).includes('\n')) throw new TomlError('не закрыта строка')
+    if (end < 0 || t.slice(i + 1, end).includes('\n')) throw new TomlError(i18n.t('не закрыта строка'))
     return [t.slice(i + 1, end), end + 1]
   }
   if (c === '"') {
     let j = i + 1
     while (j < t.length && t[j] !== '"' && t[j] !== '\n') j += t[j] === '\\' ? 2 : 1
-    if (t[j] !== '"') throw new TomlError('не закрыта строка')
+    if (t[j] !== '"') throw new TomlError(i18n.t('не закрыта строка'))
     return [unescape(t.slice(i + 1, j)), j + 1]
   }
   if (c === '[') {
@@ -65,12 +67,12 @@ function value(t: string, i: number): [Value, number] {
       arr.push(v)
       j = skip(t, k, true)
       if (t[j] === ',') j = skip(t, j + 1, true)
-      else if (t[j] !== ']') throw new TomlError('ожидалась «,» или «]» в массиве')
+      else if (t[j] !== ']') throw new TomlError(i18n.t('ожидалась «,» или «]» в массиве'))
     }
     return [arr, j + 1]
   }
   const m = /^(true|false|[+-]?\d[\d_]*)(?=[\s,\]#]|$)/.exec(t.slice(i))
-  if (!m || !m[1]) throw new TomlError('значение не распознано')
+  if (!m || !m[1]) throw new TomlError(i18n.t('значение не распознано'))
   const v = m[1] === 'true' ? true : m[1] === 'false' ? false : Number(m[1].replace(/_/g, ''))
   return [v, i + m[1].length]
 }
@@ -79,7 +81,7 @@ function unescape(s: string): string {
   return s.replace(/\\(u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|.)/gs, (all, e: string) => {
     if (e.length > 1) return String.fromCodePoint(parseInt(e.slice(1), 16))
     const r = ESCAPES[e]
-    if (r === undefined) throw new TomlError(`неизвестная последовательность ${all}`)
+    if (r === undefined) throw new TomlError(i18n.t('неизвестная последовательность {s}', { s: all }))
     return r
   })
 }
@@ -113,14 +115,14 @@ function parseToml(text: string): Map<string, Map<string, Value>> {
       i += header[0].length
     } else {
       const kv = /^([A-Za-z0-9_-]+)[ \t]*=[ \t]*/.exec(t.slice(i))
-      if (!kv?.[1]) throw new TomlError('ожидалась строка вида «ключ = значение»')
+      if (!kv?.[1]) throw new TomlError(i18n.t('ожидалась строка вида «ключ = значение»'))
       const [v, j] = value(t, i + kv[0].length)
       table.set(kv[1], v)
       i = j
     }
     i = skip(t, i, false)
     if (t[i] === '#') while (i < t.length && t[i] !== '\n') i++
-    if (i < t.length && t[i] !== '\n' && t[i] !== '\r') throw new TomlError('лишние символы в конце строки')
+    if (i < t.length && t[i] !== '\n' && t[i] !== '\r') throw new TomlError(i18n.t('лишние символы в конце строки'))
   }
   return tables
 }
@@ -133,7 +135,7 @@ function splitAddress(a: string): { server: string; port: number } | null {
   return port >= 1 && port <= 65535 ? { server: m[1], port } : null
 }
 
-const NOT_CLIENT = 'это не похоже на конфигурацию клиента TrustTunnel: нужны addresses и hostname'
+const NOT_CLIENT = (): string => i18n.t('это не похоже на конфигурацию клиента TrustTunnel: нужны addresses и hostname')
 
 /**
  * Поля точки подключения из конфигурации клиента. Имя сервера — `hostname` (по нему проверяется сертификат),
@@ -144,7 +146,7 @@ export function parseClientToml(text: string): ParsedServer {
   try {
     tables = parseToml(text)
   } catch (e) {
-    return { error: e instanceof TomlError ? `не удалось разобрать конфигурацию: ${e.message}` : NOT_CLIENT }
+    return { error: e instanceof TomlError ? i18n.t('не удалось разобрать конфигурацию: {e}', { e: e.message }) : NOT_CLIENT() }
   }
   const ep = tables.get('endpoint')
   const get = (k: string): Value | undefined => ep?.get(k) ?? tables.get('')!.get(k)
@@ -155,9 +157,9 @@ export function parseClientToml(text: string): ParsedServer {
   const addresses = get('addresses')
   const first = Array.isArray(addresses) ? addresses[0] : typeof addresses === 'string' ? addresses : undefined
   const host = str('hostname') ?? str('custom_sni')
-  if (typeof first !== 'string' || !host) return { error: NOT_CLIENT }
+  if (typeof first !== 'string' || !host) return { error: NOT_CLIENT() }
   const addr = splitAddress(first.trim())
-  if (!addr) return { error: `адрес сервера «${first}» ожидается в виде IP:порт` }
+  if (!addr) return { error: i18n.t('адрес сервера «{a}» ожидается в виде IP:порт', { a: first }) }
 
   const endpoint: Partial<Endpoint> = { server: addr.server, port: addr.port, sni: host }
   const user = str('username')
@@ -171,7 +173,7 @@ export function parseClientToml(text: string): ParsedServer {
   const tls = str('tls_profile')
   if (tls !== undefined) {
     const p = tlsProfileOf(tls)
-    if (p === 'bad') return { error: `профиль TLS «${tls}» неизвестен (tls_profile)` }
+    if (p === 'bad') return { error: i18n.t('профиль TLS «{p}» неизвестен (tls_profile)', { p: tls }) }
     if (p) endpoint.tls_profile = p
   }
   clientRandom(endpoint, str('client_random'), str('client_random_auth_key'))
@@ -183,9 +185,9 @@ export function parseClientToml(text: string): ParsedServer {
 function unsupported(host: string, customSni: string | undefined, skipVerification: boolean): string[] {
   const w: string[] = []
   if (customSni && customSni !== host) {
-    w.push(`сервер задаёт для TLS другое имя («${customSni}», custom_sni) — роутер так не умеет и подключается по имени «${host}»`)
+    w.push(i18n.t('сервер задаёт для TLS другое имя («{sni}», custom_sni) — роутер так не умеет и подключается по имени «{host}»', { sni: customSni, host }))
   }
-  if (skipVerification) w.push('в конфигурации отключена проверка сертификата (skip_verification) — роутер всегда проверяет сертификат сервера')
+  if (skipVerification) w.push(i18n.t('в конфигурации отключена проверка сертификата (skip_verification) — роутер всегда проверяет сертификат сервера'))
   return w
 }
 
@@ -200,7 +202,7 @@ function finish(endpoint: Partial<Endpoint>, password: string | undefined, name:
 
 // ---------- ссылка tt://? ----------
 
-const NOT_LINK = 'ссылка tt:// повреждена — проверьте, что она скопирована целиком'
+const NOT_LINK = (): string => i18n.t('ссылка tt:// повреждена — проверьте, что она скопирована целиком')
 
 /** DER-сертификаты подряд → PEM; длина каждого — из заголовка SEQUENCE. */
 function derToPem(der: Uint8Array): string | null {
@@ -233,12 +235,12 @@ class LinkError extends Error {}
 /** Ссылка `tt://?<base64url>`: записи «тег — длина — значение», тег и длина — varint QUIC (RFC 9000 §16). */
 export function parseDeepLink(link: string): ParsedServer {
   const m = /^tt:\/\/\??([A-Za-z0-9_-]+)=*$/.exec(link.trim())
-  if (!m?.[1]) return { error: NOT_LINK }
+  if (!m?.[1]) return { error: NOT_LINK() }
   let bytes: Uint8Array
   try {
     bytes = Uint8Array.from(atob(m[1].replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))
   } catch {
-    return { error: NOT_LINK }
+    return { error: NOT_LINK() }
   }
   let i = 0
   const varint = (): number => {
@@ -265,7 +267,7 @@ export function parseDeepLink(link: string): ParsedServer {
       else fields.set(tag, v) // повтор тега — побеждает последний (DEEP_LINK.md)
     }
   } catch {
-    return { error: NOT_LINK }
+    return { error: NOT_LINK() }
   }
   const text = (tag: number): string | undefined => {
     const v = fields.get(tag)
@@ -282,12 +284,12 @@ export function parseDeepLink(link: string): ParsedServer {
   const sub = text(0x0e)
   // ссылка только с подпиской: параметры сервера роутер получит по ней сам
   if (sub && (!host || !first)) {
-    if (!/^https:\/\/\S+$/.test(sub)) return { error: 'ссылка-подписка в tt:// должна начинаться с https://' }
+    if (!/^https:\/\/\S+$/.test(sub)) return { error: i18n.t('ссылка-подписка в tt:// должна начинаться с https://') }
     return finish({}, undefined, text(0x0c), [], sub)
   }
-  if (!host || !first) return { error: NOT_LINK }
+  if (!host || !first) return { error: NOT_LINK() }
   const addr = splitAddress(first)
-  if (!addr) return { error: `адрес сервера «${first}» ожидается в виде IP:порт` }
+  if (!addr) return { error: i18n.t('адрес сервера «{a}» ожидается в виде IP:порт', { a: first }) }
 
   const endpoint: Partial<Endpoint> = { server: addr.server, port: addr.port, sni: host, quic: fields.get(0x09)?.[0] === 2, anti_dpi: flag(0x0a) }
   const user = text(0x05)
@@ -295,14 +297,14 @@ export function parseDeepLink(link: string): ParsedServer {
   const der = fields.get(0x08)
   if (der?.length) {
     const pem = derToPem(der)
-    if (!pem) return { error: 'сертификат в ссылке tt:// повреждён' }
+    if (!pem) return { error: i18n.t('сертификат в ссылке tt:// повреждён') }
     endpoint.certificate = pem
   }
   // 0x10 — один байт, номер профиля; неизвестный номер ссылка не должна молча терять (DEEP_LINK.md: «MUST reject»)
   const tls = fields.get(0x10)
   if (tls) {
     const p = tls.length === 1 ? TLS_PROFILES[tls[0]!] : undefined
-    if (!p) return { error: 'профиль TLS в ссылке tt:// неизвестен — обновите панель роутера' }
+    if (!p) return { error: i18n.t('профиль TLS в ссылке tt:// неизвестен — обновите панель роутера') }
     if (p !== 'chrome') endpoint.tls_profile = p
   }
   clientRandom(endpoint, text(0x0b), text(0x0f))
@@ -310,7 +312,7 @@ export function parseDeepLink(link: string): ParsedServer {
   try {
     pass = fields.has(0x06) ? utf8.decode(fields.get(0x06)!) : undefined
   } catch {
-    return { error: NOT_LINK }
+    return { error: NOT_LINK() }
   }
   return finish(endpoint, pass, text(0x0c), unsupported(host, text(0x03), flag(0x07)), sub)
 }
