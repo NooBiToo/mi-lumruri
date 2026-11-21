@@ -345,6 +345,12 @@ pub fn validate_config(c: &Config) -> Vec<Issue> {
         if let Some(e) = &p.endpoint {
             check_endpoint(&mut issues, &format!("profiles[{i}].endpoint"), e);
         }
+        if let Some(b) = &p.backup {
+            check_endpoint(&mut issues, &format!("profiles[{i}].backup"), b);
+            if p.endpoint.is_none() {
+                issues.push(Issue::new(format!("profiles[{i}].backup"), "backup_without_primary", "запасной сервер задаётся вместе с основным"));
+            }
+        }
     }
 
     for (i, r) in c.rules.iter().enumerate() {

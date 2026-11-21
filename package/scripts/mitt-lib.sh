@@ -184,6 +184,49 @@ tunnel_watch() {
   printf '{"ok":false,"checked":%s,"fails":%s,"restarted":%s}\n' "$now" "$fails" "$now" >"$STATE/watch.json"
   pid_stop trusttunnel
 }
+# Запасной сервер (client-backup.toml от рендера): какой файл отдать клиенту — $STATE/endpoint (primary|backup).
+tt_config() { [ "$(cat "$STATE/endpoint" 2>/dev/null)" = backup ] && [ -f "$RENDER/client-backup.toml" ] && echo "$RENDER/client-backup.toml" || echo "$RENDER/client.toml"; }
+# Основной сервер отвечает на TCP (проверка возврата с запасного): любой ответ или ошибка TLS — порт открыт;
+# «не подключиться», тайм-аут, не разрешилось имя — нет.
+primary_reachable() {
+  local h p u rc
+  read -r h p <"$RENDER/primary.addr" 2>/dev/null || return 1
+  case "$h" in *:*) u="https://[$h]:$p/";; *) u="https://$h:$p/";; esac
+  "$WATCH_CURL" -sk --connect-timeout 5 --max-time 8 -o /dev/null "$u" 2>/dev/null; rc=$?
+  case "$rc" in 6|7|28) return 1;; *) return 0;; esac
+}
+# Переключение: клиент не подключён дольше MITT_FAILOVER_AFTER (2 мин) — на другой сервер (оба лежат — по очереди);
+# на запасном раз в MITT_FAILBACK_EVERY (5 мин) проверка основного, два ответа подряд — возврат. Смена — остановка
+# клиента: цикл службы запустит его с другим файлом и применит политику.
+failover_check() {
+  [ -f "$RENDER/client-backup.toml" ] || { rm -f "$STATE/endpoint" "$STATE/tt-down-since" "$STATE/failback-ok"; return 0; }
+  local now cur st since next ok
+  now=$(date +%s); cur="$(cat "$STATE/endpoint" 2>/dev/null)"; [ -n "$cur" ] || cur=primary
+  st="$(tail -n 200 "$LOG/trusttunnel.log" 2>/dev/null | grep -o 'VPN_SS_[A-Z_]*' | tail -n 1)"
+  if [ "$st" = VPN_SS_CONNECTED ]; then
+    rm -f "$STATE/tt-down-since"
+  else
+    since="$(cat "$STATE/tt-down-since" 2>/dev/null)"; [ -n "$since" ] || { since=$now; echo "$now" >"$STATE/tt-down-since"; }
+    if [ $((now - since)) -ge "${MITT_FAILOVER_AFTER:-120}" ]; then
+      [ "$cur" = primary ] && next=backup || next=primary
+      echo "$next" >"$STATE/endpoint"; rm -f "$STATE/tt-down-since" "$STATE/failback-ok"
+      mlog "сервер: нет связи $((now - since)) с — переключение на $( [ "$next" = backup ] && echo запасной || echo основной)"
+      pid_stop trusttunnel; return 0
+    fi
+  fi
+  [ "$cur" = backup ] && [ "$st" = VPN_SS_CONNECTED ] || return 0
+  next="$(cat "$STATE/failback-next" 2>/dev/null || echo 0)"; [ "$now" -ge "$next" ] || return 0
+  echo $((now + ${MITT_FAILBACK_EVERY:-300})) >"$STATE/failback-next"
+  if primary_reachable; then
+    ok=$(( $(cat "$STATE/failback-ok" 2>/dev/null || echo 0) + 1 )); echo "$ok" >"$STATE/failback-ok"
+    if [ "$ok" -ge 2 ]; then
+      echo primary >"$STATE/endpoint"; rm -f "$STATE/failback-ok"
+      mlog "сервер: основной снова отвечает — возврат на основной"; pid_stop trusttunnel
+    fi
+  else
+    echo 0 >"$STATE/failback-ok"
+  fi
+}
 # TUN клиента готов: есть, поднят и с IPv4-адресом (клиент настраивает его не сразу после создания)
 tun_ready() { ip link show mitt0 2>/dev/null | grep -q '[<,]UP[,>]' && ip -4 addr show dev mitt0 2>/dev/null | grep -q 'inet '; }
 pid_alive() { [ -f "$STATE/$1.pid" ] && kill -0 "$(cat "$STATE/$1.pid")" 2>/dev/null; }
@@ -238,8 +281,10 @@ status_write() {
     if pid_alive "$n"; then e="$e\"$n\":true,"; elif [ -f "$STATE/$n.wanted" ]; then e="$e\"$n\":false,"; fi
   done
   # render — итог последнего рендера (ok, error), apply — последнего полного применения (exit, error)
-  printf '{"at":%s,"release":"%s","protection":"%s","engines":{%s},"last_apply":%s,"render":%s,"apply":%s}\n' "$(date +%s)" "$(basename "$(cat "$RUN/.release" 2>/dev/null)")" \
-    "$(cat "$STATE/protection" 2>/dev/null || echo none)" "${e%,}" "$(cat "$STATE/last-apply.json" 2>/dev/null || echo null)" \
+  # endpoint — к какому серверу подключён клиент: primary или backup (запасной задан и связи с основным нет)
+  local ep; ep="$(cat "$STATE/endpoint" 2>/dev/null)"; [ -f "$RENDER/client-backup.toml" ] || ep=""; [ -n "$ep" ] || ep=primary
+  printf '{"at":%s,"release":"%s","protection":"%s","endpoint":"%s","engines":{%s},"last_apply":%s,"render":%s,"apply":%s}\n' "$(date +%s)" "$(basename "$(cat "$RUN/.release" 2>/dev/null)")" \
+    "$(cat "$STATE/protection" 2>/dev/null || echo none)" "$ep" "${e%,}" "$(cat "$STATE/last-apply.json" 2>/dev/null || echo null)" \
     "$(cat "$STATE/last-render.json" 2>/dev/null || echo null)" "$(cat "$STATE/full-apply.json" 2>/dev/null || echo null)" >"$STATE/status.json.t" && mv -f "$STATE/status.json.t" "$STATE/status.json"
 }
 

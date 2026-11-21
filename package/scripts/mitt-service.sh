@@ -30,7 +30,7 @@ engines_start() {
   fi
   if [ -f "$RENDER/client.toml" ]; then
     touch "$STATE/trusttunnel.wanted"
-    pid_alive trusttunnel || start_bg trusttunnel ${MITT_TT_WRAP:-} "$BIN/trusttunnel_client" -c "$RENDER/client.toml"
+    pid_alive trusttunnel || start_bg trusttunnel ${MITT_TT_WRAP:-} "$BIN/trusttunnel_client" -c "$(tt_config)"
     # TUN должен быть поднят и с адресом до apply: маршрут таблицы 3100 ссылается на него
     local i=0; while [ $i -lt 75 ] && ! tun_ready; do nap; i=$((i + 1)); done
   fi
@@ -127,6 +127,8 @@ while [ -f "$STATE/service.wanted" ]; do
   pid_alive trusttunnel && server_addr_learn
   # сторож: «подключён», но трафик не идёт — перезапуск клиента (движок перезапустит цикл ниже на следующем проходе)
   [ -f "$STATE/trusttunnel.wanted" ] && pid_alive trusttunnel && tunnel_watch
+  # запасной сервер: переключение при долгом отсутствии связи и возврат, когда основной снова отвечает
+  [ -f "$STATE/trusttunnel.wanted" ] && pid_alive trusttunnel && failover_check
   # полное применение не прошло (туннель не успел подняться) и действует только защита: повтор, когда mitt0 готов,
   # не чаще раза в минуту
   if [ "$(cat "$STATE/protection" 2>/dev/null)" = guard ] && [ -f "$STATE/trusttunnel.wanted" ] && tun_ready; then

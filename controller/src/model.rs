@@ -315,6 +315,10 @@ pub struct Profile {
     /// Точка подключения. Пароль хранится отдельно (secrets.json) и в API не попадает.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<Endpoint>,
+    /// Запасной сервер: служба переключается на него, если основной не подключается, и возвращается, когда основной
+    /// снова отвечает. Пароль — `backup_password` в secrets.json.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup: Option<Endpoint>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

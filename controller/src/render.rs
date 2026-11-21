@@ -39,6 +39,9 @@ pub struct ProfileSecret {
     /// пароль. Секрет — в ней логин и пароль.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subscription_url: Option<String>,
+    /// Пароль запасного сервера (`backup` профиля).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup_password: Option<String>,
 }
 
 /// Пароль задан и пригоден для client.toml.
@@ -63,9 +66,15 @@ pub fn check_subscription_url(u: &str) -> Result<(), &'static str> {
 /// Запись секретов из панели поверх прежних: незаданное поле не меняется, пустая ссылка-подписка — удалить её.
 /// Итог должен содержать пароль или подписку (пароль придёт из неё).
 pub fn merge_secret(old: Option<ProfileSecret>, new: ProfileSecret) -> Result<ProfileSecret, &'static str> {
-    let old = old.unwrap_or(ProfileSecret { password: None, subscription_url: None });
+    let old = old.unwrap_or(ProfileSecret { password: None, subscription_url: None, backup_password: None });
     let s = ProfileSecret {
         password: new.password.or(old.password),
+        // пустой пароль запасного сервера — удалить его (сервер убран)
+        backup_password: match new.backup_password {
+            Some(p) if p.is_empty() => None,
+            Some(p) => Some(p),
+            None => old.backup_password,
+        },
         subscription_url: match new.subscription_url {
             Some(u) if u.is_empty() => None,
             Some(u) => Some(u),
@@ -77,6 +86,9 @@ pub fn merge_secret(old: Option<ProfileSecret>, new: ProfileSecret) -> Result<Pr
     }
     if let Some(u) = &s.subscription_url {
         check_subscription_url(u)?;
+    }
+    if let Some(p) = &s.backup_password {
+        check_secret(&ProfileSecret { password: Some(p.clone()), subscription_url: None, backup_password: None })?;
     }
     if s.password.is_none() && s.subscription_url.is_none() {
         return Err("нужен пароль или ссылка-подписка");
@@ -100,6 +112,12 @@ pub struct Rendered {
     /// Конфигурация клиента TrustTunnel (с паролем); None — туннель не нужен.
     #[serde(skip)]
     pub client_toml: Option<String>,
+    /// Конфигурация для запасного сервера (если он задан и у него есть пароль) и адрес основного «host port» для
+    /// проверки, ответил ли он снова (служба: переключение и возврат).
+    #[serde(skip)]
+    pub client_backup_toml: Option<String>,
+    #[serde(skip)]
+    pub primary_addr: Option<String>,
     #[serde(skip)]
     pub dns: DnsPlan,
     pub warnings: Vec<String>,
@@ -459,6 +477,12 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
             .and_then(|f| std::fs::read_to_string(f).ok()).map(|t| fallback_addrs(&e.server, &t)).unwrap_or_default();
         client_toml_with(e, secrets.profiles[p.id.as_str()].password.as_deref().unwrap_or_default(), &fallback)
     });
+    let client_backup = tunnel_profile.and_then(|p| {
+        let b = p.backup.as_ref()?;
+        let pw = secrets.profiles.get(p.id.as_str())?.backup_password.as_deref()?;
+        Some(client_toml(b, pw))
+    });
+    let primary_addr = client_backup.as_ref().and(tunnel_profile).and_then(|p| p.endpoint.as_ref()).map(|e| format!("{} {}\n", e.server, e.port));
     if let Some(p) = tunnel_profile {
         if !plain_text(&p.endpoint.as_ref().expect("проверено").username) {
             return Err(vec![Issue::new("profiles", "bad_username", "имя пользователя содержит недопустимые символы")]);
@@ -490,6 +514,8 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
         plan,
         routes,
         client_toml: client,
+        client_backup_toml: client_backup,
+        primary_addr,
         dns,
         warnings,
     })

@@ -124,6 +124,33 @@ fn single_profile_limit() {
 }
 
 #[test]
+fn render_writes_backup_client_toml_with_its_password() {
+    let mut c = lab();
+    c["profiles"][0]["backup"] = json!({ "server": "backup.example.com", "port": 8443, "username": "tv-backup", "quic": true, "anti_dpi": false });
+    let pw = format!("main-{}", rand_hex(8));
+    let bpw = format!("backup-{}", rand_hex(8));
+    // без пароля запасного сервера — только основной
+    let (code, v, out) = render(&c, &secrets(&pw));
+    assert_eq!(code, 0, "{v}");
+    assert!(out.join("client.toml").exists() && !out.join("client-backup.toml").exists() && !out.join("primary.addr").exists());
+    let mut s = secrets(&pw);
+    s["profiles"]["tt-lab"]["backup_password"] = json!(bpw);
+    let (code, v, out) = render(&c, &s);
+    assert_eq!(code, 0, "{v}");
+    let b = std::fs::read_to_string(out.join("client-backup.toml")).unwrap();
+    assert!(b.contains("addresses = [\"backup.example.com:8443\"]\n") && b.contains(&format!("password = \"{bpw}\"\n")) && b.contains("upstream_protocol = \"http3\""), "{b}");
+    assert!(std::fs::read_to_string(out.join("client.toml")).unwrap().contains(&format!("password = \"{pw}\"\n")));
+    assert_eq!(std::fs::read_to_string(out.join("primary.addr")).unwrap(), "10.30.0.2 443\n");
+    // запасной без основного — ошибка проверки
+    let mut nb = with_endpoint(json!({ "server": "10.0.0.1", "port": 443, "username": "u" }));
+    nb["profiles"][0].as_object_mut().unwrap().remove("endpoint");
+    nb["profiles"][0]["backup"] = json!({ "server": "10.0.0.2", "port": 443, "username": "u" });
+    let (code, v) = validate(&nb);
+    assert_ne!(code, 0, "{v}");
+    assert!(codes(&v).iter().any(|c| c.ends_with(":backup_without_primary")), "{v}");
+}
+
+#[test]
 fn render_writes_client_toml_and_removes_it_without_tunnel_rules() {
     let pw = format!("p\"a\\ss-{}", rand_hex(12));
     let (code, v, out) = render(&lab(), &secrets(&pw));

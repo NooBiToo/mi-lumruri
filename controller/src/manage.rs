@@ -379,7 +379,7 @@ pub fn subscription_import(config_path: &str, profile_id: &str, json_path: &str)
         Ok(x) => x,
         Err(m) => return Response::error(422, "subscription_invalid", m),
     };
-    if let Err(m) = crate::render::check_secret(&ProfileSecret { password: Some(imp.password.clone()), subscription_url: None }) {
+    if let Err(m) = crate::render::check_secret(&ProfileSecret { password: Some(imp.password.clone()), subscription_url: None, backup_password: None }) {
         return Response::error(422, "subscription_invalid", format!("пароль из подписки: {m}"));
     }
     let sp = secrets_path(config_path);
@@ -407,7 +407,7 @@ pub fn subscription_import(config_path: &str, profile_id: &str, json_path: &str)
         }
     }
     if pw_changed {
-        let e = s.profiles.entry(profile_id.to_string()).or_insert(ProfileSecret { password: None, subscription_url: None });
+        let e = s.profiles.entry(profile_id.to_string()).or_insert(ProfileSecret { password: None, subscription_url: None, backup_password: None });
         e.password = Some(imp.password);
         let mut out = serde_json::to_vec_pretty(&s).unwrap_or_default();
         out.push(b'\n');

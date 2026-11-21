@@ -207,6 +207,9 @@ fn render_cmd(cfg: &str, secrets: &str, out: &str) -> Response {
                 .and_then(|_| store::write_atomic(&dir.join("policy.json"), &policy))
                 .and_then(|_| store::write_atomic(&dir.join("routes.json"), &routes))
                 .and_then(|_| opt("client.toml", r.client_toml.clone(), true))
+                // запасной сервер: его client.toml и адрес основного для проверки возврата (служба, mitt-lib.sh)
+                .and_then(|_| opt("client-backup.toml", r.client_backup_toml.clone(), true))
+                .and_then(|_| opt("primary.addr", r.primary_addr.clone(), false))
                 .and_then(|_| write_dns_file(&config, &r.dns, cfg_path, dir, tunnel_dns_args(&config, &r).is_some()))
                 // параметры mi-tt-dns по одному в строке; нет файла — защищённый DNS выключен
                 .and_then(|_| opt("dns-proxy.args", config.dns.as_ref().and_then(|d| d.secure.as_ref()).and_then(|s| s.proxy_args())
