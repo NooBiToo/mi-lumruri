@@ -33,7 +33,7 @@ case "${1:-auto}" in
       pid_alive zapret-test && mlog "подбор Zapret не остановился по флагу — сигнал"
     fi
     # mihomo и dnscrypt — движки версий до 0.2: при обновлении их останавливает уже новый загрузчик
-    for n in service trusttunnel nfqws2 dnsproxy dnstunnel mihomo dnscrypt nginx uhttpd zapret-test zapret-nfqws lists-update adblock-update diag update sub; do rm -f "$STATE/$n.wanted"; pid_stop "$n"; done
+    for n in service trusttunnel nfqws2 dnsproxy dnstunnel mihomo dnscrypt nginx uhttpd zapret-test zapret-nfqws lists-update adblock-update diag update sub notify; do rm -f "$STATE/$n.wanted"; pid_stop "$n"; done
     [ -x "$BIN/mi-tt-ctl" ] && zt_recover
     [ -x "$BIN/mi-tt-admin" ] && adm revert --state-dir "$RUN/admin" >"$STATE/revert.json" 2>&1
     # без своего файла dnsmasq перестаёт заносить адреса в снятые наборы и спрашивать резолвер туннеля
@@ -56,4 +56,6 @@ touch "$STATE/service.wanted"
 start_bg service sh "$SCR/mitt-service.sh"
 status_write
 mlog "холодный старт выполнен; служба запущена"
+# уведомление «роутер загрузился» — только при загрузке (вызов fw3 без аргументов), не при ручном start
+[ "${1:-auto}" = auto ] && notify boot boot
 exit 0

@@ -21,7 +21,7 @@ pub const MAX_LIST_BODY: usize = 8 * 1024 * 1024;
 
 pub const PATHS: &[&str] = &["/rules/delete", "/rules/move", "/profiles", "/profiles/delete", "/groups", "/groups/delete", "/categories",
     "/categories/delete", "/networks", "/networks/delete", "/devices", "/devices/delete", "/leases", "/dns", "/zapret", "/adblock/list",
-    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update", "/router", "/diag", "/service/restart", "/update", "/subscription", "/subscription/update", "/backup/export", "/backup/restore"];
+    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update", "/router", "/diag", "/service/restart", "/update", "/subscription", "/subscription/update", "/backup/export", "/backup/restore", "/notify", "/notify/test"];
 
 pub fn is_manage_path(path: &str) -> bool {
     PATHS.contains(&path.trim_end_matches('/'))
@@ -277,7 +277,7 @@ pub(crate) fn read_config(config_path: &str) -> Result<Config, Response> {
 
 fn load_secrets(p: &Path) -> Result<Secrets, Response> {
     if !p.exists() {
-        return Ok(Secrets { version: 1, profiles: BTreeMap::new() });
+        return Ok(Secrets { version: 1, profiles: BTreeMap::new(), notify: None });
     }
     let b = read_limited(&p.to_string_lossy(), 256 * 1024).map_err(|m| Response::error(500, "unreadable", m))?;
     parse_json(&b, "secrets").map_err(|_| Response::error(409, "secrets_invalid", "secrets.json не разобран; исправьте его на роутере"))
@@ -674,6 +674,9 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
             Err(i) => bad(i),
         },
         ("POST", "/backup/export") => crate::backup::export(b, config_path),
+        ("GET", "/notify") => crate::notify::get(config_path),
+        ("POST", "/notify") => crate::notify::set(b, config_path),
+        ("POST", "/notify/test") => crate::notify::test(config_path),
         ("POST", "/backup/restore") => crate::backup::restore(b, config_path),
         ("POST", "/apply-request") => match queue_apply(config_path) {
             Ok(rev) => Response { status: 202, body: json!({ "ok": true, "queued": true, "config_revision": rev, "issues": [] }) },

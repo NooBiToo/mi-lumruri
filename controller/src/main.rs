@@ -85,6 +85,11 @@ pub fn main() -> ExitCode {
             None => usage(),
         },
         ["cgi"] => cgi(),
+        // параметры уведомлений для mitt-notify.sh; код 1 — не настроены
+        ["notify-conf", secrets] => match read_limited(secrets, 256 * 1024).ok().and_then(|b| serde_json::from_slice::<render::Secrets>(&b).ok()).and_then(|s| mi_tt::notify::conf_lines(&s)) {
+            Some(l) => { print!("{l}"); ExitCode::SUCCESS }
+            None => ExitCode::from(1),
+        },
         _ => usage(),
     }
 }

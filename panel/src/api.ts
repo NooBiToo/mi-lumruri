@@ -261,6 +261,12 @@ export interface BackupRestoreResponse {
   ok: boolean; revision?: string; restored?: { config: boolean; lists: number; secrets: boolean; auth: boolean }
   secrets_skipped?: boolean; warnings?: string[]; issues: Issue[]; error?: ApiError
 }
+/** Уведомления в Telegram (controller/src/notify.rs): токен API не отдаёт; last — итог последней отправки службой. */
+export interface NotifyResponse {
+  ok: boolean; configured: boolean; chat_id: string | null; events: string[]; lang: string | null
+  last: { ok: boolean; at: number; sent: number; via: string; error: string | null } | null; test_pending?: boolean; issues: Issue[]; error?: ApiError
+}
+export interface NotifySet { telegram_token?: string; chat_id?: string; events?: string[]; lang?: string; disable?: boolean }
 export interface UpdateResponse { ok: boolean; running?: boolean; update?: UpdateState | null; queued?: boolean; issues: Issue[]; error?: ApiError }
 
 /** Итог обновления по подписке TrustTunnel (mitt-sub.sh); время — unix-секунды; updated — когда параметры менялись. */
@@ -276,6 +282,9 @@ export const manage = {
   // секрет только записывается: панель не получает его обратно
   setSecret: (profile_id: string, secret: ProfileSecret) => call<ManageResponse>('/secrets', json({ profile_id, secret })),
   applyRequest: () => call<ManageResponse>('/apply-request', json({})),
+  notifyState: () => call<NotifyResponse>('/notify'),
+  setNotify: (b: NotifySet) => call<ManageResponse>('/notify', json(b)),
+  testNotify: () => call<ManageResponse>('/notify/test', json({})),
   exportBackup: (secrets: boolean, passphrase?: string) => call<BackupExportResponse>('/backup/export', json({ secrets, passphrase })),
   restoreBackup: (base_revision: string, backup: BackupFile, passphrase?: string, skip_secrets = false) =>
     call<BackupRestoreResponse>('/backup/restore', json({ base_revision, backup, passphrase, skip_secrets })),

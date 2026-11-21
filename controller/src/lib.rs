@@ -9,6 +9,7 @@ pub mod dns;
 pub mod gate;
 pub mod manage;
 pub mod model;
+pub mod notify;
 pub mod plan;
 pub mod preview;
 pub mod release;

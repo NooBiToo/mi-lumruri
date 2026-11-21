@@ -27,6 +27,9 @@ pub struct Secrets {
     pub version: u32,
     #[serde(default)]
     pub profiles: BTreeMap<String, ProfileSecret>,
+    /// Уведомления в Telegram (токен бота, чат, события) — см. `notify`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notify: Option<crate::notify::NotifySecret>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

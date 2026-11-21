@@ -180,7 +180,7 @@ tunnel_watch() {
   [ "$fails" -ge "${MITT_WATCH_FAILS:-3}" ] || return 0
   [ $((now - last)) -ge "${MITT_WATCH_GAP:-300}" ] || return 0
   mlog "сторож: клиент «подключён», но трафик через туннель не идёт ($fails проверки подряд) — перезапуск клиента"
-  echo "$now" >"$STATE/watch-restart"; echo 0 >"$STATE/watch-fails"
+  echo "$now" >"$STATE/watch-restart"; echo 0 >"$STATE/watch-fails"; notify tunnel watch_restart
   printf '{"ok":false,"checked":%s,"fails":%s,"restarted":%s}\n' "$now" "$fails" "$now" >"$STATE/watch.json"
   pid_stop trusttunnel
 }
@@ -211,6 +211,7 @@ failover_check() {
       [ "$cur" = primary ] && next=backup || next=primary
       echo "$next" >"$STATE/endpoint"; rm -f "$STATE/tt-down-since" "$STATE/failback-ok"
       mlog "сервер: нет связи $((now - since)) с — переключение на $( [ "$next" = backup ] && echo запасной || echo основной)"
+      notify failover "failover_$next"
       pid_stop trusttunnel; return 0
     fi
   fi
@@ -221,7 +222,7 @@ failover_check() {
     ok=$(( $(cat "$STATE/failback-ok" 2>/dev/null || echo 0) + 1 )); echo "$ok" >"$STATE/failback-ok"
     if [ "$ok" -ge 2 ]; then
       echo primary >"$STATE/endpoint"; rm -f "$STATE/failback-ok"
-      mlog "сервер: основной снова отвечает — возврат на основной"; pid_stop trusttunnel
+      mlog "сервер: основной снова отвечает — возврат на основной"; notify failover failover_primary; pid_stop trusttunnel
     fi
   else
     echo 0 >"$STATE/failback-ok"
@@ -273,6 +274,39 @@ EOF
   pid_alive uhttpd || start_bg uhttpd ${MITT_UHTTPD:-uhttpd} -f -p "127.0.0.1:$CGI_PORT" -h "$RUN/cgi" -x /cgi-bin -t 30 -T 30
   pid_alive nginx || start_bg nginx ${MITT_NGINX:-nginx} -c "$RUN/nginx.conf" -g "daemon off; pid $STATE/nginx.master.pid;"
   mlog "панель: https порт $PANEL_PORT (nginx), CGI на 127.0.0.1:$CGI_PORT (uhttpd)"
+}
+
+# --- уведомления в Telegram (mitt-notify.sh) ---
+# notify <событие> <ключ сообщения> [параметр]: в очередь; mitt-notify.sh отправит, если событие выбрано в панели
+notify() {
+  mkdir -p "$STATE" 2>/dev/null
+  printf '%s\t%s\t%s\t%s\n' "$1" "$(date +%s)" "$2" "$(printf '%s' "${3:-}" | tr '\t\n' '  ' | cut -c1-300)" >>"$STATE/notify.queue"
+  tail -n 50 "$STATE/notify.queue" >"$STATE/notify.queue.t" && mv -f "$STATE/notify.queue.t" "$STATE/notify.queue"
+}
+# проход службы: пробное сообщение по заявке панели; очередь не пуста — отправка в фоне (одна одновременно)
+notify_flush() {
+  [ -f "$STATE/notify-test.request" ] && { rm -f "$STATE/notify-test.request"; notify test test; }
+  { [ -s "$STATE/notify.queue" ] || [ -s "$STATE/notify.queue.sending" ]; } || return 0
+  pid_alive notify && return 0
+  # после неудачи — не чаще раза в MITT_NOTIFY_RETRY (2 мин)
+  local now last; now=$(date +%s); last="$(sed -n 's/.*"ok":false,"at":\([0-9]*\).*/\1/p' "$STATE/notify.json" 2>/dev/null)"
+  [ -z "$last" ] || [ $((now - last)) -ge "${MITT_NOTIFY_RETRY:-120}" ] || [ "$now" -lt "$last" ] || return 0
+  start_bg notify sh "$SCR/mitt-notify.sh"
+}
+# туннель упал (клиент не подключён дольше MITT_NOTIFY_DOWN_AFTER, 3 мин) и поднялся снова — по одному сообщению
+tunnel_track() {
+  [ -f "$STATE/trusttunnel.wanted" ] || { rm -f "$STATE/tun-notified" "$STATE/tun-bad-since"; return 0; }
+  local st now since
+  st="$(tail -n 200 "$LOG/trusttunnel.log" 2>/dev/null | grep -o 'VPN_SS_[A-Z_]*' | tail -n 1)"; now=$(date +%s)
+  if pid_alive trusttunnel && [ "$st" = VPN_SS_CONNECTED ] && tun_ready; then
+    rm -f "$STATE/tun-bad-since"
+    [ "$(cat "$STATE/tun-notified" 2>/dev/null)" = down ] && { notify tunnel tunnel_up; echo up >"$STATE/tun-notified"; }
+    return 0
+  fi
+  since="$(cat "$STATE/tun-bad-since" 2>/dev/null)"; [ -n "$since" ] || { echo "$now" >"$STATE/tun-bad-since"; return 0; }
+  if [ $((now - since)) -ge "${MITT_NOTIFY_DOWN_AFTER:-180}" ] && [ "$(cat "$STATE/tun-notified" 2>/dev/null)" != down ]; then
+    notify tunnel tunnel_down "$((now - since))"; echo down >"$STATE/tun-notified"
+  fi
 }
 
 # --- автозапуск и прошивка ---

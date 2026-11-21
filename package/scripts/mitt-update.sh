@@ -114,12 +114,12 @@ case "$action" in
       installed="$(cat "$DATA/current.ver" 2>/dev/null)"; put verifying
       n=0; ok=""
       while [ "$n" -lt "$HEALTH_WAIT" ]; do health "$t0" "$need" && { ok=1; break; }; sleep 5; n=$((n + 5)); done
-      if [ -n "$ok" ]; then put done; mlog "обновление: $installed работает"
+      if [ -n "$ok" ]; then put done; mlog "обновление: $installed работает"; notify update update_done "$installed"
       else
         failed_ver="$installed"; why="$WHY"
         mlog "обновление: $installed не заработал за $HEALTH_WAIT с ($why) — откат на $prev"
         if [ -n "$prev" ] && sh "$pd/install.sh" rollback >>"$LOG/update-install.log" 2>&1; then
-          rolled=true; installed="$(cat "$DATA/current.ver" 2>/dev/null)"; put error "$why"
+          rolled=true; installed="$(cat "$DATA/current.ver" 2>/dev/null)"; put error "$why"; notify update update_rolled "$failed_ver → $installed ($why)"
         else
           put error "$why; откат не удался — подробности в журнале обновления"
         fi
