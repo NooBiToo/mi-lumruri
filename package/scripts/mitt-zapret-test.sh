@@ -93,7 +93,8 @@ try() { # try <id> <all|yt>
   local args
   RES=""
   args="$(ctl zapret-args "$1")" || { mlog "подбор Zapret: нет аргументов для $1"; return 0; }
-  # shellcheck disable=SC2086 — аргументы по одному в строке, без пробелов (каталог стратегий)
+  # аргументы по одному в строке, без пробелов (каталог стратегий)
+  # shellcheck disable=SC2086
   zapret_readable
   start_bg zapret-nfqws ${MITT_NFQWS_WRAP:-} "$NFQ" $args
   sleep "$SETTLE"

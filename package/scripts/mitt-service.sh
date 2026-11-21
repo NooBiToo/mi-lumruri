@@ -17,7 +17,8 @@ engines_start() {
   # отправляет вопросы в этот прокси; запущенный после клиента, он оставлял того без адреса сервера
   if [ -f "$RENDER/dns-proxy.args" ]; then
     touch "$STATE/dnsproxy.wanted"
-    # shellcheck disable=SC2046 — аргументы по одному в строке, без пробелов (формирует рендер)
+    # аргументы по одному в строке, без пробелов (формирует рендер)
+    # shellcheck disable=SC2046
     pid_alive dnsproxy || start_bg dnsproxy "$BIN/mi-tt-dns" $(cat "$RENDER/dns-proxy.args") --fallback "$(resolv_file)" --status "$STATE/dns-proxy.json"
     local j=0; while [ $j -lt 10 ] && ! "$BIN/mi-tt-dns" --probe 127.0.0.1:5453 example.com >/dev/null 2>&1; do nap; j=$((j + 1)); done
   fi
@@ -35,7 +36,8 @@ engines_start() {
   fi
   if [ -f "$RENDER/nfqws2.args" ]; then
     touch "$STATE/nfqws2.wanted"
-    # shellcheck disable=SC2046 — аргументы по одному в строке, без пробелов (формирует рендер)
+    # аргументы по одному в строке, без пробелов (формирует рендер)
+    # shellcheck disable=SC2046
     pid_alive nfqws2 || { zapret_readable; start_bg nfqws2 ${MITT_NFQWS_WRAP:-} "$BIN/nfqws2" $(cat "$RENDER/nfqws2.args"); }
   fi
   return 0
