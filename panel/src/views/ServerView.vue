@@ -15,6 +15,7 @@ import { config, hasPassword, hasSubscription, loadSecrets, notify, profile, sav
 import { when } from '../status'
 import { t } from '../i18n'
 import Segmented from '../components/Segmented.vue'
+import BackupServer from '../components/BackupServer.vue'
 
 const emit = defineEmits<{ navigate: [tab: 'sites'] }>()
 
@@ -210,6 +211,7 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
           <div :class="['pill', `pill--${tunnel.tone}`, 'pill--lg']"><span class="pill__dot" aria-hidden="true" /><span class="pill__text">{{ tunnel.title }}</span></div>
           <p v-if="tunnel.detail" class="hint">{{ tunnel.detail }}</p>
         </div>
+        <BackupServer v-if="!firstTime" />
       </div>
 
       <form class="card" @submit.prevent="submit">

@@ -637,7 +637,8 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
             // пароль задан; отдельно — есть ли ссылка-подписка (значения не возвращаются)
             let m: serde_json::Map<String, Value> = cfg.profiles.iter().map(|pr| (pr.id.clone(), json!(s.profiles.get(&pr.id).is_some_and(|x| x.password.is_some())))).collect();
             let sub: serde_json::Map<String, Value> = cfg.profiles.iter().map(|pr| (pr.id.clone(), json!(s.profiles.get(&pr.id).is_some_and(|x| x.subscription_url.is_some())))).collect();
-            Response { status: 200, body: json!({ "ok": true, "profiles": m, "subscriptions": sub, "issues": [] }) }
+            let backup: serde_json::Map<String, Value> = cfg.profiles.iter().map(|pr| (pr.id.clone(), json!(s.profiles.get(&pr.id).is_some_and(|x| x.backup_password.is_some())))).collect();
+            Response { status: 200, body: json!({ "ok": true, "profiles": m, "subscriptions": sub, "backups": backup, "issues": [] }) }
         }
         ("POST", "/secrets") => match parse_json::<SecretUpload>(b, "") {
             Ok(q) => {

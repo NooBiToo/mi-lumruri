@@ -45,7 +45,8 @@ describe('i18n', () => {
     const ph = (s: string) => [...s.matchAll(/\{(\w+)\}/g)].map((x) => x[1]).sort().join(',')
     for (const l of ['en', 'zh'] as const) {
       const d = DICT[l]
-      expect([...tk, ...pk].filter((k) => !(k in d)), `нет перевода (${l})`).toEqual([])
+      // список строкой — в отчёте видны все строки без перевода
+      expect([...tk, ...pk].filter((k) => !(k in d)).join(' | '), `нет перевода (${l})`).toBe('')
       expect([...tk].filter((k) => k in d && ph(k) !== ph(d[k]!)), `подстановки не совпадают (${l})`).toEqual([])
     }
   })

@@ -151,4 +151,7 @@ export default {
   'Пока пусто. Добавьте домен своего сервера и его адрес в домашней сети.': 'Empty for now. Add your server’s domain and its address on the home network.',
   'запись|записи|записей': 'record|records',
   'Свои DNS-записи': 'Custom DNS records',
+  'Весь интернет через VPN: {name}': 'Whole internet via VPN: {name}',
+  'Весь интернет': 'Whole internet',
+  '«Весь интернет» — у этого устройства через VPN идут все сайты, а не только выбранные. Исключения и сайты с обходом блокировок действуют и для него.': '“Whole internet” sends all sites from this device through the VPN, not only the selected ones. Exceptions and DPI-bypass sites still apply to it.',
 }

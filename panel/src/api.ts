@@ -25,7 +25,8 @@ export interface Endpoint {
   client_random_auth_key?: string
 }
 export type TlsProfile = 'chrome' | 'chrome_canary' | 'safari' | 'firefox' | 'okhttp' | 'openssl' | 'boringssl'
-export interface Profile { id: string; name: string; kind: ProfileKind; on_failure: 'block' | 'direct'; endpoint?: Endpoint }
+/** Профиль TrustTunnel; backup — запасной сервер (пароль — backup_password в секретах). */
+export interface Profile { id: string; name: string; kind: ProfileKind; on_failure: 'block' | 'direct'; endpoint?: Endpoint; backup?: Endpoint }
 export interface Network { id: string; name: string; ssid: string; segment?: string; subnet?: string; bridge?: string; ports?: string[] }
 export interface Device { id: string; name: string; mac: string; network: string }
 
@@ -64,7 +65,7 @@ export interface DnsConfig {
 /** Выбор стратегий Zapret (controller/src/model.rs): `auto` — круговой режим, иначе id стратегии каталога. */
 export interface ZapretConfig { strategy: string; youtube: string }
 /** Секреты профиля: поля без значения не меняются; пустая ссылка-подписка — удалить её. */
-export interface ProfileSecret { password?: string; subscription_url?: string }
+export interface ProfileSecret { password?: string; subscription_url?: string; backup_password?: string }
 
 export interface Group { id: string; name: string; destinations: Destination[] }
 
@@ -86,6 +87,8 @@ export interface Config {
   /** Как часто служба сама обновляет списки сайтов и перепроверяет способ Zapret. */
   schedule?: ScheduleConfig
   zapret?: ZapretConfig
+  /** IPv6 через VPN для источников «весь интернет через VPN». */
+  ipv6_via_vpn?: boolean
 }
 
 export interface Issue { path: string; code: string; message: string }
@@ -178,6 +181,8 @@ export interface ManageResponse {
   profiles?: Record<string, boolean>
   /** Есть ли у профиля ссылка-подписка (значение панель не получает). */
   subscriptions?: Record<string, boolean>
+  /** Сохранён ли пароль запасного сервера. */
+  backups?: Record<string, boolean>
   domains?: number
   entries?: number
   queued?: boolean

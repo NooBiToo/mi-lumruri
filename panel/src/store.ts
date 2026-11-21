@@ -24,6 +24,8 @@ export const service = ref<ManageResponse | null>(null)
 export const hasPassword = ref(false)
 /** У профиля сохранена ссылка-подписка TrustTunnel (значение панель не получает). */
 export const hasSubscription = ref(false)
+/** Сохранён пароль запасного сервера. */
+export const hasBackupPassword = ref(false)
 /** Куда прокрутить экран, который сейчас откроется (id блока), например `zapret` на «Сайтах». */
 export const scrollTarget = ref<string | null>(null)
 
@@ -53,6 +55,7 @@ export function reset() {
   service.value = null
   hasPassword.value = false
   hasSubscription.value = false
+  hasBackupPassword.value = false
 }
 
 /** Первые замечания одной строкой для пользователя. */
@@ -106,6 +109,7 @@ export async function loadSecrets() {
   const id = profile.value?.id
   hasPassword.value = !!(id && r.body.profiles?.[id])
   hasSubscription.value = !!(id && r.body.subscriptions?.[id])
+  hasBackupPassword.value = !!(id && r.body.backups?.[id])
 }
 
 export async function loadAll(): Promise<void> {
