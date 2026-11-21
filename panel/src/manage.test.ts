@@ -47,6 +47,13 @@ describe('профиль TrustTunnel', () => {
   it('секрет — только пароль; пустое поле — пароль не меняется', () => {
     expect(formToSecret({ ...emptyProfileForm(), password: ' p@ss ' })).toEqual({ password: ' p@ss ' }) // secret-scan: allow значение формы в тесте
     expect(formToSecret(emptyProfileForm())).toBeNull()
+    expect(formToSecret({ ...emptyProfileForm(), subscriptionUrl: ' https://u:p@vpn.example.com/sub ' })).toEqual({ subscription_url: 'https://u:p@vpn.example.com/sub' })
+  })
+  it('только подписка: профиль без точки подключения; с адресом — обычный профиль', () => {
+    const f = { ...emptyProfileForm(), id: 'tt', name: 'TT' }
+    expect(formToProfile(f, true)).toEqual({ id: 'tt', name: 'TT', kind: 'trusttunnel', on_failure: 'block' })
+    expect(typeof formToProfile({ ...f, server: '203.0.113.10', username: 'alice' }, true)).toBe('object')
+    expect(formToProfile({ ...f, server: '203.0.113.10', username: 'alice' }, true)).toHaveProperty('endpoint')
   })
 })
 

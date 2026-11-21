@@ -103,7 +103,13 @@ while [ -f "$STATE/service.wanted" ]; do
     # идущая проверка: заявка остаётся до следующего прохода
     # кнопка «Обновить» обновляет и список рекламы: сброс его отсрочки
     pid_alive lists-update || { [ -f "$STATE/lists-update.request" ] && rm -f "$STATE/adblock-next"; rm -f "$STATE/lists-update.request"
-      start_bg lists-update sh "$SCR/mitt-lists.sh" update; mlog "проверка обновлений списков запущена"; }
+      start_bg lists-update sh "$SCR/mitt-lists.sh" update; mlog "проверка обновлений списков запущена"
+      # подписка TrustTunnel — по тому же расписанию (если ссылка задана; иначе сценарий сразу выходит)
+      pid_alive sub || start_bg sub sh "$SCR/mitt-sub.sh"; }
+  fi
+  # подписка по кнопке панели
+  if [ -f "$STATE/sub-update.request" ] && ! pid_alive sub; then
+    mv -f "$STATE/sub-update.request" "$STATE/sub-update.request.run"; start_bg sub sh "$SCR/mitt-sub.sh"
   fi
   # список рекламы: по расписанию списков сайтов, по кнопке «Обновить» и при смене ссылки — в фоне
   if ! pid_alive adblock-update && adblock_due; then

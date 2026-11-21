@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
@@ -8,10 +8,11 @@ import Textarea from 'primevue/textarea'
 import ToggleSwitch from 'primevue/toggleswitch'
 import { Check, ChevronDown, ClipboardPaste, Minus } from 'lucide-vue-next'
 import Select from 'primevue/select'
-import { manage, type Endpoint, type TlsProfile } from '../api'
+import { api, manage, type Endpoint, type SubscriptionResponse, type TlsProfile } from '../api'
 import { emptyProfileForm, formToProfile, formToSecret, profileToForm, type ProfileForm } from '../manage'
 import { parseServer, TLS_PROFILES } from '../serverConfig'
-import { config, hasPassword, loadSecrets, notify, profile, save, simple, tunnel } from '../store'
+import { config, hasPassword, hasSubscription, loadSecrets, notify, profile, save, simple, tunnel } from '../store'
+import { when } from '../status'
 import Segmented from '../components/Segmented.vue'
 
 const emit = defineEmits<{ navigate: [tab: 'sites'] }>()
@@ -54,6 +55,7 @@ function recognize() {
   f.clientRandom = e.client_random ?? ''
   f.clientRandomAuthKey = e.client_random_auth_key ?? ''
   if (r.password) f.password = r.password
+  if (r.subscription) f.subscriptionUrl = r.subscription
   if (r.name && !profile.value) f.name = r.name
   // необязательные параметры — только если они есть в ссылке
   const extra = [
@@ -68,6 +70,7 @@ function recognize() {
       { label: 'Пароль', value: r.password ? 'есть' : null },
       { label: 'Сертификат', value: e.certificate ? 'есть' : null },
       ...extra,
+      ...(r.subscription ? [{ label: 'Подписка', value: e.server ? 'есть' : 'есть — адрес и пароль роутер получит по ней' }] : []),
     ],
     warnings: r.warnings ?? [],
   }
@@ -79,16 +82,20 @@ async function onPaste() { await nextTick(); recognize() }
 const saving = ref(false)
 const error = ref<string | null>(null)
 const done = ref(false)
-const needPassword = computed(() => !hasPassword.value && !form.value.password)
+/** Подписка задана сейчас или уже сохранена: адрес, логин и пароль сервер может прислать сам. */
+const subscribed = computed(() => !!form.value.subscriptionUrl.trim() || hasSubscription.value)
+const subscriptionOnly = computed(() => subscribed.value && !form.value.server.trim() && !form.value.username.trim())
+const needPassword = computed(() => !hasPassword.value && !form.value.password && !subscribed.value)
 const blocker = computed(() => {
   const f = form.value
+  if (subscriptionOnly.value) return null
   if (!f.server.trim() || !f.username.trim()) return 'Укажите адрес сервера и логин — или вставьте ссылку.'
   if (needPassword.value) return 'Укажите пароль.'
   return null
 })
 async function submit() {
   if (blocker.value || !config.value) return
-  const p = formToProfile(form.value)
+  const p = formToProfile(form.value, subscriptionOnly.value)
   if (typeof p === 'string') { error.value = p; return }
   saving.value = true
   error.value = null
@@ -111,7 +118,10 @@ async function submit() {
       await manage.applyRequest()
       notify.show('success', 'Сохранено, применяю на роутере')
     }
+    // новая ссылка-подписка — сразу забрать параметры сервера
+    if (secret?.subscription_url) void refreshSubscription(true)
     form.value.password = ''
+    form.value.subscriptionUrl = ''
     pristine.value = JSON.stringify(form.value)
     pasted.value = ''
     done.value = true
@@ -120,6 +130,37 @@ async function submit() {
     saving.value = false
   }
 }
+// ---- подписка TrustTunnel ----
+const sub = ref<SubscriptionResponse | null>(null)
+let subTimer: number | undefined
+async function loadSubscription() {
+  clearTimeout(subTimer)
+  try { sub.value = (await api.subscription()).body } catch { /* панель недоступна */ }
+  if (sub.value?.running) subTimer = window.setTimeout(() => void loadSubscription(), 2000)
+}
+async function refreshSubscription(quiet = false) {
+  const r = await api.updateSubscription()
+  if (r.status !== 202) { notify.show('error', 'Не получилось', r.body.error?.message); return }
+  if (!quiet) notify.show('info', 'Обновляю параметры по подписке')
+  subTimer = window.setTimeout(() => void loadSubscription(), 1500)
+}
+async function dropSubscription() {
+  const id = profile.value?.id
+  if (!id) return
+  const r = await manage.setSecret(id, { subscription_url: '' })
+  if (r.status !== 200) { notify.show('error', 'Не получилось', r.body.error?.message); return }
+  notify.show('success', 'Подписка удалена')
+  await loadSecrets()
+}
+const subText = computed(() => {
+  const s = sub.value?.subscription
+  if (sub.value?.running) return 'Обновляю по подписке…'
+  if (!s) return 'Роутер ещё не обращался к подписке'
+  if (!s.ok) return `Не получилось ${when(s.checked)}: ${s.error ?? 'ошибка'}. Действуют прежние параметры`
+  return `Проверено ${when(s.checked)}${s.updated ? `, параметры менялись ${when(s.updated)}` : ', изменений нет'}`
+})
+onMounted(() => void loadSubscription())
+onBeforeUnmount(() => clearTimeout(subTimer))
 const nothingSelected = computed(() => !!simple.value && simple.value.mode === 'selected' && !simple.value.services.length && !simple.value.customDomains.length)
 </script>
 
@@ -238,6 +279,23 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
             </div>
           </div>
           <span class="field__hint">Нужны, только если сервер пускает подключения по client_random. Обычно приходят вместе со ссылкой; задаётся что-то одно — префикс или ключ.</span>
+          <div class="field">
+            <label for="srv-sub" class="field__label">Ссылка-подписка</label>
+            <Password v-model="form.subscriptionUrl" input-id="srv-sub" :feedback="false" toggle-mask fluid autocomplete="off"
+              :placeholder="hasSubscription ? 'Сохранена. Оставьте пустым' : 'https://…'" />
+            <span class="field__hint">Подписка TrustTunnel 1.3: по ней роутер сам забирает адрес, логин, пароль и сертификат сервера —
+              по расписанию списков сайтов и по кнопке. В ссылке есть логин и пароль, поэтому она хранится только на роутере</span>
+          </div>
+          <template v-if="hasSubscription">
+            <span :class="['adblock__state', { 'adblock__state--bad': sub?.subscription && !sub.subscription.ok }]" aria-live="polite">
+              <span :class="['led', sub?.subscription ? (sub.subscription.ok ? 'led--ok' : 'led--warn') : 'led--idle']" aria-hidden="true" />
+              <span class="meta">{{ subText }}</span>
+            </span>
+            <div class="sub__actions">
+              <Button label="Обновить по подписке" size="small" severity="secondary" variant="outlined" :loading="!!sub?.running" :disabled="!!sub?.running" @click="refreshSubscription()" />
+              <Button label="Удалить подписку" size="small" severity="secondary" variant="text" @click="dropSubscription" />
+            </div>
+          </template>
         </div>
 
         <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
@@ -249,3 +307,7 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
     </div>
   </section>
 </template>
+
+<style scoped>
+.sub__actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+</style>

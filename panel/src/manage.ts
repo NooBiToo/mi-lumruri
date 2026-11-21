@@ -16,14 +16,15 @@ export interface ProfileForm {
   tlsProfile: TlsProfile
   clientRandom: string
   clientRandomAuthKey: string
-  // пароль: только ввод, сохранённое значение панель не получает
+  // пароль и ссылка-подписка: только ввод, сохранённые значения панель не получает
   password: string
+  subscriptionUrl: string
 }
 
 export function emptyProfileForm(): ProfileForm {
   return {
     id: '', name: '', onFailure: 'block', server: '', port: '443', sni: '', username: '', quic: false, antiDpi: false, certificate: '',
-    tlsProfile: 'chrome', clientRandom: '', clientRandomAuthKey: '', password: '',
+    tlsProfile: 'chrome', clientRandom: '', clientRandomAuthKey: '', password: '', subscriptionUrl: '',
   }
 }
 
@@ -40,7 +41,9 @@ export function profileToForm(p: Profile): ProfileForm {
 }
 
 /** Профиль TrustTunnel из формы. Здесь только сборка JSON и проверка порта; адрес, SNI, имя и сертификат проверяет контроллер. */
-export function formToProfile(f: ProfileForm): Profile | string {
+export function formToProfile(f: ProfileForm, subscription = false): Profile | string {
+  // только подписка: адрес и логин сервер пришлёт сам — профиль без точки подключения
+  if (subscription && !f.server.trim() && !f.username.trim()) return { id: f.id.trim(), name: f.name.trim(), kind: 'trusttunnel', on_failure: f.onFailure }
   const port = Number(f.port.trim())
   if (!Number.isInteger(port) || port < 1 || port > 65535) return 'Порт — целое число от 1 до 65535.'
   const endpoint: Endpoint = { server: f.server.trim(), port, username: f.username.trim(), quic: f.quic, anti_dpi: f.antiDpi }
@@ -57,9 +60,12 @@ export function formToProfile(f: ProfileForm): Profile | string {
   return { id: f.id.trim(), name: f.name.trim(), kind: 'trusttunnel', on_failure: f.onFailure, endpoint }
 }
 
-/** Пароль для записи; пустое поле — пароль не меняется. Пробелы не обрезаются: они могут быть частью пароля. */
+/** Секреты для записи; пустое поле — значение не меняется. Пробелы в пароле не обрезаются: они могут быть его частью. */
 export function formToSecret(f: ProfileForm): ProfileSecret | null {
-  return f.password ? { password: f.password } : null
+  const s: ProfileSecret = {}
+  if (f.password) s.password = f.password
+  if (f.subscriptionUrl.trim()) s.subscription_url = f.subscriptionUrl.trim()
+  return Object.keys(s).length ? s : null
 }
 
 // ---- DNS ----

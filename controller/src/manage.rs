@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 use crate::api::{MAX_CONFIG_BYTES, Response, parse_json, read_limited};
 use crate::model::{Category, Config, Device, DnsConfig, Group, Network, Profile, ZapretConfig};
-use crate::render::{ProfileSecret, Secrets, check_secret, parse_category_list};
+use crate::render::{ProfileSecret, Secrets, merge_secret, parse_category_list};
 use crate::store::{self, SaveError, update_config};
 use crate::validate::{Issue, MAX_RULES, normalize_mac};
 
@@ -21,7 +21,7 @@ pub const MAX_LIST_BODY: usize = 8 * 1024 * 1024;
 
 pub const PATHS: &[&str] = &["/rules/delete", "/rules/move", "/profiles", "/profiles/delete", "/groups", "/groups/delete", "/categories",
     "/categories/delete", "/networks", "/networks/delete", "/devices", "/devices/delete", "/leases", "/dns", "/zapret", "/adblock/list",
-    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update", "/router", "/diag", "/service/restart", "/update"];
+    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update", "/router", "/diag", "/service/restart", "/update", "/subscription", "/subscription/update"];
 
 pub fn is_manage_path(path: &str) -> bool {
     PATHS.contains(&path.trim_end_matches('/'))
@@ -346,6 +346,86 @@ struct Replace {
 }
 
 /// `POST /config`: замена настроек целиком (полная проверка, атомарная запись) и сразу заявка на применение.
+/// Ссылка-подписка профиля (для mitt-sub.sh): только из secrets.json, наружу через API не отдаётся.
+pub fn subscription_url(config_path: &str, profile_id: &str) -> Option<String> {
+    let s = load_secrets(&secrets_path(config_path)).ok()?;
+    s.profiles.get(profile_id)?.subscription_url.clone()
+}
+
+/// Ответ подписки (JSON, скачанный службой) → точка подключения профиля и пароль. Ничего не изменилось — ничего не
+/// пишется; изменилось — пароль в secrets.json, точка подключения в настройках (с проверкой и ревизией) и заявка на
+/// применение.
+pub fn subscription_import(config_path: &str, profile_id: &str, json_path: &str) -> Response {
+    let body = match read_limited(json_path, 256 * 1024) {
+        Ok(b) => b,
+        Err(m) => return Response::error(500, "unreadable", m),
+    };
+    let j: crate::subscription::SubscriptionJson = match serde_json::from_slice(&body) {
+        Ok(j) => j,
+        Err(e) => return Response::error(422, "subscription_invalid", format!("ответ подписки не разобран: {e}")),
+    };
+    let raw = match read_limited(config_path, MAX_CONFIG_BYTES) {
+        Ok(b) => b,
+        Err(m) => return Response::error(500, "unreadable", m),
+    };
+    let cfg: Config = match parse_json(&raw, "config") {
+        Ok(c) => c,
+        Err(_) => return Response::error(409, "config_invalid", "настройки не разобраны"),
+    };
+    let Some(i) = cfg.profiles.iter().position(|p| p.id == profile_id) else {
+        return Response::error(404, "unknown_profile", format!("профиль «{profile_id}» не найден"));
+    };
+    let imp = match crate::subscription::apply(&j, cfg.profiles[i].endpoint.as_ref()) {
+        Ok(x) => x,
+        Err(m) => return Response::error(422, "subscription_invalid", m),
+    };
+    if let Err(m) = crate::render::check_secret(&ProfileSecret { password: Some(imp.password.clone()), subscription_url: None }) {
+        return Response::error(422, "subscription_invalid", format!("пароль из подписки: {m}"));
+    }
+    let sp = secrets_path(config_path);
+    let _g = match store::lock(&sp) {
+        Ok(g) => g,
+        Err(m) => return Response::error(503, "busy", m),
+    };
+    let mut s = match load_secrets(&sp) {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    let old_ep = serde_json::to_value(&cfg.profiles[i].endpoint).unwrap_or_default();
+    let ep_changed = old_ep != serde_json::to_value(Some(&imp.endpoint)).unwrap_or_default();
+    let pw_changed = s.profiles.get(profile_id).and_then(|x| x.password.as_deref()) != Some(imp.password.as_str());
+    if !ep_changed && !pw_changed {
+        return Response { status: 200, body: json!({ "ok": true, "changed": false, "warnings": imp.warnings, "issues": [] }) };
+    }
+    // новая точка подключения проверяется до записи пароля: при отказе не меняется ничего
+    let mut next = cfg.clone();
+    next.profiles[i].endpoint = Some(imp.endpoint);
+    if ep_changed {
+        let issues = crate::validate::validate_config(&next);
+        if !issues.is_empty() {
+            return Response { status: 422, body: json!({ "ok": false, "error": { "code": "subscription_invalid", "message": "параметры из подписки не прошли проверку; ничего не записано" }, "issues": issues }) };
+        }
+    }
+    if pw_changed {
+        let e = s.profiles.entry(profile_id.to_string()).or_insert(ProfileSecret { password: None, subscription_url: None });
+        e.password = Some(imp.password);
+        let mut out = serde_json::to_vec_pretty(&s).unwrap_or_default();
+        out.push(b'\n');
+        if let Err(m) = store::write_atomic(&sp, &out) {
+            return Response::error(500, "write_failed", m);
+        }
+    }
+    if ep_changed {
+        if let Err(e) = store::replace_config(Path::new(config_path), &store::revision(&raw), MAX_CONFIG_BYTES, &next) {
+            return saved(Err(e), "config");
+        }
+    }
+    match queue_apply(config_path) {
+        Ok(_) => Response { status: 200, body: json!({ "ok": true, "changed": true, "endpoint": ep_changed, "password": pw_changed, "name": imp.name, "warnings": imp.warnings, "issues": [] }) },
+        Err(m) => Response::error(500, "write_failed", format!("подписка перенесена, но заявка на применение не записана: {m}")),
+    }
+}
+
 pub fn replace_config(body: Option<&[u8]>, config_path: &str) -> Response {
     let q = match parse_json::<Replace>(body.unwrap_or_default(), "") {
         Ok(q) => q,
@@ -554,8 +634,10 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
                 Err(r) => return Some(r),
             };
             // только признак наличия; значения секретов API никогда не возвращает
-            let m: serde_json::Map<String, Value> = cfg.profiles.iter().map(|pr| (pr.id.clone(), json!(s.profiles.contains_key(&pr.id)))).collect();
-            Response { status: 200, body: json!({ "ok": true, "profiles": m, "issues": [] }) }
+            // пароль задан; отдельно — есть ли ссылка-подписка (значения не возвращаются)
+            let m: serde_json::Map<String, Value> = cfg.profiles.iter().map(|pr| (pr.id.clone(), json!(s.profiles.get(&pr.id).is_some_and(|x| x.password.is_some())))).collect();
+            let sub: serde_json::Map<String, Value> = cfg.profiles.iter().map(|pr| (pr.id.clone(), json!(s.profiles.get(&pr.id).is_some_and(|x| x.subscription_url.is_some())))).collect();
+            Response { status: 200, body: json!({ "ok": true, "profiles": m, "subscriptions": sub, "issues": [] }) }
         }
         ("POST", "/secrets") => match parse_json::<SecretUpload>(b, "") {
             Ok(q) => {
@@ -566,9 +648,6 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
                 let Some(pr) = cfg.profiles.iter().find(|x| x.id == q.profile_id) else {
                     return Some(Response::error(404, "unknown_profile", format!("профиль «{}» не найден", q.profile_id)));
                 };
-                if let Err(m) = check_secret(&q.secret) {
-                    return Some(Response::error(422, "bad_secret", format!("секреты профиля «{}»: {m}", pr.id)));
-                }
                 let sp = secrets_path(config_path);
                 let _g = match store::lock(&sp) {
                     Ok(g) => g,
@@ -578,7 +657,12 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
                     Ok(s) => s,
                     Err(r) => return Some(r),
                 };
-                s.profiles.insert(q.profile_id.clone(), q.secret);
+                // поля, которых нет в запросе, не меняются (пароль и ссылка-подписка задаются по отдельности)
+                let merged = match merge_secret(s.profiles.remove(&q.profile_id), q.secret) {
+                    Ok(m) => m,
+                    Err(m) => return Some(Response::error(422, "bad_secret", format!("секреты профиля «{}»: {m}", pr.id))),
+                };
+                s.profiles.insert(q.profile_id.clone(), merged);
                 let mut out = serde_json::to_vec_pretty(&s).unwrap_or_default();
                 out.push(b'\n');
                 match store::write_atomic(&sp, &out) {
@@ -654,6 +738,21 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
             }
             Err(i) => bad(i),
         },
+        ("GET", "/subscription") => {
+            // итог последнего обновления по подписке (mitt-sub.sh); подписки нет или ещё не обновлялась — null
+            let d = run_dir();
+            let st = std::fs::read(d.join("subscription.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
+            let running = d.join("sub-update.request").exists() || d.join("sub-update.request.run").exists();
+            Response { status: 200, body: json!({ "ok": true, "running": running, "subscription": st, "issues": [] }) }
+        }
+        ("POST", "/subscription/update") => {
+            let d = run_dir();
+            let req = json!({ "requested_unix": crate::auth::now() });
+            match std::fs::create_dir_all(&d).map_err(|e| e.to_string()).and_then(|_| store::write_atomic(&d.join("sub-update.request"), req.to_string().as_bytes())) {
+                Ok(()) => Response { status: 202, body: json!({ "ok": true, "queued": true, "issues": [] }) },
+                Err(m) => Response::error(500, "write_failed", m),
+            }
+        }
         ("GET", "/update") => {
             // итог последней проверки или установки (mitt-update.sh); до первой — null
             let d = run_dir();

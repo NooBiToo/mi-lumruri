@@ -62,7 +62,8 @@ export interface DnsConfig {
 }
 /** Выбор стратегий Zapret (controller/src/model.rs): `auto` — круговой режим, иначе id стратегии каталога. */
 export interface ZapretConfig { strategy: string; youtube: string }
-export interface ProfileSecret { password: string }
+/** Секреты профиля: поля без значения не меняются; пустая ссылка-подписка — удалить её. */
+export interface ProfileSecret { password?: string; subscription_url?: string }
 
 export interface Group { id: string; name: string; destinations: Destination[] }
 
@@ -174,6 +175,8 @@ export interface ManageResponse {
   config?: Config
   current_revision?: string
   profiles?: Record<string, boolean>
+  /** Есть ли у профиля ссылка-подписка (значение панель не получает). */
+  subscriptions?: Record<string, boolean>
   domains?: number
   entries?: number
   queued?: boolean
@@ -244,6 +247,10 @@ export interface UpdateState {
 }
 export interface UpdateResponse { ok: boolean; running?: boolean; update?: UpdateState | null; queued?: boolean; issues: Issue[]; error?: ApiError }
 
+/** Итог обновления по подписке TrustTunnel (mitt-sub.sh); время — unix-секунды; updated — когда параметры менялись. */
+export interface SubscriptionState { ok: boolean; checked: number; updated: number | null; error: string | null }
+export interface SubscriptionResponse { ok: boolean; running?: boolean; subscription?: SubscriptionState | null; queued?: boolean; issues: Issue[]; error?: ApiError }
+
 /** Ответ замены настроек целиком: при успехе — новая ревизия, настройки и заявка на применение (`queued`). */
 export interface ReplaceResponse extends SaveResponse { queued?: boolean }
 
@@ -278,6 +285,8 @@ export const api = {
   runDiag: (site?: string) => call<DiagResponse>('/diag', json(site ? { site } : {})),
   restartService: () => call<DiagResponse>('/service/restart', json({})),
   update: () => call<UpdateResponse>('/update'),
+  subscription: () => call<SubscriptionResponse>('/subscription'),
+  updateSubscription: () => call<SubscriptionResponse>('/subscription/update', json({})),
   checkUpdate: () => call<UpdateResponse>('/update', json({ action: 'check' })),
   installUpdate: (trust_official = false) => call<UpdateResponse>('/update', json({ action: 'install', trust_official })),
 }

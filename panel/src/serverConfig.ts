@@ -25,7 +25,7 @@ function clientRandom(endpoint: Partial<Endpoint>, prefix: string | undefined, k
  * Поля точки подключения, пароль, имя сервера (`name`) и предупреждения о параметрах, которые роутер не поддерживает
  * (другое имя в TLS, отключённая проверка сертификата).
  */
-export type ParsedServer = { endpoint: Partial<Endpoint>; password?: string; name?: string; warnings?: string[] } | { error: string }
+export type ParsedServer = { endpoint: Partial<Endpoint>; password?: string; name?: string; warnings?: string[]; subscription?: string } | { error: string }
 
 type Value = string | number | boolean | Value[]
 
@@ -176,7 +176,7 @@ export function parseClientToml(text: string): ParsedServer {
   }
   clientRandom(endpoint, str('client_random'), str('client_random_auth_key'))
   const pass = get('password')
-  return finish(endpoint, typeof pass === 'string' ? pass : undefined, str('name'), unsupported(host, str('custom_sni'), get('skip_verification') === true))
+  return finish(endpoint, typeof pass === 'string' ? pass : undefined, str('name'), unsupported(host, str('custom_sni'), get('skip_verification') === true), str('subscription_url'))
 }
 
 /** Параметры, которые клиент роутера не поддерживает: пользователь должен знать, что они не перенесены. */
@@ -189,8 +189,9 @@ function unsupported(host: string, customSni: string | undefined, skipVerificati
   return w
 }
 
-function finish(endpoint: Partial<Endpoint>, password: string | undefined, name: string | undefined, warnings: string[]): ParsedServer {
-  const out: { endpoint: Partial<Endpoint>; password?: string; name?: string; warnings?: string[] } = { endpoint }
+function finish(endpoint: Partial<Endpoint>, password: string | undefined, name: string | undefined, warnings: string[], subscription?: string): ParsedServer {
+  const out: { endpoint: Partial<Endpoint>; password?: string; name?: string; warnings?: string[]; subscription?: string } = { endpoint }
+  if (subscription && /^https:\/\/\S+$/.test(subscription)) out.subscription = subscription
   if (password) out.password = password
   if (name) out.name = name
   if (warnings.length) out.warnings = warnings
@@ -278,7 +279,12 @@ export function parseDeepLink(link: string): ParsedServer {
   const flag = (tag: number): boolean => fields.get(tag)?.[0] === 1
   const host = text(0x01)
   const first = addresses[0]?.trim()
-  if (fields.has(0x0e) && (!host || !first)) return { error: 'ссылки-подписки (subscription_url) роутер не поддерживает: нужна ссылка с адресом сервера' }
+  const sub = text(0x0e)
+  // ссылка только с подпиской: параметры сервера роутер получит по ней сам
+  if (sub && (!host || !first)) {
+    if (!/^https:\/\/\S+$/.test(sub)) return { error: 'ссылка-подписка в tt:// должна начинаться с https://' }
+    return finish({}, undefined, text(0x0c), [], sub)
+  }
   if (!host || !first) return { error: NOT_LINK }
   const addr = splitAddress(first)
   if (!addr) return { error: `адрес сервера «${first}» ожидается в виде IP:порт` }
@@ -306,7 +312,7 @@ export function parseDeepLink(link: string): ParsedServer {
   } catch {
     return { error: NOT_LINK }
   }
-  return finish(endpoint, pass, text(0x0c), unsupported(host, text(0x03), flag(0x07)))
+  return finish(endpoint, pass, text(0x0c), unsupported(host, text(0x03), flag(0x07)), sub)
 }
 
 /** Вставленный текст: ссылка `tt://` или client.toml. */

@@ -13,5 +13,6 @@ pub mod preview;
 pub mod release;
 pub mod render;
 pub mod store;
+pub mod subscription;
 pub mod validate;
 pub mod zapret;

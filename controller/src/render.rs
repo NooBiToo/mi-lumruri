@@ -35,6 +35,10 @@ pub struct ProfileSecret {
     /// Пароль пользователя TrustTunnel.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
+    /// Ссылка-подписка TrustTunnel 1.3 (`https://user:pass@host/path`): служба по ней обновляет точку подключения и
+    /// пароль. Секрет — в ней логин и пароль.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subscription_url: Option<String>,
 }
 
 /// Пароль задан и пригоден для client.toml.
@@ -45,6 +49,39 @@ pub fn check_secret(s: &ProfileSecret) -> Result<(), &'static str> {
         Some(p) if p.chars().any(char::is_control) => Err("пароль содержит управляющие символы"),
         _ => Ok(()),
     }
+}
+
+/// Ссылка-подписка: https, без пробелов, кавычек и управляющих символов, до 2048 знаков.
+pub fn check_subscription_url(u: &str) -> Result<(), &'static str> {
+    let rest = u.strip_prefix("https://").ok_or("ссылка-подписка — https://…")?;
+    if u.len() > 2048 || rest.is_empty() || u.chars().any(|c| c.is_control() || c.is_whitespace() || matches!(c, '"' | '\'' | '\\' | '`' | '<' | '>')) {
+        return Err("ссылка-подписка содержит недопустимые символы или слишком длинная");
+    }
+    Ok(())
+}
+
+/// Запись секретов из панели поверх прежних: незаданное поле не меняется, пустая ссылка-подписка — удалить её.
+/// Итог должен содержать пароль или подписку (пароль придёт из неё).
+pub fn merge_secret(old: Option<ProfileSecret>, new: ProfileSecret) -> Result<ProfileSecret, &'static str> {
+    let old = old.unwrap_or(ProfileSecret { password: None, subscription_url: None });
+    let s = ProfileSecret {
+        password: new.password.or(old.password),
+        subscription_url: match new.subscription_url {
+            Some(u) if u.is_empty() => None,
+            Some(u) => Some(u),
+            None => old.subscription_url,
+        },
+    };
+    if s.password.is_some() {
+        check_secret(&s)?;
+    }
+    if let Some(u) = &s.subscription_url {
+        check_subscription_url(u)?;
+    }
+    if s.password.is_none() && s.subscription_url.is_none() {
+        return Err("нужен пароль или ссылка-подписка");
+    }
+    Ok(s)
 }
 
 #[derive(Debug, Serialize)]

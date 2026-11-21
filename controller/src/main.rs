@@ -50,6 +50,15 @@ pub fn main() -> ExitCode {
         ["category-update", cfg, id, list] => cli(category_update(cfg, id, list)),
         ["category-check", kind, list] => cli(category_check(kind, list)),
         ["adblock-check", list] => cli(adblock_check(list)),
+        // подписка TrustTunnel: ссылка для mitt-sub.sh (печать, без JSON) и перенос скачанного ответа в настройки
+        ["subscription-url", cfg, profile] => match mi_tt::manage::subscription_url(cfg, profile) {
+            Some(u) => {
+                println!("{u}");
+                ExitCode::SUCCESS
+            }
+            None => ExitCode::from(1),
+        },
+        ["subscription-import", cfg, profile, json] => cli(mi_tt::manage::subscription_import(cfg, profile, json)),
         ["zapret-list", kind] => match zapret_kind(kind) {
             Some(k) => lines(zapret::candidates(k).into_iter().map(str::to_string)),
             None => usage(),

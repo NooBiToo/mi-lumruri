@@ -138,6 +138,18 @@ included_routes = []
     expect(both.endpoint).not.toHaveProperty('client_random')
   })
 
+  it('subscription URL (0x0E): subscription-only link is accepted, full link keeps both', () => {
+    const enc = new TextEncoder()
+    const tlv = (tag: number, v: string) => { const b = enc.encode(v); return [tag, b.length, ...b] }
+    const link = (b: number[]) => 'tt://?' + btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    const url = 'https://alice:pw@vpn.example.com/subscription'
+    expect(parseDeepLink(link([0, 1, 2, ...tlv(0x0e, url), ...tlv(0x0c, 'Acme')]))).toEqual({ endpoint: {}, subscription: url, name: 'Acme' })
+    const full = parseDeepLink(link([...tlv(1, 'vpn.example.com'), ...tlv(2, '203.0.113.10:443'), ...tlv(5, 'bob'), ...tlv(6, 'pw'), ...tlv(0x0e, url)]))
+    expect(full).toMatchObject({ endpoint: { server: '203.0.113.10' }, password: 'pw', subscription: url })
+    expect(parseDeepLink(link([...tlv(0x0e, 'http://insecure.example.com/sub')]))).toHaveProperty('error')
+    expect(parseClientToml(`hostname = "vpn.example.com"\naddresses = ["203.0.113.10:443"]\nsubscription_url = "${url}"\n`)).toMatchObject({ subscription: url })
+  })
+
   it('reads tls_profile and client_random from client.toml; "default" is boringssl', () => {
     const t = (extra: string) => parseClientToml(`hostname = "vpn.example.com"\naddresses = ["203.0.113.10:443"]\nusername = "u"\n${extra}`)
     expect(t('tls_profile = "firefox"\nclient_random_auth_key = "00ff"\nclient_random = ""\n')).toMatchObject({ endpoint: { tls_profile: 'firefox', client_random_auth_key: '00ff' } })

@@ -21,6 +21,8 @@ export const lanError = ref<string | null>(null)
 export const leases = ref<Lease[]>([])
 export const service = ref<ManageResponse | null>(null)
 export const hasPassword = ref(false)
+/** У профиля сохранена ссылка-подписка TrustTunnel (значение панель не получает). */
+export const hasSubscription = ref(false)
 /** Куда прокрутить экран, который сейчас откроется (id блока), например `zapret` на «Сайтах». */
 export const scrollTarget = ref<string | null>(null)
 
@@ -49,6 +51,7 @@ export function reset() {
   leases.value = []
   service.value = null
   hasPassword.value = false
+  hasSubscription.value = false
 }
 
 /** Первые замечания одной строкой для пользователя. */
@@ -101,6 +104,7 @@ export async function loadSecrets() {
   const r = await manage.secrets()
   const id = profile.value?.id
   hasPassword.value = !!(id && r.body.profiles?.[id])
+  hasSubscription.value = !!(id && r.body.subscriptions?.[id])
 }
 
 export async function loadAll(): Promise<void> {
