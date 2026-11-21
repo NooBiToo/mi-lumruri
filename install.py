@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 REPO = "NooBiToo/mi-lumruri"
-ARTIFACT = "mi-trusttunnel-be7000"
+ARTIFACT = "mi-lumruri-be7000"
 # Dropbear штатной прошивки предлагает только ключ хоста ssh-rsa, который OpenSSH 8.8+ по умолчанию отключил.
 SSH_OPTS = ["-o", "HostKeyAlgorithms=+ssh-rsa", "-o", "PubkeyAcceptedAlgorithms=+ssh-rsa"]
 INSTALL = """set -eu
@@ -25,11 +25,11 @@ actual=$(openssl dgst -sha256 package.tar)
 [ "${actual##* }" = EXPECTED_SHA ] || { echo 'SHA-256 mismatch' >&2; exit 1; }
 tar xf package.tar
 rm package.tar
-cd mi-trusttunnel
+if [ -d mi-lumruri ]; then cd mi-lumruri; else cd mi-trusttunnel; fi
 sh install.sh
 """
 LOGIN = """set -eu
-base=/data/mi-trusttunnel
+base=/data/mi-lumruri
 tries=0
 while [ ! -f "$base/etc/auth/auth.json" ]; do
   [ "$tries" -lt 3 ] || { echo 'Вход в панель не настроен.' >&2; exit 1; }
@@ -61,13 +61,15 @@ def download(directory):
         "gh", "run", "download", str(run["databaseId"]), "-R", REPO,
         "-n", ARTIFACT, "-D", str(directory),
     ], check=True)
-    return directory / f"mi-trusttunnel-ci-{short_sha}.tar"
+    return directory / f"mi-lumruri-ci-{short_sha}.tar"
 
 
 def verify(package):
-    checksum = (package.parent / "SHA256SUMS").read_text(encoding="ascii").strip()
-    match = re.fullmatch(r"([0-9a-f]{64}) [ *](.+)", checksum)
-    if not match or match[2] != package.name:
+    # с 0.5.0 в SHA256SUMS две строки: mi-lumruri-*.tar и совместимая копия mi-trusttunnel-*.tar
+    lines = (package.parent / "SHA256SUMS").read_text(encoding="ascii").splitlines()
+    matches = [m for m in (re.fullmatch(r"([0-9a-f]{64}) [ *](.+)", line.strip()) for line in lines if line.strip())]
+    match = next((m for m in matches if m and m[2] == package.name), None)
+    if not match or not all(matches):
         raise ValueError("SHA256SUMS не соответствует имени выбранного TAR.")
     digest = hashlib.sha256()
     with package.open("rb") as stream:
@@ -79,12 +81,12 @@ def verify(package):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Установить или обновить Mi Lumruri (mi-trusttunnel) по SSH.")
+    parser = argparse.ArgumentParser(description="Установить или обновить Mi Lumruri по SSH.")
     parser.add_argument("router", nargs="?", type=ipaddress.IPv4Address, default="192.168.31.1",
                         help="LAN-адрес роутера (по умолчанию 192.168.31.1)")
     parser.add_argument("--package", type=Path, help="TAR из распакованного артефакта с SHA256SUMS")
     parser.add_argument("--store", help="каталог на USB-накопителе роутера для релизов, например "
-                        "/mnt/usb-XXXX/mi-trusttunnel (если пакет не помещается в /data)")
+                        "/mnt/usb-XXXX/mi-lumruri (если пакет не помещается в /data)")
     parser.add_argument("--trust-key", metavar="FINGERPRINT",
                         help="принять пакет, подписанный другим ключом с этим отпечатком (16 знаков), и закрепить его; "
                         "настройки сохраняются. Отпечаток показывает установщик при отказе")
@@ -97,7 +99,7 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         package = args.package
         if package is None:
-            adjacent = list(Path(__file__).resolve().parent.glob("mi-trusttunnel-ci-*.tar"))
+            adjacent = list(Path(__file__).resolve().parent.glob("mi-lumruri-ci-*.tar"))
             if len(adjacent) > 1:
                 raise ValueError("Найдено несколько пакетов. Выберите один через --package.")
             package = adjacent[0] if adjacent else download(Path(tmp))

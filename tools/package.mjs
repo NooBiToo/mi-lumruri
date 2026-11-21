@@ -1,7 +1,8 @@
-// Установочный пакет mi-trusttunnel для BE7000 (RC06 1.1.38, aarch64): контроллер, панель, клиент TrustTunnel, nfqws2, сценарии,
+// Установочный пакет Mi Lumruri (mi-lumruri) для BE7000 (RC06 1.1.38, aarch64): контроллер, панель, клиент TrustTunnel, nfqws2, сценарии,
 // манифест с SHA-256 и подпись Ed25519. Без сети, если кэш .tools уже заполнен; результат воспроизводим (подпись Ed25519
 // детерминирована, XZ и tar — без времени и владельцев).
-//   node tools/package.mjs [--version X]   →  out/package/mi-trusttunnel-<версия>.tar (+ каталог для проверки)
+//   node tools/package.mjs [--version X]   →  out/package/mi-lumruri-<версия>.tar (+ каталог для проверки)
+//   и совместимая копия mi-trusttunnel-<версия>.tar (каталог mi-trusttunnel/ внутри) — для обновления из панели 0.4.x
 // Ключ подписи — .tools/keys/release-ed25519.pem (создаётся при первом запуске, в репозиторий не попадает).
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
@@ -12,9 +13,9 @@ import { gunzipSync } from 'node:zlib'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
-const VERSION = args.includes('--version') ? args[args.indexOf('--version') + 1] : '0.4.0'
+const VERSION = args.includes('--version') ? args[args.indexOf('--version') + 1] : '0.5.0'
 const OUT = args.includes('--out') ? args[args.indexOf('--out') + 1] : join(ROOT, 'out', 'package')
-const PKG = join(OUT, 'mi-trusttunnel')
+const PKG = join(OUT, 'mi-lumruri')
 const DL = join(ROOT, '.tools', 'lab', 'dl')
 const PY = process.platform === 'win32' ? 'python' : 'python3'
 const sha = (b) => createHash('sha256').update(b).digest('hex')
@@ -93,7 +94,7 @@ const priv = createPrivateKey(readFileSync(KEYF))
 const pubHex = createPublicKey(priv).export({ type: 'spki', format: 'der' }).subarray(-32).toString('hex')
 files.sort((a, b) => a.path.localeCompare(b.path))
 const manifest = {
-  name: 'mi-trusttunnel', version: VERSION, target: 'rc06-1.1.38-aarch64', created: '2026-11-18', pubkey: pubHex, files,
+  name: 'mi-lumruri', version: VERSION, target: 'rc06-1.1.38-aarch64', created: '2026-11-18', pubkey: pubHex, files,
   data_bytes: files.reduce((s, f) => s + f.size, 0), tmp_bytes: files.reduce((s, f) => s + (f.unpacked_size ?? f.size), 0),
 }
 const mbytes = Buffer.from(JSON.stringify(manifest, null, 1) + '\n')
@@ -101,8 +102,11 @@ writeFileSync(join(PKG, 'manifest.json'), mbytes)
 writeFileSync(join(PKG, 'manifest.sig'), sign(null, mbytes, priv).toString('hex') + '\n')
 rmSync(tmp, { recursive: true, force: true })
 
-const tarPath = join(OUT, `mi-trusttunnel-${VERSION}.tar`)
+const tarPath = join(OUT, `mi-lumruri-${VERSION}.tar`)
 execFileSync(PY, ['-I', join(ROOT, 'tools', 'xzpack.py'), 'tar', PKG, tarPath])
+// та же подписанная начинка под прежним именем: сценарий обновления 0.4.x ищет mi-trusttunnel-*.tar с каталогом mi-trusttunnel/
+const compatPath = join(OUT, `mi-trusttunnel-${VERSION}.tar`)
+execFileSync(PY, ['-I', join(ROOT, 'tools', 'xzpack.py'), 'tar', PKG, compatPath, 'mi-trusttunnel'])
 const tarSize = statSync(tarPath).size
 const n = (x) => x.toLocaleString('ru-RU')
 const report = { version: VERSION, tar: tarPath, tar_bytes: tarSize, tar_sha256: sha(readFileSync(tarPath)), data_bytes: manifest.data_bytes, tmp_bytes: manifest.tmp_bytes,
@@ -110,7 +114,7 @@ const report = { version: VERSION, tar: tarPath, tar_bytes: tarSize, tar_sha256:
   files: files.map((f) => ({ path: f.path, size: f.size, unpacked_size: f.unpacked_size })) }
 writeFileSync(join(OUT, `report-${VERSION}.json`), JSON.stringify(report, null, 2) + '\n')
 // install.py сверяет TAR с SHA256SUMS рядом с ним
-writeFileSync(join(OUT, 'SHA256SUMS'), `${report.tar_sha256} *mi-trusttunnel-${VERSION}.tar\n`)
+writeFileSync(join(OUT, 'SHA256SUMS'), `${report.tar_sha256} *mi-lumruri-${VERSION}.tar\n${sha(readFileSync(compatPath))} *mi-trusttunnel-${VERSION}.tar\n`)
 console.log(`пакет: ${tarPath} ${n(tarSize)} Б, sha256 ${report.tar_sha256}`)
 console.log(`на /data: ${n(manifest.data_bytes)} Б; в /tmp после распаковки: ${n(manifest.tmp_bytes)} Б; бюджет 20 000 000 Б, запас ${n(report.headroom)} Б`)
 console.log(`ключ релиза: ${report.key_fingerprint}`)

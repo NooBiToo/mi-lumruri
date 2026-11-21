@@ -202,7 +202,7 @@ pub fn lists_dir() -> Option<PathBuf> {
 
 /// Каталог состояния службы (запрос применения, статус). По умолчанию — RAM.
 pub fn run_dir() -> PathBuf {
-    std::env::var("MI_TT_RUN_DIR").ok().filter(|s| !s.is_empty()).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp/mi-trusttunnel/run"))
+    std::env::var("MI_TT_RUN_DIR").ok().filter(|s| !s.is_empty()).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp/mi-lumruri/run"))
 }
 
 /// Итог диагностики службы (каталог `diag` рядом с состоянием, пишет mitt-diag.sh) и маршрут проверенного сайта

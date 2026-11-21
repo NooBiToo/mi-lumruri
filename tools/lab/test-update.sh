@@ -39,20 +39,20 @@ esac
 EOF
 chmod +x "$ST/curl"
 
-# пакет: mi-trusttunnel/install.sh — заглушка, поведение по $LT/install (ok | foreign); аргументы пишет в $LT/install.args
+# пакет: <mi-lumruri|mi-trusttunnel>/install.sh (каталог — по имени файла) — заглушка, поведение по $LT/install (ok | foreign); аргументы пишет в $LT/install.args
 mkpkg() { # mkpkg <каталог lt> <имя файла пакета>
-  local d="$W/pkg.$$"; rm -rf "$d"; mkdir -p "$d/mi-trusttunnel"
-  cat >"$d/mi-trusttunnel/install.sh" <<'EOF'
-echo "$*" >"$LT/install.args"
+  local d="$W/pkg.$$" n="${2%%-ci-*}"; rm -rf "$d"; mkdir -p "$d/$n"
+  cat >"$d/$n/install.sh" <<'EOF'
+echo "$*" >"$LT/install.args"; basename "$(dirname "$0")" >"$LT/install.dir"
 case "$(cat "$LT/install")" in
   foreign)
     case "$*" in *--trust-key=e4a271890e5643ab*) ;; *)
-      echo "mi-trusttunnel: ОТКАЗ: пакет подписан другим ключом: закреплён 1e1e65e7b11b50ca, у пакета e4a271890e5643ab. Если это ваш новый ключ, повторите с --trust-key=e4a271890e5643ab"; exit 3;; esac;;
+      echo "mi-lumruri: ОТКАЗ: пакет подписан другим ключом: закреплён 1e1e65e7b11b50ca, у пакета e4a271890e5643ab. Если это ваш новый ключ, повторите с --trust-key=e4a271890e5643ab"; exit 3;; esac;;
 esac
-echo "$NEWVER" >"$MITT_ROOT/data/mi-trusttunnel/current.ver"; echo "mi-trusttunnel: установлен релиз $NEWVER"
+echo "$NEWVER" >"$MITT_ROOT/data/mi-lumruri/current.ver"; echo "mi-lumruri: установлен релиз $NEWVER"
 EOF
-  (cd "$d" && tar -cf "$1/remote/$2" mi-trusttunnel); rm -rf "$d"
-  (cd "$1/remote" && sha256sum "$2" >SHA256SUMS)
+  (cd "$d" && tar -cf "$1/remote/$2" "$n"); rm -rf "$d"
+  (cd "$1/remote" && sha256sum "$2" >>SHA256SUMS)
 }
 latest() { # latest <каталог lt> <тег> <файл пакета>
   printf '{"url":"x","html_url":"https://github.test/rel/releases/tag/%s","tag_name":"%s","published_at":"2026-11-21T10:00:00Z","assets":[{"name":"%s","browser_download_url":"https://github.test/dl/%s"},{"name":"SHA256SUMS","browser_download_url":"https://github.test/dl/SHA256SUMS"}]}' \
@@ -60,38 +60,38 @@ latest() { # latest <каталог lt> <тег> <файл пакета>
 }
 root() { # root <имя> <установленная версия>
   local d="$W/$1/root" lt="$W/$1/lt"
-  mkdir -p "$d/data/mi-trusttunnel" "$d/tmp/mi-trusttunnel/bin" "$d/tmp/mi-trusttunnel/scripts" "$d/tmp/mi-trusttunnel/run" "$lt/remote"
-  echo "$2" >"$d/data/mi-trusttunnel/current.ver"
-  cp "$ROOT"/package/scripts/*.sh "$d/tmp/mi-trusttunnel/scripts/"
-  printf '#!/bin/sh\nexec %s %s "$@"\n' "$Q" "$ADM" >"$d/tmp/mi-trusttunnel/bin/mi-tt-admin"; chmod +x "$d/tmp/mi-trusttunnel/bin/mi-tt-admin"
-  printf '#!/bin/sh\necho "$1" >>"%s/boot.log"\n' "$lt" >"$d/data/mi-trusttunnel/mitt-boot.sh"
+  mkdir -p "$d/data/mi-lumruri" "$d/tmp/mi-lumruri/bin" "$d/tmp/mi-lumruri/scripts" "$d/tmp/mi-lumruri/run" "$lt/remote"
+  echo "$2" >"$d/data/mi-lumruri/current.ver"
+  cp "$ROOT"/package/scripts/*.sh "$d/tmp/mi-lumruri/scripts/"
+  printf '#!/bin/sh\nexec %s %s "$@"\n' "$Q" "$ADM" >"$d/tmp/mi-lumruri/bin/mi-tt-admin"; chmod +x "$d/tmp/mi-lumruri/bin/mi-tt-admin"
+  printf '#!/bin/sh\necho "$1" >>"%s/boot.log"\n' "$lt" >"$d/data/mi-lumruri/mitt-boot.sh"
   echo online >"$lt/scenario"; echo ok >"$lt/install"
 }
 upd() { # upd <имя> <json заявки>
   local d="$W/$1/root"
-  printf '%s' "$2" >"$d/tmp/mi-trusttunnel/run/update.request.run"
+  printf '%s' "$2" >"$d/tmp/mi-lumruri/run/update.request.run"
   timeout 300 env -i PATH="$SB" MITT_ROOT="$d" MITT_QUIET=1 MITT_CURL="$ST/curl" MITT_UPDATE_API=https://api.github.test/latest LT="$W/$1/lt" NEWVER="${NEWVER:-ci-0123456789ab}" \
-    "$Q" -L "$F" "$F/bin/busybox" ash "$d/tmp/mi-trusttunnel/scripts/mitt-update.sh" >>"$W/$1/out" 2>&1
+    "$Q" -L "$F" "$F/bin/busybox" ash "$d/tmp/mi-lumruri/scripts/mitt-update.sh" >>"$W/$1/out" 2>&1
   echo "[$1] $2: код $?"
 }
 j() { python3 -I -c 'import json,sys
-s=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))' "$W/$1/root/tmp/mi-trusttunnel/run/update.json" "$2" 2>&1; }
-check() { local r; r="$(j "$1" "$3")"; if [ "$r" = True ]; then ok "$1: $2"; else bad "$1: $2 → $r; update.json: $(cat "$W/$1/root/tmp/mi-trusttunnel/run/update.json" 2>/dev/null); вывод: $(tail -5 "$W/$1/out")"; fi; }
+s=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))' "$W/$1/root/tmp/mi-lumruri/run/update.json" "$2" 2>&1; }
+check() { local r; r="$(j "$1" "$3")"; if [ "$r" = True ]; then ok "$1: $2"; else bad "$1: $2 → $r; update.json: $(cat "$W/$1/root/tmp/mi-lumruri/run/update.json" 2>/dev/null); вывод: $(tail -5 "$W/$1/out")"; fi; }
 waitdone() { local i=0; while [ $i -lt 60 ] && [ "$(j "$1" 's["state"]')" != done ]; do sleep 1; i=$((i + 1)); done; }
 
 echo "(а) проверка: установлена 0.3.3, в релизе v0.4.0 — есть новее"
-root a 0.3.3; latest "$W/a/lt" v0.4.0 mi-trusttunnel-ci-0123456789ab.tar; mkpkg "$W/a/lt" mi-trusttunnel-ci-0123456789ab.tar
+root a 0.3.3; latest "$W/a/lt" v0.4.0 mi-lumruri-ci-0123456789ab.tar; mkpkg "$W/a/lt" mi-lumruri-ci-0123456789ab.tar
 upd a '{"action":"check"}'
 check a "ready, latest v0.4.0, available ci-0123456789ab, newer" 's["state"]=="ready" and s["latest"]=="v0.4.0" and s["available"]=="ci-0123456789ab" and s["newer"] is True and s["error"] is None'
 check a "ссылка на страницу релиза и дата" 's["page"].endswith("/releases/tag/v0.4.0") and s["published"].startswith("2026-11-21")'
-[ ! -e "$W/a/root/tmp/mi-trusttunnel/run/update.request.run" ] && ok "a: заявка снята" || bad "a: заявка не снята"
+[ ! -e "$W/a/root/tmp/mi-lumruri/run/update.request.run" ] && ok "a: заявка снята" || bad "a: заявка не снята"
 
 echo "(б) проверка: установлена та же сборка — не новее; установлена 0.5.0 — не новее"
-root b ci-0123456789ab; latest "$W/b/lt" v0.4.0 mi-trusttunnel-ci-0123456789ab.tar; upd b '{"action":"check"}'
+root b ci-0123456789ab; latest "$W/b/lt" v0.4.0 mi-lumruri-ci-0123456789ab.tar; upd b '{"action":"check"}'
 check b "та же сборка — newer false" 's["state"]=="ready" and s["newer"] is False'
-echo 0.5.0 >"$W/b/root/data/mi-trusttunnel/current.ver"; upd b '{"action":"check"}'
+echo 0.5.0 >"$W/b/root/data/mi-lumruri/current.ver"; upd b '{"action":"check"}'
 check b "0.5.0 против v0.4.0 — newer false" 's["newer"] is False'
-echo ci-ffffffffffff >"$W/b/root/data/mi-trusttunnel/current.ver"; upd b '{"action":"check"}'
+echo ci-ffffffffffff >"$W/b/root/data/mi-lumruri/current.ver"; upd b '{"action":"check"}'
 check b "другая сборка CI — newer true" 's["newer"] is True'
 
 echo "(в) установка: SHA-256 сверен, install.sh --no-start, перезапуск службы отдельным процессом"
@@ -103,15 +103,15 @@ check a "done, установлена ci-0123456789ab" 's["state"]=="done" and s
 [ -z "$(ls -d "$W/a/root/tmp/mitt-update."* 2>/dev/null)" ] && ok "a: временный каталог удалён" || bad "a: остался временный каталог"
 
 echo "(г) подменённый пакет: SHA-256 не совпал — установщик не запускается"
-root g 0.3.3; latest "$W/g/lt" v0.4.0 mi-trusttunnel-ci-0123456789ab.tar; mkpkg "$W/g/lt" mi-trusttunnel-ci-0123456789ab.tar
-printf 'x' >>"$W/g/lt/remote/mi-trusttunnel-ci-0123456789ab.tar"
+root g 0.3.3; latest "$W/g/lt" v0.4.0 mi-lumruri-ci-0123456789ab.tar; mkpkg "$W/g/lt" mi-lumruri-ci-0123456789ab.tar
+printf 'x' >>"$W/g/lt/remote/mi-lumruri-ci-0123456789ab.tar"
 upd g '{"action":"install"}'
 check g "error: SHA-256 не совпал" 's["state"]=="error" and "SHA-256" in s["error"]'
 [ ! -e "$W/g/lt/install.args" ] && ok "g: install.sh не запускался" || bad "g: install.sh запускался"
-[ "$(cat "$W/g/root/data/mi-trusttunnel/current.ver")" = 0.3.3 ] && ok "g: current без изменений" || bad "g: current изменён"
+[ "$(cat "$W/g/root/data/mi-lumruri/current.ver")" = 0.3.3 ] && ok "g: current без изменений" || bad "g: current изменён"
 
 echo "(д) другой ключ: ошибка с ключом пакета; с trust_official — установка с --trust-key официального ключа"
-root k 0.3.3; latest "$W/k/lt" v0.4.0 mi-trusttunnel-ci-0123456789ab.tar; mkpkg "$W/k/lt" mi-trusttunnel-ci-0123456789ab.tar; echo foreign >"$W/k/lt/install"
+root k 0.3.3; latest "$W/k/lt" v0.4.0 mi-lumruri-ci-0123456789ab.tar; mkpkg "$W/k/lt" mi-lumruri-ci-0123456789ab.tar; echo foreign >"$W/k/lt/install"
 upd k '{"action":"install","trust_official":false}'
 check k "error: другой ключ, package_key = e4a271890e5643ab, official_key тот же" 's["state"]=="error" and "другим ключом" in s["error"] and s["package_key"]=="e4a271890e5643ab" and s["official_key"]=="e4a271890e5643ab"'
 upd k '{"action":"install","trust_official":true}'
@@ -126,5 +126,20 @@ check o "error с причиной curl" 's["state"]=="error" and "GitHub не �
 echo "(ж) релиз без пакета — понятная ошибка"
 root e 0.3.3; printf '{"tag_name":"v0.4.0","assets":[]}' >"$W/e/lt/remote/latest.json"; upd e '{"action":"check"}'
 check e "error: нет пакета или SHA256SUMS" 's["state"]=="error" and "нет пакета" in s["error"]'
+
+echo "(з) релиз 0.5+: два пакета (mi-lumruri и совместимый mi-trusttunnel) — берётся mi-lumruri"
+root n 0.4.0; mkpkg "$W/n/lt" mi-lumruri-ci-0123456789ab.tar; mkpkg "$W/n/lt" mi-trusttunnel-ci-0123456789ab.tar
+printf '{"html_url":"https://github.test/rel/releases/tag/v0.5.0","tag_name":"v0.5.0","published_at":"2026-11-21T10:00:00Z","assets":[{"name":"mi-trusttunnel-ci-0123456789ab.tar","browser_download_url":"https://github.test/dl/mi-trusttunnel-ci-0123456789ab.tar"},{"name":"mi-lumruri-ci-0123456789ab.tar","browser_download_url":"https://github.test/dl/mi-lumruri-ci-0123456789ab.tar"},{"name":"SHA256SUMS","browser_download_url":"https://github.test/dl/SHA256SUMS"}]}' >"$W/n/lt/remote/latest.json"
+upd n '{"action":"install"}'
+waitdone n
+check n "done, установлена ci-0123456789ab" 's["state"]=="done" and s["installed"]=="ci-0123456789ab"'
+[ "$(cat "$W/n/lt/install.dir")" = mi-lumruri ] && ok "n: запущен mi-lumruri/install.sh" || bad "n: каталог пакета: $(cat "$W/n/lt/install.dir" 2>/dev/null)"
+
+echo "(и) релиз до 0.5: только mi-trusttunnel-*.tar — тоже устанавливается"
+root p 0.3.3; latest "$W/p/lt" v0.4.0 mi-trusttunnel-ci-0123456789ab.tar; mkpkg "$W/p/lt" mi-trusttunnel-ci-0123456789ab.tar
+upd p '{"action":"install"}'
+waitdone p
+check p "done, установлена ci-0123456789ab" 's["state"]=="done" and s["installed"]=="ci-0123456789ab"'
+[ "$(cat "$W/p/lt/install.dir")" = mi-trusttunnel ] && ok "p: запущен mi-trusttunnel/install.sh" || bad "p: каталог пакета: $(cat "$W/p/lt/install.dir" 2>/dev/null)"
 
 [ $FAIL -eq 0 ] && echo "ИТОГ: ПРОЙДЕНО" || { echo "ИТОГ: ЕСТЬ ОШИБКИ"; exit 1; }

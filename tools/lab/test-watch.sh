@@ -32,8 +32,8 @@ echo "$*" >>"$LT/curl.log"
 EOF
 chmod +x "$SB"/*
 
-R="$W/root"; LT="$W/lt"; mkdir -p "$R/tmp/mi-trusttunnel/run" "$R/tmp/mi-trusttunnel/log" "$R/data/mi-trusttunnel" "$LT"
-S="$R/tmp/mi-trusttunnel/run"; L="$R/tmp/mi-trusttunnel/log"
+R="$W/root"; LT="$W/lt"; mkdir -p "$R/tmp/mi-lumruri/run" "$R/tmp/mi-lumruri/log" "$R/data/mi-lumruri" "$LT"
+S="$R/tmp/mi-lumruri/run"; L="$R/tmp/mi-lumruri/log"
 sleep 1000 & CLIENT=$!
 echo "$CLIENT" >"$S/trusttunnel.pid"
 echo "x VPNCORE raise_state: [0] VPN_SS_CONNECTED" >"$L/trusttunnel.log"

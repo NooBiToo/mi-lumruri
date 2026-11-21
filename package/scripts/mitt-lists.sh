@@ -1,5 +1,5 @@
 #!/bin/sh
-# mi-trusttunnel: готовые списки сайтов (снимок itdoginfo/allow-domains в релизе, обновления — в /data).
+# mi-lumruri: готовые списки сайтов (снимок itdoginfo/allow-domains в релизе, обновления — в /data).
 #   mitt-lists.sh sync   — $ETC/categories/svc-<id>.list (домены) и svc-<id>-ip.list (IPv4) по каталогу релиза: из $DATA/lists
 #                          (обновлённый файл), иначе из payload/lists релиза; файл переписывается только при изменении.
 #                          Служба вызывает перед каждым render.

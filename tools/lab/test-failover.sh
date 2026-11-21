@@ -22,8 +22,8 @@ done
 printf '#!/bin/sh\necho "$*" >>"$LT/curl.log"\nexit "$(cat "$LT/rc")"\n' >"$SB/curl"
 chmod +x "$SB"/*
 
-R="$W/root"; LT="$W/lt"; S="$R/tmp/mi-trusttunnel/run"; L="$R/tmp/mi-trusttunnel/log"; RD="$R/tmp/mi-trusttunnel/render"
-mkdir -p "$S" "$L" "$RD" "$R/data/mi-trusttunnel" "$LT"
+R="$W/root"; LT="$W/lt"; S="$R/tmp/mi-lumruri/run"; L="$R/tmp/mi-lumruri/log"; RD="$R/tmp/mi-lumruri/render"
+mkdir -p "$S" "$L" "$RD" "$R/data/mi-lumruri" "$LT"
 : >"$RD/client.toml"; : >"$RD/client-backup.toml"; echo "203.0.113.10 443" >"$RD/primary.addr"; echo 7 >"$LT/rc"
 newclient() { [ -n "$CLIENT" ] && kill "$CLIENT" 2>/dev/null; sleep 1000 & CLIENT=$!; echo "$CLIENT" >"$S/trusttunnel.pid"; }
 state() { echo "x VPNCORE raise_state: [0] $1" >>"$L/trusttunnel.log"; }

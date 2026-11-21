@@ -49,11 +49,11 @@ chmod +x "$ST/curl"
 # root <имя>: свежий корень «роутера» с релизом 0.9.0 (снимок списков из package/lists)
 root() {
   local d="$W/$1/root"
-  mkdir -p "$d/data/mi-trusttunnel/etc" "$d/data/mi-trusttunnel/releases/0.9.0/payload" "$d/tmp/mi-trusttunnel/bin" "$d/tmp/mi-trusttunnel/scripts" "$W/$1/lt"
-  echo 0.9.0 >"$d/data/mi-trusttunnel/current.ver"
-  cp -r "$ROOT/package/lists" "$d/data/mi-trusttunnel/releases/0.9.0/payload/lists"
-  cp "$ROOT"/package/scripts/*.sh "$d/tmp/mi-trusttunnel/scripts/"
-  printf '#!/bin/sh\nexec %s %s "$@"\n' "$Q" "$CTL" >"$d/tmp/mi-trusttunnel/bin/mi-tt-ctl"; chmod +x "$d/tmp/mi-trusttunnel/bin/mi-tt-ctl"
+  mkdir -p "$d/data/mi-lumruri/etc" "$d/data/mi-lumruri/releases/0.9.0/payload" "$d/tmp/mi-lumruri/bin" "$d/tmp/mi-lumruri/scripts" "$W/$1/lt"
+  echo 0.9.0 >"$d/data/mi-lumruri/current.ver"
+  cp -r "$ROOT/package/lists" "$d/data/mi-lumruri/releases/0.9.0/payload/lists"
+  cp "$ROOT"/package/scripts/*.sh "$d/tmp/mi-lumruri/scripts/"
+  printf '#!/bin/sh\nexec %s %s "$@"\n' "$Q" "$CTL" >"$d/tmp/mi-lumruri/bin/mi-tt-ctl"; chmod +x "$d/tmp/mi-lumruri/bin/mi-tt-ctl"
   cp -r "$ROOT/package/lists" "$W/$1/lt/remote"
   echo 'resp() { echo ok; }' >"$W/$1/lt/scenario"
 }
@@ -63,17 +63,17 @@ bb() {
   timeout 600 env -i PATH="$SB" MITT_ROOT="$W/$n/root" MITT_QUIET=1 MITT_CURL="$ST/curl" MITT_LISTS_URL=https://lists.test/main LT="$W/$n/lt" \
     "$Q" -L "$F" "$F/bin/busybox" ash "$@"
 }
-lists() { bb "$1" "$W/$1/root/tmp/mi-trusttunnel/scripts/mitt-lists.sh" "$2" >>"$W/$1/out" 2>&1; echo "[$1] $2: код $?"; }
-due() { bb "$1" -c '. "$MITT_ROOT/tmp/mi-trusttunnel/scripts/mitt-lib.sh"; lists_due'; }
+lists() { bb "$1" "$W/$1/root/tmp/mi-lumruri/scripts/mitt-lists.sh" "$2" >>"$W/$1/out" 2>&1; echo "[$1] $2: код $?"; }
+due() { bb "$1" -c '. "$MITT_ROOT/tmp/mi-lumruri/scripts/mitt-lib.sh"; lists_due'; }
 j() { python3 -I -c 'import json,sys
-s=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))' "$W/$1/root/tmp/mi-trusttunnel/run/lists.json" "$2" 2>&1; }
-check() { local r; r="$(j "$1" "$3")"; if [ "$r" = True ]; then ok "$1: $2"; else bad "$1: $2 → $r; lists.json: $(cat "$W/$1/root/tmp/mi-trusttunnel/run/lists.json" 2>/dev/null); вывод: $(tail -5 "$W/$1/out")"; fi; }
+s=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))' "$W/$1/root/tmp/mi-lumruri/run/lists.json" "$2" 2>&1; }
+check() { local r; r="$(j "$1" "$3")"; if [ "$r" = True ]; then ok "$1: $2"; else bad "$1: $2 → $r; lists.json: $(cat "$W/$1/root/tmp/mi-lumruri/run/lists.json" 2>/dev/null); вывод: $(tail -5 "$W/$1/out")"; fi; }
 ino() { stat -c %i "$1" 2>/dev/null; }
 
 NFILES="$(python3 -I -c 'import json,sys;c=json.load(open(sys.argv[1]));print(len(c["services"])+sum(1 for s in c["services"] if s["ipv4"]))' "$ROOT/package/lists/catalog.json")"
 COMMIT="$(python3 -I -c 'import json,sys;print(json.load(open(sys.argv[1]))["commit"])' "$ROOT/package/lists/catalog.json")"
 SNAPDATE="$(python3 -I -c 'import json,sys;print(json.load(open(sys.argv[1]))["date"])' "$ROOT/package/lists/catalog.json")"
-A="$W/a/root"; CATD="$A/data/mi-trusttunnel/etc/categories"; UPD="$A/data/mi-trusttunnel/lists"; RUNS="$A/tmp/mi-trusttunnel/run"
+A="$W/a/root"; CATD="$A/data/mi-lumruri/etc/categories"; UPD="$A/data/mi-lumruri/lists"; RUNS="$A/tmp/mi-lumruri/run"
 
 echo "(а) sync из пакета"
 root a; lists a sync
@@ -110,7 +110,7 @@ check a "причины: проверка формата, пустой отве�
 check a "updated не изменился" 's["updated"]=='"$UPD1"
 t "c: после ошибки одного файла остальные проверены" '[ "$(wc -l <"$W/a/lt/curl.log")" = "$NFILES" ]'
 t "c: ничего не изменилось — заявки на применение нет" '[ ! -e "$RUNS/apply.request" ]'
-t "c: временных файлов не осталось" '[ -z "$(find "$UPD" -name "*.t*")" ] && [ ! -e "$A/tmp/mi-trusttunnel/lists-dl" ]'
+t "c: временных файлов не осталось" '[ -z "$(find "$UPD" -name "*.t*")" ] && [ ! -e "$A/tmp/mi-lumruri/lists-dl" ]'
 
 echo "(г) без сети: ok=false, списки из пакета работают"
 B="$W/g/root"; root g
@@ -119,18 +119,18 @@ t "g: без метки .checked проверка нужна сразу" 'due g'
 lists g sync; lists g update
 check g "ok=false, одна ошибка «нет связи», updated null" 'not s["ok"] and len(s["errors"])==1 and "нет связи" in s["errors"][0] and "Could not resolve host" in s["errors"][0] and s["updated"] is None'
 t "g: после первой неудачи связи остальные файлы не запрашивались" '[ "$(wc -l <"$W/g/lt/curl.log")" = 1 ]'
-t "g: svc-youtube.list — из пакета" 'cmp -s "$B/data/mi-trusttunnel/etc/categories/svc-youtube.list" "$ROOT/package/lists/Services/youtube.lst"'
-t "g: в /data списков нет" '[ -z "$(find "$B/data/mi-trusttunnel/lists" -name "*.lst")" ]'
-t "g: повтор не раньше чем через час (метка сдвинута)" '! due g && [ "$(( $(date +%s) - $(cut -d " " -f 1 "$B/data/mi-trusttunnel/lists/.checked") ))" -ge 82700 ]'
-t "g: отсрочка в RAM (lists-next) — через час, снимок тот же" '[ "$(cut -d " " -f 2 "$B/tmp/mi-trusttunnel/run/lists-next")" = "$COMMIT" ] && [ "$(( $(cut -d " " -f 1 "$B/tmp/mi-trusttunnel/run/lists-next") - $(date +%s) ))" -ge 3500 ]'
+t "g: svc-youtube.list — из пакета" 'cmp -s "$B/data/mi-lumruri/etc/categories/svc-youtube.list" "$ROOT/package/lists/Services/youtube.lst"'
+t "g: в /data списков нет" '[ -z "$(find "$B/data/mi-lumruri/lists" -name "*.lst")" ]'
+t "g: повтор не раньше чем через час (метка сдвинута)" '! due g && [ "$(( $(date +%s) - $(cut -d " " -f 1 "$B/data/mi-lumruri/lists/.checked") ))" -ge 82700 ]'
+t "g: отсрочка в RAM (lists-next) — через час, снимок тот же" '[ "$(cut -d " " -f 2 "$B/tmp/mi-lumruri/run/lists-next")" = "$COMMIT" ] && [ "$(( $(cut -d " " -f 1 "$B/tmp/mi-lumruri/run/lists-next") - $(date +%s) ))" -ge 3500 ]'
 # дальше проверяется метка .checked: отсрочки в RAM нет (как после перезагрузки)
-rm -f "$B/tmp/mi-trusttunnel/run/lists-next"
-t "g: метка из будущего (часы ушли назад) — проверка нужна" 'echo "$(( $(date +%s) + 999 )) $COMMIT" >"$B/data/mi-trusttunnel/lists/.checked"; due g'
-t "g: прошли сутки — проверка нужна" 'echo "$(( $(date +%s) - 86401 )) $COMMIT" >"$B/data/mi-trusttunnel/lists/.checked"; due g'
-t "g: метка свежая, коммит снимка тот же — проверка не нужна" 'echo "$(date +%s) $COMMIT" >"$B/data/mi-trusttunnel/lists/.checked"; ! due g'
-t "g: отсрочка в RAM действует без метки .checked" 'rm -f "$B/data/mi-trusttunnel/lists/.checked"; echo "$(( $(date +%s) + 600 )) $COMMIT" >"$B/tmp/mi-trusttunnel/run/lists-next"; ! due g'
-t "g: отсрочка дальше суток (часы ушли назад) не в счёт" 'echo "$(( $(date +%s) + 90000 )) $COMMIT" >"$B/tmp/mi-trusttunnel/run/lists-next"; due g'
-t "g: истёкшая отсрочка — решает метка (её нет — проверка нужна)" 'echo "$(( $(date +%s) - 1 )) $COMMIT" >"$B/tmp/mi-trusttunnel/run/lists-next"; due g'
+rm -f "$B/tmp/mi-lumruri/run/lists-next"
+t "g: метка из будущего (часы ушли назад) — проверка нужна" 'echo "$(( $(date +%s) + 999 )) $COMMIT" >"$B/data/mi-lumruri/lists/.checked"; due g'
+t "g: прошли сутки — проверка нужна" 'echo "$(( $(date +%s) - 86401 )) $COMMIT" >"$B/data/mi-lumruri/lists/.checked"; due g'
+t "g: метка свежая, коммит снимка тот же — проверка не нужна" 'echo "$(date +%s) $COMMIT" >"$B/data/mi-lumruri/lists/.checked"; ! due g'
+t "g: отсрочка в RAM действует без метки .checked" 'rm -f "$B/data/mi-lumruri/lists/.checked"; echo "$(( $(date +%s) + 600 )) $COMMIT" >"$B/tmp/mi-lumruri/run/lists-next"; ! due g'
+t "g: отсрочка дальше суток (часы ушли назад) не в счёт" 'echo "$(( $(date +%s) + 90000 )) $COMMIT" >"$B/tmp/mi-lumruri/run/lists-next"; due g'
+t "g: истёкшая отсрочка — решает метка (её нет — проверка нужна)" 'echo "$(( $(date +%s) - 1 )) $COMMIT" >"$B/tmp/mi-lumruri/run/lists-next"; due g'
 
 echo "(д) после перезагрузки (RAM пуста) состояние проверки восстанавливается из /data"
 rm -f "$RUNS/lists.json"; lists a sync
@@ -158,7 +158,7 @@ check a "сертификат (код 60) — «нет связи», одна о
 t "h: после ошибки сертификата остальные не запрашивались, повтор через час" '[ "$(wc -l <"$W/a/lt/curl.log")" = 1 ] && ! due a && [ "$(( $(date +%s) - $(cut -d " " -f 1 "$UPD/.checked") ))" -ge 82700 ]'
 
 echo "(и) новый релиз с другим снимком: старая копия в /data не используется"
-REL2="$A/data/mi-trusttunnel/releases/0.9.0/payload/lists"
+REL2="$A/data/mi-lumruri/releases/0.9.0/payload/lists"
 sed -i "s/$COMMIT/$(printf 'f%.0s' $(seq 40))/" "$REL2/catalog.json"
 printf '\nsnap-new.example.com\n' >>"$REL2/Services/youtube.lst"
 t "i: в /data старая копия YouTube (lab-new)" 'grep -qx lab-new.example.com "$UPD/Services/youtube.lst"'
@@ -174,33 +174,33 @@ echo 'resp() { echo ok; }' >"$W/a/lt/scenario"; lists a update
 t "i: после проверки .base — коммит нового снимка, YouTube снова из /data" '[ "$(cat "$UPD/.base")" = "$(printf "f%.0s" $(seq 40))" ] && grep -qx lab-new.example.com "$CATD/svc-youtube.list" && ! due a'
 
 echo "(к) нет каталога: проверка не нужна, журнал — не чаще раза в час"
-Z="$W/k/root"; root k; rm -f "$Z/data/mi-trusttunnel/releases/0.9.0/payload/lists/catalog.json"
+Z="$W/k/root"; root k; rm -f "$Z/data/mi-lumruri/releases/0.9.0/payload/lists/catalog.json"
 t "k: без каталога проверка не нужна" '! due k'
 lists k update; lists k update; lists k sync
-t "k: «нет каталога» в журнале один раз" '[ "$(grep -c "нет каталога" "$Z/tmp/mi-trusttunnel/log/mitt.log")" = 1 ]'
-t "k: метка повтора через час, curl не вызывался" '[ "$(( $(date +%s) - $(cut -d " " -f 1 "$Z/data/mi-trusttunnel/lists/.checked") ))" -ge 82700 ] && [ ! -e "$W/k/lt/curl.log" ]'
+t "k: «нет каталога» в журнале один раз" '[ "$(grep -c "нет каталога" "$Z/tmp/mi-lumruri/log/mitt.log")" = 1 ]'
+t "k: метка повтора через час, curl не вызывался" '[ "$(( $(date +%s) - $(cut -d " " -f 1 "$Z/data/mi-lumruri/lists/.checked") ))" -ge 82700 ] && [ ! -e "$W/k/lt/curl.log" ]'
 
 echo "(л) /data только для чтения: проверка не повторяется каждые 5 с, состояние видно"
 if [ "$(id -u)" = 0 ]; then echo "  skip под root права каталога не действуют"
 else
   L="$W/l/root"; root l; lists l sync
-  mkdir -p "$L/data/mi-trusttunnel/lists"; chmod 555 "$L/data/mi-trusttunnel/lists"
+  mkdir -p "$L/data/mi-lumruri/lists"; chmod 555 "$L/data/mi-lumruri/lists"
   t "l: проверка нужна (метки нет)" 'due l'
   # служба проверяет lists_due каждые 5 с: десять «тиков» — один прогон update
   for i in 1 2 3 4 5 6 7 8 9 10; do due l && lists l update; done
   t "l: за 10 тиков curl прошёл по списку один раз" '[ "$(wc -l <"$W/l/lt/curl.log")" = "$NFILES" ]'
   check l "состояние в RAM: ok=false, ошибка про /data" 'not s["ok"] and any(e.startswith("/data: ") for e in s["errors"]) and s["checked"]>0'
-  t "l: отсрочка в RAM — через час" '[ "$(( $(cut -d " " -f 1 "$L/tmp/mi-trusttunnel/run/lists-next") - $(date +%s) ))" -ge 3500 ] && ! due l'
-  t "l: метки .checked нет, временных файлов нет" '[ ! -e "$L/data/mi-trusttunnel/lists/.checked" ] && [ -z "$(ls -A "$L/data/mi-trusttunnel/lists")" ]'
-  t "l: списки из снимка работают" 'cmp -s "$L/data/mi-trusttunnel/etc/categories/svc-youtube.list" "$ROOT/package/lists/Services/youtube.lst"'
-  chmod 755 "$L/data/mi-trusttunnel/lists"
+  t "l: отсрочка в RAM — через час" '[ "$(( $(cut -d " " -f 1 "$L/tmp/mi-lumruri/run/lists-next") - $(date +%s) ))" -ge 3500 ] && ! due l'
+  t "l: метки .checked нет, временных файлов нет" '[ ! -e "$L/data/mi-lumruri/lists/.checked" ] && [ -z "$(ls -A "$L/data/mi-lumruri/lists")" ]'
+  t "l: списки из снимка работают" 'cmp -s "$L/data/mi-lumruri/etc/categories/svc-youtube.list" "$ROOT/package/lists/Services/youtube.lst"'
+  chmod 755 "$L/data/mi-lumruri/lists"
 fi
 
 echo "(м) служба: итог рендера и полного применения — в status.json (mitt-lib.sh, BusyBox awk)"
-M="$W/m/root"; root m; ME="$M/data/mi-trusttunnel/etc"; MS="$M/tmp/mi-trusttunnel/run"
+M="$W/m/root"; root m; ME="$M/data/mi-lumruri/etc"; MS="$M/tmp/mi-lumruri/run"
 echo '{"version": 1, "profiles": []}' >"$ME/config.json"; echo '{"version": 1}' >"$ME/secrets.json"
 # заглушка mi-tt-admin: защитный вызов проходит, полный — сбой с сообщением (в нём кавычки и «\»)
-cat >"$M/tmp/mi-trusttunnel/bin/mi-tt-admin" <<'STUB'
+cat >"$M/tmp/mi-lumruri/bin/mi-tt-admin" <<'STUB'
 #!/bin/sh
 case " $* " in *" --guard-only "*) echo '{ "ok": true }'; exit 0;; esac
 echo '{'
@@ -209,8 +209,8 @@ echo '  "error": { "code": "apply_failed", "message": "iptables-restore: стр�
 echo '}'
 exit 3
 STUB
-chmod +x "$M/tmp/mi-trusttunnel/bin/mi-tt-admin"
-svc() { bb m -c '. "$MITT_ROOT/tmp/mi-trusttunnel/scripts/mitt-lib.sh"; mkdir -p "$STATE" "$LOG"; '"$1" >>"$W/m/out" 2>&1; }
+chmod +x "$M/tmp/mi-lumruri/bin/mi-tt-admin"
+svc() { bb m -c '. "$MITT_ROOT/tmp/mi-lumruri/scripts/mitt-lib.sh"; mkdir -p "$STATE" "$LOG"; '"$1" >>"$W/m/out" 2>&1; }
 sj() { python3 -I -c 'import json,sys
 s=json.load(open(sys.argv[1])); r=s["render"]; a=s["apply"]; print(eval(sys.argv[2]))' "$MS/status.json" "$1" 2>&1; }
 svc 'render_now; echo "render $?"; admin_apply panel-request; admin_apply panel-request-guard --guard-only; status_write'
@@ -220,7 +220,7 @@ t "m: status.json разбирается; рендер не прошёл — п�
 t "m: полное применение — код 3 и причина; защитный вызов после него её не скрыл" '[ "$(sj '\''a["exit"] == 3 and a["tag"] == "panel-request" and a["error"].endswith("строка 3 " + chr(39) + "x" + chr(39) + " не принята") and s["last_apply"]["exit"] == 0'\'')" = True ]'
 echo '{"version": 1, "default_action": {"type": "direct"}}' >"$ME/config.json"
 echo '#!/bin/sh
-echo "{ \"ok\": true }"' >"$M/tmp/mi-trusttunnel/bin/mi-tt-admin"
+echo "{ \"ok\": true }"' >"$M/tmp/mi-lumruri/bin/mi-tt-admin"
 svc 'render_now; admin_apply panel-request; status_write'
 t "m: удачные рендер и применение — ok, exit 0, без ошибки" '[ "$(sj '\''r == {"ok": True, "at": r["at"]} and a["exit"] == 0 and a["error"] is None'\'')" = True ]'
 [ "$FAIL" -eq 0 ] || echo "  вывод (м): $(tail -5 "$W/m/out"); status.json после сбоя: $(cat "$W/m/status.1.json" 2>/dev/null)"

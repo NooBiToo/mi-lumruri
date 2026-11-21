@@ -1,6 +1,7 @@
 """Детерминированное XZ (preset 6, словарь 8 МиБ, CRC32 — как в ARCHITECTURE.md) и детерминированный tar для пакета.
   xzpack.py xz <вход> <выход>            — сжать; печатает SHA-256 и размер входа
-  xzpack.py tar <каталог> <выход.tar>    — tar без владельцев и времени (mtime 0), пути отсортированы"""
+  xzpack.py tar <каталог> <выход.tar> [имя] — tar без владельцев и времени (mtime 0), пути отсортированы;
+                                             [имя] — другое имя верхнего каталога в архиве"""
 import hashlib
 import lzma
 import os
@@ -26,7 +27,10 @@ elif sys.argv[1] == "tar":
             paths.append((os.path.join(rel, f), os.path.join(d, f), False))
     with tarfile.open(sys.argv[3], "w", format=tarfile.USTAR_FORMAT) as t:
         for rel, full, isdir in sorted(paths):
-            ti = tarfile.TarInfo(rel.replace(os.sep, "/"))
+            name = rel.replace(os.sep, "/")
+            if len(sys.argv) > 4:
+                name = sys.argv[4] + name[len(base):]
+            ti = tarfile.TarInfo(name)
             ti.mtime, ti.uid, ti.gid, ti.uname, ti.gname = 0, 0, 0, "", ""
             if isdir:
                 ti.type, ti.mode = tarfile.DIRTYPE, 0o755

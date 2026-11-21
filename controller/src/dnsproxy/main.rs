@@ -8,7 +8,7 @@
 //! TLS — rustls с криптографией RustCrypto (чистый Rust, без C), корневые сертификаты — webpki-roots.
 //!
 //!   mi-tt-dns --listen 127.0.0.1:5453 --doh https://cloudflare-dns.com/dns-query --ip 1.1.1.1 --ip 1.0.0.1 \
-//!             [--fallback /tmp/resolv.conf.auto] [--status /tmp/mi-trusttunnel/run/dns-proxy.json]
+//!             [--fallback /tmp/resolv.conf.auto] [--status /tmp/mi-lumruri/run/dns-proxy.json]
 //!   mi-tt-dns --listen … --dot dns.quad9.net --ip 9.9.9.9 …
 //!   mi-tt-dns --probe 127.0.0.1:5453 example.com   — один вопрос A, код возврата 0 при ответе
 //!   mi-tt-dns --version

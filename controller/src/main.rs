@@ -1,4 +1,4 @@
-//! mi-tt-ctl — контроллер mi-trusttunnel, срез «чтение, проверка и предпросмотр правила».
+//! mi-tt-ctl — контроллер Mi Lumruri, срез «чтение, проверка и предпросмотр правила».
 //! Ничего не применяет к сети и не записывает настройки.
 
 use mi_tt::{api, auth, gate, model, render, store, zapret};
@@ -8,7 +8,7 @@ use std::process::ExitCode;
 
 use api::{MAX_BODY_BYTES, MAX_CONFIG_BYTES, Response, WriteAccess, check_origin, handle, read_limited, reason};
 
-const DEFAULT_CONFIG: &str = "/data/mi-trusttunnel/config.json";
+const DEFAULT_CONFIG: &str = "/data/mi-lumruri/config.json";
 const USAGE: &str = "mi-tt-ctl — чтение, проверка и предпросмотр правил (срез без применения)
 
   mi-tt-ctl validate <config.json>

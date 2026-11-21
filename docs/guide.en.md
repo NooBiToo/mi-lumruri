@@ -2,7 +2,7 @@
 
 [Русский](guide.md) · **English** · [简体中文](guide.zh-CN.md)
 
-This guide covers Mi Lumruri version 0.4.0. Internal names have not changed: package files are named `mi-trusttunnel-*.tar`, and on the router the package lives in `/data/mi-trusttunnel` and `/tmp/mi-trusttunnel`.
+This guide covers Mi Lumruri version 0.5.0. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
 
 You need a BE7000 (RC06) with firmware 1.1.38, working root access over SSH from the home network, the installation TAR, and the parameters of your TrustTunnel server. The stock release firmware usually ships with SSH turned off.
 
@@ -29,7 +29,7 @@ The answer `0` means root login works and you can run the installer. On `Connect
 
 ## Quick install from a computer
 
-Download `mi-trusttunnel-*.tar`, `SHA256SUMS` and `install.py` from the [latest release](https://github.com/NooBiToo/mi-lumruri/releases/latest) into one folder (or unpack the ZIP from GitHub Actions). Open a terminal in the folder with `install.py`, the TAR and `SHA256SUMS`. Keep the original file names. On Windows, run:
+Download `mi-lumruri-*.tar`, `SHA256SUMS` and `install.py` from the [latest release](https://github.com/NooBiToo/mi-lumruri/releases/latest) into one folder (or unpack the ZIP from GitHub Actions). Open a terminal in the folder with `install.py`, the TAR and `SHA256SUMS`. Keep the original file names. On Windows, run:
 
 ```powershell
 python install.py 192.168.31.1
@@ -71,10 +71,10 @@ ssh root@192.168.31.1 "grep /mnt/usb /proc/mounts"
 Pass a directory on that drive to the installer:
 
 ```powershell
-python install.py 192.168.31.1 --store /mnt/usb-XXXX/mi-trusttunnel
+python install.py 192.168.31.1 --store /mnt/usb-XXXX/mi-lumruri
 ```
 
-For a manual install, `sh install.sh install --store=/mnt/usb-XXXX/mi-trusttunnel` does the same. The choice is remembered: later updates install without `--store`.
+For a manual install, `sh install.sh install --store=/mnt/usb-XXXX/mi-lumruri` does the same. The choice is remembered: later updates install without `--store`.
 
 What to know about using a drive:
 
@@ -108,15 +108,15 @@ In the SSH session on the router, run the whole block. The `-O` flag in the prev
 ```sh
 stage=$(mktemp -d /tmp/mitt-install.XXXXXX) &&
   tar xf /tmp/mitt-install.tar -C "$stage" &&
-  cd "$stage/mi-trusttunnel" &&
+  cd "$stage/mi-lumruri" &&
   sh install.sh
 ```
 
 After a successful install, set up login:
 
 ```sh
-sh /data/mi-trusttunnel/mitt-boot.sh auth init
-openssl x509 -in /data/mi-trusttunnel/etc/tls/cert.pem -noout -fingerprint -sha256
+sh /data/mi-lumruri/mitt-boot.sh auth init
+openssl x509 -in /data/mi-lumruri/etc/tls/cert.pem -noout -fingerprint -sha256
 ```
 
 Set a panel password of at least 12 characters. Open **`https://192.168.31.1:8443/`** from the home network. On the first login, compare the certificate SHA-256 in the browser with the fingerprint from the SSH session.
@@ -126,8 +126,8 @@ Set a panel password of at least 12 characters. Open **`https://192.168.31.1:844
 By default you log in to the panel with a password only. To turn on one-time codes from an app, run on the router:
 
 ```sh
-sh /data/mi-trusttunnel/mitt-boot.sh auth reset-totp
-sh /data/mi-trusttunnel/mitt-boot.sh auth confirm
+sh /data/mi-lumruri/mitt-boot.sh auth reset-totp
+sh /data/mi-lumruri/mitt-boot.sh auth confirm
 ```
 
 The first command shows a QR code (scan it with an authenticator app) and prints one-time recovery codes. Store them offline. The second command asks for a code from the app. Until the code is confirmed, panel login is closed.
@@ -278,7 +278,7 @@ If the saved settings fail validation, the panel still loads them and offers the
 
 The service lists come from the [itdoginfo/allow-domains](https://github.com/itdoginfo/allow-domains) project. A snapshot of the lists is included in the package, so everything works right after installation, even without internet.
 
-The router checks for updates on `raw.githubusercontent.com` on its own, once a day by default. You manage the lists in the **Site lists** card on the Sites screen. It shows when the lists were updated and how the last check ended, the **Update** button (checks immediately, together with the ad blocking list) and the check frequency: Every 6 hours, Daily, Weekly or Manually. Each downloaded file is checked: a response that does not look like a list, or a list with less than half of the previous entries, is not applied, and the previous one stays. New versions are stored in `/data/mi-trusttunnel/lists` and apply immediately. If there is no connection, the next attempt is in an hour. If `/data` is full or not writable, updates are not saved, the error shows on Overview and in the Site lists card, and the next attempt is also in an hour. With the Manually frequency, the router does not check on its own, only when you click Update. On the same schedule and with the same button, the router updates the server parameters from the [subscription link](#server), if one is set.
+The router checks for updates on `raw.githubusercontent.com` on its own, once a day by default. You manage the lists in the **Site lists** card on the Sites screen. It shows when the lists were updated and how the last check ended, the **Update** button (checks immediately, together with the ad blocking list) and the check frequency: Every 6 hours, Daily, Weekly or Manually. Each downloaded file is checked: a response that does not look like a list, or a list with less than half of the previous entries, is not applied, and the previous one stays. New versions are stored in `/data/mi-lumruri/lists` and apply immediately. If there is no connection, the next attempt is in an hour. If `/data` is full or not writable, updates are not saved, the error shows on Overview and in the Site lists card, and the next attempt is also in an hour. With the Manually frequency, the router does not check on its own, only when you click Update. On the same schedule and with the same button, the router updates the server parameters from the [subscription link](#server), if one is set.
 
 After you install a new package version, the lists from its snapshot apply until the next check downloads fresh ones.
 
@@ -317,7 +317,7 @@ It works through the router's DNS: for domains from the ad and tracker list, dns
 
 You choose the list in Advanced: **HaGeZi Light** (default, about 90 thousand domains, ads and trackers, rarely affects sites), **HaGeZi Normal** (about 200 thousand, broader, may occasionally break individual sites) or a **Custom link**: an https link to a list of domains or hosts lines (`0.0.0.0 domain`; `#` is a comment), file size up to 12 MiB. The [HaGeZi](https://github.com/hagezi/dns-blocklists) lists (GPL-3.0) are taken in the "domain with subdomains" format.
 
-The router downloads the list on its own: right after you turn it on or change the list, and then at the same frequency as the site lists. The Update button in the Site lists card on Sites updates it too. If the site lists update only manually, the ad list also updates only with this button after the first download (or when you change the list). If the download fails, the next attempt is in an hour. The downloaded list is checked: an HTML page, an empty response, or a file where more than 5% of lines cannot be parsed is not applied, and the previous one stays. Single malformed lines are skipped. The working copy is kept in RAM, and a compressed copy (about 0.6–1.2 MB) is in `/data/mi-trusttunnel/adblock.list.gz`, so blocking works right after a reboot. Advanced shows how many domains are in the list and when it was updated, or why it was not updated.
+The router downloads the list on its own: right after you turn it on or change the list, and then at the same frequency as the site lists. The Update button in the Site lists card on Sites updates it too. If the site lists update only manually, the ad list also updates only with this button after the first download (or when you change the list). If the download fails, the next attempt is in an hour. The downloaded list is checked: an HTML page, an empty response, or a file where more than 5% of lines cannot be parsed is not applied, and the previous one stays. Single malformed lines are skipped. The working copy is kept in RAM, and a compressed copy (about 0.6–1.2 MB) is in `/data/mi-lumruri/adblock.list.gz`, so blocking works right after a reboot. Advanced shows how many domains are in the list and when it was updated, or why it was not updated.
 
 ## DNS
 
@@ -325,7 +325,7 @@ Devices keep getting DNS from the router: DHCP and local names work as before. F
 
 The router resolves domains of sites through the VPN via a separate DNS server, and queries to it go through the tunnel. You choose the server on the **Advanced** screen in the DNS for sites through the VPN block: Cloudflare `1.1.1.1` (default), Quad9 `9.9.9.9`, Google `8.8.8.8`, AdGuard DNS `94.140.14.14`, NextDNS `45.90.28.0` or Custom address, any public IPv4 address. For NextDNS, link the IP of your VPN server in your NextDNS account (Linked IP), otherwise the filters do not apply. The router resolves other domains as usual or through [secure DNS](#secure-dns-dohdot).
 
-**Custom DNS records**: a domain and all its subdomains resolve to the given IPv4 or IPv6 address, and the query does not go out (dnsmasq `address=/domain/address`). Example: a home server with Traefik on `192.168.31.10` and the domain `home.example.com`. One record covers `traefik.home.example.com`, `pve.home.example.com` and the rest. It works for devices that get DNS from the router. The record applies while the mi-trusttunnel service runs. Do not add such a domain to the lists of sites through the VPN or Zapret: the home server must open directly.
+**Custom DNS records**: a domain and all its subdomains resolve to the given IPv4 or IPv6 address, and the query does not go out (dnsmasq `address=/domain/address`). Example: a home server with Traefik on `192.168.31.10` and the domain `home.example.com`. One record covers `traefik.home.example.com`, `pve.home.example.com` and the rest. It works for devices that get DNS from the router. The record applies while the Mi Lumruri service runs. Do not add such a domain to the lists of sites through the VPN or Zapret: the home server must open directly.
 
 ## IPv6 via VPN
 
@@ -362,7 +362,7 @@ Under the simple screens runs the controller's rule model: source (device, netwo
 
 **From the panel** (since version 0.4.0). Advanced has an Update block. The router does not look for new versions on its own: the Check button finds the latest release on GitHub. The router needs access to `api.github.com` and `github.com`. If a newer one exists, the Update to … button appears. The router downloads the package itself, compares its SHA-256 with the release's `SHA256SUMS` file, verifies the signature with the pinned key and restarts the service. The panel disappears for about half a minute, and settings are kept. If the router runs your own build signed with your key, the panel offers Switch to GitHub releases and update. The router then accepts the package with the GitHub release key (`e4a271890e5643ab`) and pins it. The panel does not accept other keys.
 
-**From a computer.** To update, repeat the quick install, or copy the new TAR and repeat step 2 up to the login setup. Existing settings and the second factor are kept. Releases are stored in `/data/mi-trusttunnel/releases` (or in the `--store` directory): the current and the previous one. Older ones are deleted. A new release needs about 4.5 MB plus a 2 MiB reserve. If that much is not available, the installer deletes old releases, and with very little room it installs the update without keeping the previous release. Rollback is then unavailable. See [If there is not enough space in `/data`](#if-there-is-not-enough-space-in-data).
+**From a computer.** To update, repeat the quick install, or copy the new TAR and repeat step 2 up to the login setup. Existing settings and the second factor are kept. Releases are stored in `/data/mi-lumruri/releases` (or in the `--store` directory): the current and the previous one. Older ones are deleted. A new release needs about 4.5 MB plus a 2 MiB reserve. If that much is not available, the installer deletes old releases, and with very little room it installs the update without keeping the previous release. Rollback is then unavailable. See [If there is not enough space in `/data`](#if-there-is-not-enough-space-in-data).
 
 An update must be signed with the same key as the first install: on the first install the router pins the package's public key and then accepts only packages signed with it. Packages from GitHub releases and GitHub Actions builds are signed with the CI key, and a package built on your own computer is signed with your key from `.tools/keys/`. If you install your own build over an install from a release, or the other way around, the installer refuses and shows both fingerprints: "package is signed with a different key: pinned …, package has …" («пакет подписан другим ключом: закреплён …, у пакета …»). To switch to another key, repeat the install with the `--trust-key` flag and the new key's fingerprint from that message:
 
@@ -375,7 +375,7 @@ On the router, the same is `sh install.sh install --trust-key=<fingerprint>`. Se
 You can see the currently pinned key on the router:
 
 ```sh
-/tmp/mi-trusttunnel/bin/mi-tt-admin release key-fingerprint /data/mi-trusttunnel/keys/release.pub
+/tmp/mi-lumruri/bin/mi-tt-admin release key-fingerprint /data/mi-lumruri/keys/release.pub
 ```
 
 The answer is a line like `{"ok":true,"key_fingerprint":"…"}`.
@@ -383,7 +383,7 @@ The answer is a line like `{"ok":true,"key_fingerprint":"…"}`.
 To see the state of the running service, run over SSH:
 
 ```sh
-sh /data/mi-trusttunnel/mitt-boot.sh status
+sh /data/mi-lumruri/mitt-boot.sh status
 ```
 
 To roll back, run **one** command from the unpacked package directory that contains `install.sh`. If the directory is gone after a reboot, copy and unpack the TAR again. You do not need to run the installation to roll back.
@@ -399,29 +399,29 @@ Rollback is available after you install a second version, if the installer kept 
 From the unpacked package directory that contains `install.sh`:
 
 ```sh
-sh install.sh uninstall          # keeps settings in /data/mi-trusttunnel/etc
+sh install.sh uninstall          # keeps settings in /data/mi-lumruri/etc
 sh install.sh uninstall --purge  # removes settings too
 ```
 
 Without the package, you can do the same manually over SSH:
 
 ```sh
-sh /data/mi-trusttunnel/mitt-boot.sh stop
+sh /data/mi-lumruri/mitt-boot.sh stop
 uci -q delete firewall.mitt
 uci commit firewall
-rm -rf /tmp/mi-trusttunnel /data/mi-trusttunnel
+rm -rf /tmp/mi-lumruri /data/mi-lumruri
 ```
 
-The first command stops the services, removes the routing rules and removes the mi-trusttunnel file from the dnsmasq settings. If releases were stored on a USB drive, `install.sh uninstall` deletes them on its own. For a manual uninstall, also delete the directory you passed in `--store`.
+The first command stops the services, removes the routing rules and removes the mi-lumruri file from the dnsmasq settings. If releases were stored on a USB drive, `install.sh uninstall` deletes them on its own. For a manual uninstall, also delete the directory you passed in `--store`.
 
-Without `--purge`, `/data/mi-trusttunnel` keeps the settings and the pinned signing key. A package with a different key then installs with the `--trust-key` flag.
+Without `--purge`, `/data/mi-lumruri` keeps the settings and the pinned signing key. A package with a different key then installs with the `--trust-key` flag.
 
 ## If you cannot log in
 
 - **SSH refuses the connection.** Check the LAN address and whether SSH is available on the current firmware. The installer runs inside an SSH session.
 - **The installer reports a lack of space.** It prints the required and available space separately for `/data` and `/tmp`. Check both partitions with the command from step 1. If `/data` is the one that is short, move releases to a USB drive. See [If there is not enough space in `/data`](#if-there-is-not-enough-space-in-data).
 - **The installer says "package signature or hashes failed verification"** («подпись или хэши пакета не прошли проверку»). The package is damaged: download it again. If the installer says "package is signed with a different key" («пакет подписан другим ключом»), it is your own build over a release package, or the other way around: repeat the install with `--trust-key`. See [Updating and rollback](#updating-and-rollback).
-- **Overview keeps showing "Settings not applied".** Open Diagnostics and click Check: it shows which part does not work. The router saves the report of a failed apply to `/tmp/mi-trusttunnel/run/apply.<tag>.fail.json`. You can attach it to a problem report together with the diagnostics report.
+- **Overview keeps showing "Settings not applied".** Open Diagnostics and click Check: it shows which part does not work. The router saves the report of a failed apply to `/tmp/mi-lumruri/run/apply.<tag>.fail.json`. You can attach it to a problem report together with the diagnostics report.
 - **The panel rejects the code after a reboot.** Check the time with `date -u`. Wait for the clock to sync or use a one-time recovery code. A TOTP code that was already used is not accepted again.
 
 [Back to the project overview](../README.en.md)

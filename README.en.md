@@ -12,7 +12,7 @@ Selective VPN and DPI bypass for the Xiaomi BE7000 on stock firmware. Paste a li
 
 ## Install
 
-Download three files from the [latest release](https://github.com/NooBiToo/mi-lumruri/releases/latest) into one folder: `mi-trusttunnel-*.tar`, `SHA256SUMS` and `install.py`. In that folder run:
+Download three files from the [latest release](https://github.com/NooBiToo/mi-lumruri/releases/latest) into one folder: `mi-lumruri-*.tar`, `SHA256SUMS` and `install.py`. In that folder run:
 
 ```sh
 python install.py 192.168.31.1
@@ -74,7 +74,7 @@ The full list is in the [guide](docs/guide.en.md#limitations).
 
 ## For developers
 
-The project used to be called mi-trusttunnel. That name remains in package files, programs and folders on the router (`/data/mi-trusttunnel`), so existing installs update without reinstalling.
+The project used to be called mi-trusttunnel. Since version 0.5.0 the package and the folders on the router are named `mi-lumruri` (`/data/mi-lumruri`, `/tmp/mi-lumruri`). Installing the new version over 0.4 moves `/data/mi-trusttunnel` to `/data/mi-lumruri` together with settings, passwords and keys, and leaves a link in the old place, so rolling back to 0.4 and old commands keep working. The programs inside the package are still called `mi-tt-*`.
 
 - The controller, the admin utility and the DNS proxy are written in Rust and built into a single program, `mi-tt`.
 - The panel uses Vue 3, TypeScript and PrimeVue.

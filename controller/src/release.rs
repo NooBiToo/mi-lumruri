@@ -139,7 +139,7 @@ mod tests {
         std::fs::write(d.join("payload/a.bin"), b"hello").unwrap();
         let kp = ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new(crate::auth::random_bytes::<32>()));
         let (h, n) = sha256_file(&d.join("payload/a.bin")).unwrap();
-        let m = Manifest { name: "mi-trusttunnel".into(), version: "1".into(), target: "t".into(), created: "c".into(), pubkey: crate::auth::hex(kp.pk.as_ref()),
+        let m = Manifest { name: "mi-lumruri".into(), version: "1".into(), target: "t".into(), created: "c".into(), pubkey: crate::auth::hex(kp.pk.as_ref()),
             files: vec![FileEntry { path: "payload/a.bin".into(), sha256: h, size: n, unpacked: None, unpacked_sha256: None, unpacked_size: None }], data_bytes: n, tmp_bytes: 0 };
         let mb = serde_json::to_vec(&m).unwrap();
         std::fs::write(d.join("manifest.json"), &mb).unwrap();

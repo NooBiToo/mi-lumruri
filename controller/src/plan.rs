@@ -34,7 +34,7 @@ pub const METRIC_GUARD: u32 = 4096;
 /// Биты skb mark стока заняты (по miqosd_init.sh: QoS 0xffff8000, mwan3 0x3f00, родконтроль 0xf, uu 0xf0) —
 /// свободен только 0x4000: им помечается трафик «через TrustTunnel». Коллизии проверяются при каждом применении.
 pub const NF_MARK: u32 = 0x4000;
-pub const NF_COMMENT: &str = "mi-trusttunnel";
+pub const NF_COMMENT: &str = "mi-lumruri";
 pub const CHAIN_PREFIX: &str = "MITT_";
 pub const SET_PREFIX: &str = "mitt";
 /// Наборы, которые заполняет dnsmasq: запись живёт сутки после последнего ответа.
@@ -843,7 +843,7 @@ pub fn reconcile(desired: &BTreeSet<Entry>, owned: &BTreeSet<Entry>, live: &Live
                     } else if uses_marks && !in_zone {
                         d.conflicts.push(format!("чужое правило использует биты наших меток ({ours_mask:#x}): {}", e.label()));
                     } else {
-                        d.conflicts.push(format!("чужое правило в зоне mi-trusttunnel: {}", e.label()));
+                        d.conflicts.push(format!("чужое правило в зоне Mi Lumruri: {}", e.label()));
                     }
                 }
             }

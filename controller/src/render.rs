@@ -250,7 +250,7 @@ pub fn client_toml_with(e: &Endpoint, password: &str, fallback: &[std::net::IpAd
         None => "certificate = \"\"".into(),
     };
     format!(
-        "# mi-trusttunnel: сформировано автоматически, правки перезаписываются\n\
+        "# mi-lumruri: сформировано автоматически, правки перезаписываются\n\
 loglevel = \"info\"\n\
 vpn_mode = \"general\"\n\
 killswitch_enabled = false\n\

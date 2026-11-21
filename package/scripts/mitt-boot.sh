@@ -1,5 +1,5 @@
 #!/bin/sh
-# mi-trusttunnel: загрузчик. Регистрируется установщиком как `config include 'mitt'` firewall (fw3 вызывает его
+# mi-lumruri: загрузчик. Регистрируется установщиком как `config include 'mitt'` firewall (fw3 вызывает его
 # при загрузке и при каждой перезагрузке firewall). Без WAN: всё локально из /data, сеть не нужна.
 #   холодный старт: распаковка в RAM, render, apply --guard-only (защита до движков и клиентов), панель, служба;
 #   перезагрузка firewall: служба уже работает — восстановить свои правила (apply), fw3 мог их снять;
@@ -10,7 +10,7 @@ D="$(cd "$(dirname "$0")" && pwd)"
 . "$D/mitt-lib.sh"
 case "${1:-}" in
   auth)
-    shift; [ -x "$BIN/mi-tt-admin" ] || { echo "mi-trusttunnel: служба не запущена (нет $BIN/mi-tt-admin): sh install.sh install" >&2; exit 1; }
+    shift; [ -x "$BIN/mi-tt-admin" ] || { echo "mi-lumruri: служба не запущена (нет $BIN/mi-tt-admin): sh install.sh install" >&2; exit 1; }
     MI_TT_AUTH_DIR="$ETC/auth" MI_TT_SESSION_DIR="$RUN/sessions" exec "$BIN/mi-tt-admin" auth "$@";;
   status) cat "$STATE/status.json" 2>/dev/null || echo '{"protection":"none"}'; exit 0;;
 esac

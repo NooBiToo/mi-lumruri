@@ -318,8 +318,8 @@ useAutosave({
               <ChevronDown :size="16" :class="['disclose__icon', { 'disclose__icon--open': totpHelp }]" aria-hidden="true" />{{ t('Как включить') }}
             </button>
             <span v-show="totpHelp" id="totp-help" class="setrow__desc">{{ t('Подключитесь к роутеру по SSH и выполните') }}
-              <code>sh /data/mi-trusttunnel/mitt-boot.sh auth reset-totp</code>{{ t(', отсканируйте QR-код приложением, затем') }}
-              <code>sh /data/mi-trusttunnel/mitt-boot.sh auth confirm</code>{{ t('. Подробнее — в инструкции, раздел «Второй фактор».') }}</span>
+              <code>sh /data/mi-lumruri/mitt-boot.sh auth reset-totp</code>{{ t(', отсканируйте QR-код приложением, затем') }}
+              <code>sh /data/mi-lumruri/mitt-boot.sh auth confirm</code>{{ t('. Подробнее — в инструкции, раздел «Второй фактор».') }}</span>
           </template>
         </span>
         <span :class="['badge', totp ? 'badge--ok' : 'badge--idle']">{{ totp ? t('Пароль и код') : t('Только пароль') }}</span>

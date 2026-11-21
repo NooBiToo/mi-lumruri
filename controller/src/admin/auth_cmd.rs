@@ -18,7 +18,7 @@ pub const USAGE: &str = "  mi-tt-admin auth init [--stdin] [--force] [--with-tot
   mi-tt-admin auth unlock                     # снять блокировку после неудачных попыток
   mi-tt-admin auth revoke-sessions            # завершить все сессии
   mi-tt-admin auth status                     # состояние без секретов
-  Каталоги: --auth-dir (MI_TT_AUTH_DIR, по умолчанию /data/mi-trusttunnel/auth), --session-dir (MI_TT_SESSION_DIR).";
+  Каталоги: --auth-dir (MI_TT_AUTH_DIR, по умолчанию /data/mi-lumruri/auth), --session-dir (MI_TT_SESSION_DIR).";
 
 struct Opts {
     cmd: String,

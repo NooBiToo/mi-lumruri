@@ -1,5 +1,5 @@
 #!/bin/sh
-# mi-trusttunnel: подписка TrustTunnel 1.3. По ссылке из secrets.json (https://user:pass@host/path, секрет) скачивает
+# mi-lumruri: подписка TrustTunnel 1.3. По ссылке из secrets.json (https://user:pass@host/path, секрет) скачивает
 # JSON с параметрами подключения и переносит его в настройки профиля (mi-tt-ctl subscription-import): адрес, имя
 # сервера, логин, пароль, HTTP/3, anti-DPI, сертификат, префикс client_random. Изменилось — заявка на применение.
 # Запускает служба: по расписанию списков сайтов и по кнопке панели (sub-update.request). Итог — $STATE/subscription.json.

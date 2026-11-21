@@ -25,8 +25,8 @@ use subtle::ConstantTimeEq;
 
 use crate::store::{lock, write_atomic};
 
-pub const DEFAULT_AUTH_DIR: &str = "/data/mi-trusttunnel/auth";
-pub const DEFAULT_SESSION_DIR: &str = "/tmp/mi-trusttunnel/sessions";
+pub const DEFAULT_AUTH_DIR: &str = "/data/mi-lumruri/auth";
+pub const DEFAULT_SESSION_DIR: &str = "/tmp/mi-lumruri/sessions";
 pub const COOKIE_SESSION: &str = "__Host-mitt_sess";
 pub const COOKIE_PENDING: &str = "__Host-mitt_pre";
 pub const CSRF_HEADER: &str = "X-MITT-CSRF";
@@ -210,7 +210,7 @@ pub fn totp_at(secret_b32: &str, time: u64) -> Option<String> {
 }
 
 pub fn otpauth_uri(secret_b32: &str, label: &str) -> String {
-    format!("otpauth://totp/mi-trusttunnel:{label}?secret={secret_b32}&issuer=mi-trusttunnel&algorithm=SHA1&digits={TOTP_DIGITS}&period={TOTP_STEP}")
+    format!("otpauth://totp/Mi%20Lumruri:{label}?secret={secret_b32}&issuer=Mi%20Lumruri&algorithm=SHA1&digits={TOTP_DIGITS}&period={TOTP_STEP}")
 }
 
 /// Шаг, которому соответствует код (окно ±1 шаг), без учёта повторов.

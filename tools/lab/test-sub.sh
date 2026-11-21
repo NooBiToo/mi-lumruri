@@ -32,11 +32,11 @@ esac
 EOF
 chmod +x "$SB"/*
 
-R="$W/root"; LT="$W/lt"; E="$R/data/mi-trusttunnel/etc"; S="$R/tmp/mi-trusttunnel/run"
-mkdir -p "$E" "$S" "$R/tmp/mi-trusttunnel/bin" "$R/tmp/mi-trusttunnel/scripts" "$LT"
-cp "$ROOT"/package/scripts/*.sh "$R/tmp/mi-trusttunnel/scripts/"
-printf '#!/bin/sh\nexec %s %s.arm64 "$@"\n' "$Q" "$R/tmp/mi-trusttunnel/bin/mi-tt-ctl" >"$R/tmp/mi-trusttunnel/bin/mi-tt-ctl"; chmod +x "$R/tmp/mi-trusttunnel/bin/mi-tt-ctl"
-cp "$MT" "$R/tmp/mi-trusttunnel/bin/mi-tt-ctl.arm64"
+R="$W/root"; LT="$W/lt"; E="$R/data/mi-lumruri/etc"; S="$R/tmp/mi-lumruri/run"
+mkdir -p "$E" "$S" "$R/tmp/mi-lumruri/bin" "$R/tmp/mi-lumruri/scripts" "$LT"
+cp "$ROOT"/package/scripts/*.sh "$R/tmp/mi-lumruri/scripts/"
+printf '#!/bin/sh\nexec %s %s.arm64 "$@"\n' "$Q" "$R/tmp/mi-lumruri/bin/mi-tt-ctl" >"$R/tmp/mi-lumruri/bin/mi-tt-ctl"; chmod +x "$R/tmp/mi-lumruri/bin/mi-tt-ctl"
+cp "$MT" "$R/tmp/mi-lumruri/bin/mi-tt-ctl.arm64"
 cat >"$E/config.json" <<'EOF'
 { "version": 1, "profiles": [{ "id": "tt", "name": "Мой сервер", "kind": "trusttunnel", "on_failure": "block" }],
   "networks": [], "devices": [], "groups": [], "rules": [], "default_action": { "type": "direct" } }
@@ -44,7 +44,7 @@ EOF
 printf '{"version":1,"profiles":{"tt":{"subscription_url":"https://alice:pw@vpn.example.com/subscription"}}}\n' >"$E/secrets.json" # secret-scan: allow тестовая ссылка
 printf '{"version":1,"hostname":"vpn.example.com","address":"203.0.113.1:443","username":"alice","password":"lab-pass-1","upstream_protocol":"http3","anti_dpi":false,"skip_verification":false}' >"$LT/sub.json" # secret-scan: allow тестовый пароль
 sub() { timeout 300 env -i PATH="$SB" MITT_ROOT="$R" MITT_QUIET=1 MITT_CURL="$SB/curl" LT="$LT" MI_TT_RUN_DIR="$S" \
-  "$Q" -L "$F" "$F/bin/busybox" ash "$R/tmp/mi-trusttunnel/scripts/mitt-sub.sh" >>"$W/out" 2>&1; echo "  [код $?]"; }
+  "$Q" -L "$F" "$F/bin/busybox" ash "$R/tmp/mi-lumruri/scripts/mitt-sub.sh" >>"$W/out" 2>&1; echo "  [код $?]"; }
 j() { python3 -I -c 'import json,sys; s=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))' "$1" "$2" 2>&1; }
 
 echo "(а) подписка без точки подключения: точка, пароль, заявка на применение"

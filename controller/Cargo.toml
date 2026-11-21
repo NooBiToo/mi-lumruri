@@ -3,7 +3,7 @@ name = "mi-tt-ctl"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.100"
-description = "mi-trusttunnel controller: read, validate and preview device/network rules (read-only slice)"
+description = "Mi Lumruri controller: read, validate and preview device/network rules (read-only slice)"
 license = "MIT"
 publish = false
 

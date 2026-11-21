@@ -148,7 +148,7 @@ export function tempCert() {
   const key = join(dir, 'key.pem')
   const cert = join(dir, 'cert.pem')
   execFileSync('openssl', ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-days', '1',
-    '-subj', '/CN=mi-trusttunnel-stand', '-addext', 'subjectAltName=IP:127.0.0.1,DNS:localhost',
+    '-subj', '/CN=mi-lumruri-stand', '-addext', 'subjectAltName=IP:127.0.0.1,DNS:localhost',
     '-keyout', key, '-out', cert], { stdio: 'ignore', env: { ...process.env, MSYS_NO_PATHCONV: '1', MSYS2_ARG_CONV_EXCL: '*' } })
   return { key: readFileSync(key), cert: readFileSync(cert), certFile: cert, cleanup: () => rmSync(dir, { recursive: true, force: true }) }
 }

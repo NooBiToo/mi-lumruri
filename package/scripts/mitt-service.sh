@@ -1,5 +1,5 @@
 #!/bin/sh
-# mi-trusttunnel: служба (цикл). Запускает и перезапускает клиент TrustTunnel и nfqws2, применяет полную политику после их
+# mi-lumruri: служба (цикл). Запускает и перезапускает клиент TrustTunnel и nfqws2, применяет полную политику после их
 # готовности, выполняет заявки панели (apply.request, restart.request, diag.request, zapret-test.request, lists-update.request), раз в сутки проверяет
 # обновления готовых списков сайтов. Работает без WAN: туннель подключится сам, когда появится связь;
 # до этого трафик «через TrustTunnel» блокируется (unreachable) или идёт напрямую, если так выбрано в профиле.
@@ -53,7 +53,7 @@ dns_sync() { # dnsmasq: наш файл в активном conf-dir стока 
     rm -f "$d/mitt.conf"
   fi
   ${MITT_DNSMASQ_RESTART:-/etc/init.d/dnsmasq restart} >>"$LOG/dnsmasq-restart.log" 2>&1
-  mlog "dnsmasq: файл mi-trusttunnel обновлён, служба перезапущена"
+  mlog "dnsmasq: файл mi-lumruri обновлён, служба перезапущена"
 }
 full_cycle() { # full_cycle <причина>
   if render_now; then

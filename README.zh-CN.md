@@ -12,7 +12,7 @@
 
 ## 安装
 
-从[最新发布版](https://github.com/NooBiToo/mi-lumruri/releases/latest)下载三个文件到同一个文件夹：`mi-trusttunnel-*.tar`、`SHA256SUMS` 和 `install.py`。在该文件夹中运行：
+从[最新发布版](https://github.com/NooBiToo/mi-lumruri/releases/latest)下载三个文件到同一个文件夹：`mi-lumruri-*.tar`、`SHA256SUMS` 和 `install.py`。在该文件夹中运行：
 
 ```sh
 python install.py 192.168.31.1
@@ -74,7 +74,7 @@ python install.py 192.168.31.1
 
 ## 开发者
 
-项目原名 mi-trusttunnel。软件包文件、程序和路由器上的文件夹（`/data/mi-trusttunnel`）仍沿用这个名字，因此已有安装无需重装即可更新。
+项目原名 mi-trusttunnel。自 0.5.0 版本起，安装包和路由器上的文件夹改名为 `mi-lumruri`（`/data/mi-lumruri`、`/tmp/mi-lumruri`）。在 0.4 之上安装新版本时，会把 `/data/mi-trusttunnel` 连同设置、密码和密钥一起移动到 `/data/mi-lumruri`，并在原位置留下链接，因此回滚到 0.4 和旧命令仍然可用。安装包内的程序仍名为 `mi-tt-*`。
 
 - 控制器、管理工具和 DNS 代理用 Rust 编写，并合并为一个程序 `mi-tt`。
 - 面板使用 Vue 3、TypeScript 和 PrimeVue。

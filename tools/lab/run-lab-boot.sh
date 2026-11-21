@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Лаборатория автозагрузки и службы (этап 12): одноразовые user+net+mount+pid namespace; сценарии пакета на штатном
 # BusyBox ARM64, панель на штатных nginx и uhttpd прошивки (qemu-user), контроллер ARM64 (qemu), клиент TrustTunnel и nfqws2 x86_64,
-# настоящий сервер TrustTunnel. Пакет — out/package/mi-trusttunnel (node tools/package.mjs).
+# настоящий сервер TrustTunnel. Пакет — out/package/mi-lumruri (node tools/package.mjs).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-PKG="${1:-$ROOT/out/package/mi-trusttunnel}"
+PKG="${1:-$ROOT/out/package/mi-lumruri}"
 "$ROOT/tools/fw/prepare.sh" >/dev/null
 "$ROOT/tools/lab/fetch-iptables.sh" >/dev/null
 "$ROOT/tools/lab/fetch-ipset.sh" >/dev/null

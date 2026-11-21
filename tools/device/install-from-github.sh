@@ -10,7 +10,7 @@ grep -q "option HARDWARE 'RC06'" "$version_file" &&
 stage=$(mktemp -d /tmp/mitt-install.XXXXXX)
 trap 'rm -rf "$stage"' EXIT
 cd "$stage"
-url=https://github.com/NooBiToo/mi-lumruri/releases/download/v0.4.0/mi-trusttunnel-ci-05a1131e08df.tar
+url=https://github.com/NooBiToo/mi-lumruri/releases/download/v0.4.0/mi-lumruri-ci-05a1131e08df.tar
 if command -v curl >/dev/null; then
   curl -fL --retry 2 -o package.tar "$url"
 else
@@ -21,9 +21,9 @@ digest=$(openssl dgst -sha256 package.tar)
   { echo 'Package SHA-256 mismatch' >&2; exit 1; }
 tar xf package.tar
 rm package.tar
-cd mi-trusttunnel
+if [ -d mi-lumruri ]; then cd mi-lumruri; else cd mi-trusttunnel; fi
 sh install.sh
-base=/data/mi-trusttunnel
+base=/data/mi-lumruri
 if [ ! -f "$base/etc/auth/auth.json" ]; then
   sh "$base/mitt-boot.sh" auth init
 fi

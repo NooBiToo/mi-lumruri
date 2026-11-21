@@ -87,18 +87,18 @@ optional https://t10.test/'
 run() {
   local n="$1" d="$W/$1"
   local RR="$d/root" ZT="$d/zt"
-  mkdir -p "$ZT" "$RR/data/mi-trusttunnel/etc" "$RR/tmp/mi-trusttunnel/bin" "$RR/tmp/mi-trusttunnel/scripts"
-  cp "$ROOT"/package/scripts/*.sh "$RR/tmp/mi-trusttunnel/scripts/"
-  cp "$ST/mi-tt-ctl" "$RR/tmp/mi-trusttunnel/bin/"
-  [ -n "${NOZAP:-}" ] || { mkdir -p "$RR/tmp/mi-trusttunnel/render"; echo --qnum=200 >"$RR/tmp/mi-trusttunnel/render/nfqws2.args"; }
+  mkdir -p "$ZT" "$RR/data/mi-lumruri/etc" "$RR/tmp/mi-lumruri/bin" "$RR/tmp/mi-lumruri/scripts"
+  cp "$ROOT"/package/scripts/*.sh "$RR/tmp/mi-lumruri/scripts/"
+  cp "$ST/mi-tt-ctl" "$RR/tmp/mi-lumruri/bin/"
+  [ -n "${NOZAP:-}" ] || { mkdir -p "$RR/tmp/mi-lumruri/render"; echo --qnum=200 >"$RR/tmp/mi-lumruri/render/nfqws2.args"; }
   printf '%s\n' "$2" >"$d/targets.txt"
   printf '%s\n' "$3" >"$ZT/scenario"
-  printf '{\n  "version": 1,\n  "zapret": {\n    "strategy": "auto",\n    "youtube": "auto"\n  }\n}\n' >"$RR/data/mi-trusttunnel/etc/config.json"
-  cp "$RR/data/mi-trusttunnel/etc/config.json" "$d/config.before"
+  printf '{\n  "version": 1,\n  "zapret": {\n    "strategy": "auto",\n    "youtube": "auto"\n  }\n}\n' >"$RR/data/mi-lumruri/etc/config.json"
+  cp "$RR/data/mi-lumruri/etc/config.json" "$d/config.before"
   [ -z "${PRE:-}" ] || eval "$PRE"
   local t0=$(date +%s)
-  if [ -n "${BG:-}" ]; then bb "$n" "$RR/tmp/mi-trusttunnel/scripts/mitt-zapret-test.sh" >"$d/out" 2>&1 & echo $! >"$d/bgpid"; return 0; fi
-  bb "$n" "$RR/tmp/mi-trusttunnel/scripts/mitt-zapret-test.sh" >"$d/out" 2>&1
+  if [ -n "${BG:-}" ]; then bb "$n" "$RR/tmp/mi-lumruri/scripts/mitt-zapret-test.sh" >"$d/out" 2>&1 & echo $! >"$d/bgpid"; return 0; fi
+  bb "$n" "$RR/tmp/mi-lumruri/scripts/mitt-zapret-test.sh" >"$d/out" 2>&1
   echo "$?" >"$d/rc"
   echo "[$n] код $(cat "$d/rc"), $(( $(date +%s) - t0 )) с"
   [ -z "${NOCHECK:-}" ] || return 0
@@ -108,15 +108,15 @@ run() {
 bb() {
   local d="$W/$1"; shift
   timeout 300 env -i PATH="$SB" MITT_ROOT="$d/root" MITT_QUIET=1 MITT_CURL="$ST/curl" MITT_NFQWS="$ST/nfqws2" MITT_ZAPRET_TARGETS="$d/targets.txt" \
-    MITT_ZT_SETTLE=0 MITT_ZT_APPLY_WAIT=1 MITT_ZT_STOP_WAIT=4 MITT_ZT_RETRY_DELAYS="0 0" ZT="$d/zt" ZSTATE="$d/root/tmp/mi-trusttunnel/run" \
+    MITT_ZT_SETTLE=0 MITT_ZT_APPLY_WAIT=1 MITT_ZT_STOP_WAIT=4 MITT_ZT_RETRY_DELAYS="0 0" ZT="$d/zt" ZSTATE="$d/root/tmp/mi-lumruri/run" \
     "$Q" -L "$F" "$F/bin/busybox" ash "$@"
 }
 # служба: разбор остатка прерванного подбора (zt_recover из mitt-lib.sh)
-recover() { bb "$1" -c '. "$MITT_ROOT/tmp/mi-trusttunnel/scripts/mitt-lib.sh"; zt_recover' >>"$W/$1/out" 2>&1; echo "[$1] разбор службой: код $?"; }
+recover() { bb "$1" -c '. "$MITT_ROOT/tmp/mi-lumruri/scripts/mitt-lib.sh"; zt_recover' >>"$W/$1/out" 2>&1; echo "[$1] разбор службой: код $?"; }
 after() { # общие проверки: заглушки без ошибок, проверочный nfqws2 остановлен
   local n="$1" ZT="$W/$1/zt" RR="$W/$1/root"
   [ -s "$ZT/errors" ] && bad "$n: $(cat "$ZT/errors")"
-  [ -f "$RR/tmp/mi-trusttunnel/run/zapret-nfqws.pid" ] && bad "$n: проверочный nfqws2 не остановлен"
+  [ -f "$RR/tmp/mi-lumruri/run/zapret-nfqws.pid" ] && bad "$n: проверочный nfqws2 не остановлен"
   pgrep -f "$ST/nfqws2" >/dev/null && { bad "$n: процесс заглушки nfqws2 жив"; pkill -f "$ST/nfqws2"; }
   return 0
 }
@@ -124,13 +124,13 @@ after() { # общие проверки: заглушки без ошибок, �
 j() {
   local d="$W/$1"
   python3 -I -c 'import json,sys
-d=sys.argv[1]; s=json.load(open(d+"/root/tmp/mi-trusttunnel/run/zapret-test.json")); c=json.load(open(d+"/root/data/mi-trusttunnel/etc/config.json"))
-import os; areq=os.path.exists(d+"/root/tmp/mi-trusttunnel/run/apply.request")
+d=sys.argv[1]; s=json.load(open(d+"/root/tmp/mi-lumruri/run/zapret-test.json")); c=json.load(open(d+"/root/data/mi-lumruri/etc/config.json"))
+import os; areq=os.path.exists(d+"/root/tmp/mi-lumruri/run/apply.request")
 r=eval(sys.argv[2]); print(r)' "$d" "$2" 2>&1
 }
 check() { # check <имя> <описание> <выражение>
   local r; r="$(j "$1" "$3")"
-  if [ "$r" = True ]; then ok "$1: $2"; else bad "$1: $2 → $r; состояние: $(cat "$W/$1/root/tmp/mi-trusttunnel/run/zapret-test.json" 2>/dev/null); вывод: $(tail -5 "$W/$1/out")"; fi
+  if [ "$r" = True ]; then ok "$1: $2"; else bad "$1: $2 → $r; состояние: $(cat "$W/$1/root/tmp/mi-lumruri/run/zapret-test.json" 2>/dev/null); вывод: $(tail -5 "$W/$1/out")"; fi
 }
 
 echo "(а) контроль 2/10, v3 9/10, остальные 4/10"
@@ -148,13 +148,13 @@ echo "(б) все стратегии не лучше контроля"
 run b "$TEN" 'lim() { case "$1" in control) echo 4;; *) echo 4;; esac; }'
 check b "готово, не применено" 's["state"]=="done" and s["applied"] is False'
 check b "сообщение" 's["message"]=="Подходящей стратегии лучше, чем без Zapret, не нашлось"'
-cmp -s "$W/b/config.before" "$W/b/root/data/mi-trusttunnel/etc/config.json" && ok "b: настройки не изменены" || bad "b: настройки изменены"
+cmp -s "$W/b/config.before" "$W/b/root/data/mi-lumruri/etc/config.json" && ok "b: настройки не изменены" || bad "b: настройки изменены"
 check b "без заявки на применение" 'not areq'
 
 echo "(в) прерывание посреди подбора"
 run c "$TEN" 'lim() { [ "$1" = v4 ] && touch "$ZSTATE/zapret-test.stop"; case "$1" in control) echo 2;; v3) echo 9;; *) echo 4;; esac; }'
 check c "прервано" 's["state"]=="failed" and s["applied"] is False and s["finished"] is not None'
-cmp -s "$W/c/config.before" "$W/c/root/data/mi-trusttunnel/etc/config.json" && ok "c: настройки не изменены" || bad "c: настройки изменены"
+cmp -s "$W/c/config.before" "$W/c/root/data/mi-lumruri/etc/config.json" && ok "c: настройки не изменены" || bad "c: настройки изменены"
 check c "без заявки на применение" 'not areq'
 grep -q '^v5 ' "$W/c/zt/curl.log" && bad "c: после прерывания проверка продолжилась" || ok "c: после прерывания стратегии не проверялись"
 
@@ -180,7 +180,7 @@ NOZAP=1 run f "$TEN" 'lim() { echo 9; }'
 check f "отказ с объяснением" 's["state"]=="failed" and "Zapret не включён" in s["message"] and not areq'
 [ -f "$W/f/zt/curl.log" ] && bad "f: проверочные запросы были" || ok "f: проверочных запросов не было"
 
-MARK=root/data/mi-trusttunnel/etc/zapret-test.rollback
+MARK=root/data/mi-lumruri/etc/zapret-test.rollback
 # lim для повторной проверки v3 (после 10 запросов первого прохода): <действие>; echo <K>
 recheck() { echo 'lim() { case "$1" in control) echo 2;; v3) if [ "$(grep -c "^v3 " "$ZT/curl.log")" -gt 10 ]; then '"$1"'; else echo 9; fi;; *) echo 4;; esac; }'; }
 SPID='"$(sed -n "s/.*\"pid\":\([0-9]*\).*/\1/p" "$ZSTATE/zapret-test.json")"'
@@ -194,7 +194,7 @@ echo "(з) KILL во время повторной проверки — отка
 NOCHECK=1 run h "$TEN" "$(recheck "kill -KILL $SPID; sleep 1; echo 9")"
 check h "после KILL: running, действует v3" 's["state"]=="running" and c["zapret"]["strategy"]=="v3"'
 [ "$(cat "$W/h/$MARK" 2>/dev/null)" = "general auto v3" ] && ok "h: метка отката «general auto v3»" || bad "h: метки отката нет: $(cat "$W/h/$MARK" 2>/dev/null)"
-rm -f "$W/h/root/tmp/mi-trusttunnel/run/apply.request"
+rm -f "$W/h/root/tmp/mi-lumruri/run/apply.request"
 recover h; after h
 check h "после разбора: failed, прежняя стратегия, заявка" 's["state"]=="failed" and s["applied"] is False and c["zapret"]["strategy"]=="auto" and "восстановлен" in s["message"] and areq'
 [ -f "$W/h/$MARK" ] && bad "h: метка отката осталась" || ok "h: метка снята"
@@ -213,13 +213,13 @@ check k "откат после двух busy" 's["state"]=="done" and s["applied
 [ "$(grep -c 'zapret-set general auto' "$W/k/zt/calls")" = 3 ] && ok "k: три попытки" || bad "k: $(grep 'general auto' "$W/k/zt/calls")"
 
 echo "(л) метка отката не записалась — стратегия не меняется"
-PRE='mkdir -p "$RR/data/mi-trusttunnel/etc/zapret-test.rollback"' run l "$TEN" 'lim() { case "$1" in control) echo 2;; v3) echo 9;; *) echo 4;; esac; }'
+PRE='mkdir -p "$RR/data/mi-lumruri/etc/zapret-test.rollback"' run l "$TEN" 'lim() { case "$1" in control) echo 2;; v3) echo 9;; *) echo 4;; esac; }'
 check l "готово, не применено, настройки прежние" 's["state"]=="done" and s["applied"] is False and c["zapret"]["strategy"]=="auto"'
 grep -q 'zapret-set' "$W/l/zt/calls" 2>/dev/null && bad "l: zapret-set вызывался" || ok "l: zapret-set не вызывался"
 
 echo "(м) служба: стойкий сбой записи — не больше 3 попыток; ручная смена не перезаписывается"
-LOGM="$W/m/root/tmp/mi-trusttunnel/log/mitt.log"
-svc() { bb "$1" -c '. "$MITT_ROOT/tmp/mi-trusttunnel/scripts/mitt-lib.sh"; zt_service_recover' >>"$W/$1/out" 2>&1; }
+LOGM="$W/m/root/tmp/mi-lumruri/log/mitt.log"
+svc() { bb "$1" -c '. "$MITT_ROOT/tmp/mi-lumruri/scripts/mitt-lib.sh"; zt_service_recover' >>"$W/$1/out" 2>&1; }
 run m "$TEN" "$(recheck "echo 1")
 set_hook() { [ \"\$2\" = auto ] && echo fail; }"
 for x in 1 2 3 4 5; do svc m; done
@@ -227,7 +227,7 @@ for x in 1 2 3 4 5; do svc m; done
 [ "$(grep -c 'прекращает попытки' "$LOGM")" = 1 ] && ok "m: отказ от попыток — одна строка журнала" || bad "m: $(grep -c 'прекращает попытки' "$LOGM") строк"
 check m "failed, applied=true, действует v3" 's["state"]=="failed" and s["applied"] is True and c["zapret"]["strategy"]=="v3"'
 [ -f "$W/m/$MARK" ] && ok "m: метка оставлена" || bad "m: метки нет"
-sed -i 's/"strategy": "v3"/"strategy": "v5"/' "$W/m/root/data/mi-trusttunnel/etc/config.json"
+sed -i 's/"strategy": "v3"/"strategy": "v5"/' "$W/m/root/data/mi-lumruri/etc/config.json"
 recover m
 [ "$(grep -c 'zapret-set general auto' "$W/m/zt/calls")" = 4 ] && ok "m: после ручной смены возврата нет" || bad "m: был возврат"
 check m "ручной выбор v5 сохранён, сообщение" 'c["zapret"]["strategy"]=="v5" and "вручную" in s["message"]'
@@ -236,12 +236,12 @@ check m "ручной выбор v5 сохранён, сообщение" 'c["za
 
 # stopcase <имя> <lim>: подбор в фоне, на повторной проверке — mitt-boot.sh stop
 stopcase() {
-  local n="$1" d="$W/$1" RS="$W/$1/root/tmp/mi-trusttunnel/run" i=0 t0
+  local n="$1" d="$W/$1" RS="$W/$1/root/tmp/mi-lumruri/run" i=0 t0
   BG=1 run "$n" "$TEN" "$2"
   while [ $i -lt 600 ] && [ "$(cat "$d/zt/curl.log" 2>/dev/null | grep -c '^v3 ')" -le 10 ]; do sleep 0.1; i=$((i + 1)); done
   sed -n 's/.*"pid":\([0-9]*\).*/\1/p' "$RS/zapret-test.json" >"$RS/zapret-test.pid"
   t0=$(date +%s.%N)
-  bb "$n" "$d/root/tmp/mi-trusttunnel/scripts/mitt-boot.sh" stop >"$d/stop.out" 2>&1
+  bb "$n" "$d/root/tmp/mi-lumruri/scripts/mitt-boot.sh" stop >"$d/stop.out" 2>&1
   python3 -c "import sys;print(round(float(sys.argv[2])-float(sys.argv[1]),1))" "$t0" "$(date +%s.%N)" >"$d/stop.time"
   wait "$(cat "$d/bgpid")" 2>/dev/null
   echo "[$n] остановка: $(cat "$d/stop.time") с"; after "$n"
@@ -250,12 +250,12 @@ echo "(н) mitt-boot.sh stop: сценарий слушает флаг"
 stopcase n1 "$(recheck "sleep 0.3; echo 9")"
 check n1 "прерван по флагу, прежняя стратегия" 's["state"]=="failed" and s["applied"] is False and c["zapret"]["strategy"]=="auto" and "прерван" in s["message"]'
 awk '{exit !($1 < 4)}' "$W/n1/stop.time" && ok "n1: без ожидания до предела" || bad "n1: $(cat "$W/n1/stop.time") с"
-grep -q 'не остановился по флагу' "$W/n1/root/tmp/mi-trusttunnel/log/mitt.log" && bad "n1: был сигнал" || ok "n1: сигнал не понадобился"
+grep -q 'не остановился по флагу' "$W/n1/root/tmp/mi-lumruri/log/mitt.log" && bad "n1: был сигнал" || ok "n1: сигнал не понадобился"
 echo "(о) mitt-boot.sh stop: сценарий завис — ожидание, затем сигнал"
 stopcase n2 "$(recheck "sleep 30; echo 9")"
 check n2 "остановлен сигналом, прежняя стратегия" 's["state"]=="failed" and c["zapret"]["strategy"]=="auto"'
 awk '{exit !($1 >= 4 && $1 < 12)}' "$W/n2/stop.time" && ok "n2: ожидание флага, затем сигнал" || bad "n2: $(cat "$W/n2/stop.time") с"
-grep -q 'не остановился по флагу' "$W/n2/root/tmp/mi-trusttunnel/log/mitt.log" && ok "n2: сигнал записан в журнал" || bad "n2: нет записи о сигнале"
+grep -q 'не остановился по флагу' "$W/n2/root/tmp/mi-lumruri/log/mitt.log" && ok "n2: сигнал записан в журнал" || bad "n2: нет записи о сигнале"
 [ -f "$W/n2/$MARK" ] && bad "n2: метка осталась" || ok "n2: метки нет"
 pkill -f "$ST/curl" 2>/dev/null
 

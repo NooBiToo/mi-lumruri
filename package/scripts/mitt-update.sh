@@ -1,5 +1,5 @@
 #!/bin/sh
-# mi-trusttunnel: обновление из релизов GitHub по заявке панели ($STATE/update.request.run, JSON от mi-tt-ctl):
+# mi-lumruri: обновление из релизов GitHub по заявке панели ($STATE/update.request.run, JSON от mi-tt-ctl):
 #   {"action":"check"}  — узнать последний релиз и сравнить с установленным;
 #   {"action":"install","trust_official":true|false} — скачать пакет, сверить SHA-256 по SHA256SUMS релиза и поставить
 #   штатным install.sh (подпись проверяется закреплённым ключом). trust_official — разрешить смену ключа только на
@@ -40,10 +40,12 @@ check() {
   tag="$(sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' "$W/latest.txt" | head -n 1)"
   published="$(sed -n 's/.*"published_at": *"\([^"]*\)".*/\1/p' "$W/latest.txt" | head -n 1)"
   page="$(sed -n 's/.*"html_url": *"\(https:[^"]*\/releases\/tag\/[^"]*\)".*/\1/p' "$W/latest.txt" | head -n 1)"
-  asset="$(sed -n 's/.*"browser_download_url": *"\(https:[^"]*\/mi-trusttunnel-[^"\/]*\.tar\)".*/\1/p' "$W/latest.txt" | head -n 1)"
+  asset="$(sed -n 's/.*"browser_download_url": *"\(https:[^"]*\/mi-lumruri-[^"\/]*\.tar\)".*/\1/p' "$W/latest.txt" | head -n 1)"
+  # релизы до 0.5 — пакет под прежним именем
+  [ -n "$asset" ] || asset="$(sed -n 's/.*"browser_download_url": *"\(https:[^"]*\/mi-trusttunnel-[^"\/]*\.tar\)".*/\1/p' "$W/latest.txt" | head -n 1)"
   sums="$(sed -n 's/.*"browser_download_url": *"\(https:[^"]*\/SHA256SUMS\)".*/\1/p' "$W/latest.txt" | head -n 1)"
   [ -n "$tag" ] && [ -n "$asset" ] && [ -n "$sums" ] || fail "в последнем релизе нет пакета или SHA256SUMS"
-  avail="$(basename "$asset" .tar | sed 's/^mi-trusttunnel-//')"
+  avail="$(basename "$asset" .tar | sed 's/^mi-lumruri-//; s/^mi-trusttunnel-//')"
   # новее: та же сборка — нет; установлена сборка CI (ci-…) другая — да (релизы идут только вперёд);
   # установлена версия x.y.z — сравнение с тегом релиза
   if [ "$avail" = "$installed" ]; then newer=false
@@ -66,14 +68,16 @@ case "$action" in
     have="$("$BIN/mi-tt-admin" sha256 "$W/package.tar" 2>/dev/null | cut -d' ' -f1)"
     [ -n "$want" ] && [ "$want" = "$have" ] || fail "SHA-256 пакета не совпал с SHA256SUMS релиза"
     put installing
-    mkdir -p "$W/x" && tar -xf "$W/package.tar" -C "$W/x" && [ -f "$W/x/mi-trusttunnel/install.sh" ] || fail "пакет не распакован"
+    mkdir -p "$W/x" && tar -xf "$W/package.tar" -C "$W/x" || fail "пакет не распакован"
+    pd="$W/x/mi-lumruri"; [ -f "$pd/install.sh" ] || pd="$W/x/mi-trusttunnel"
+    [ -f "$pd/install.sh" ] || fail "пакет не распакован"
     rm -f "$W/package.tar"
     set -- install --no-start
     [ -n "$trust" ] && set -- "$@" "--trust-key=$OFFICIAL_FP"
-    if ! sh "$W/x/mi-trusttunnel/install.sh" "$@" >"$LOG/update-install.log" 2>&1; then
+    if ! sh "$pd/install.sh" "$@" >"$LOG/update-install.log" 2>&1; then
       pk="$(sed -n 's/.*у пакета \([0-9a-f]\{16\}\).*/\1/p' "$LOG/update-install.log" | head -n 1)"
       [ -n "$pk" ] && fail "пакет подписан другим ключом, чем установленный" "$pk"
-      fail "установщик отказал: $(grep 'ОТКАЗ' "$LOG/update-install.log" | tail -n 1 | sed 's/^mi-trusttunnel: ОТКАЗ: //')"
+      fail "установщик отказал: $(grep 'ОТКАЗ' "$LOG/update-install.log" | tail -n 1 | sed 's/^mi-[a-z]*: ОТКАЗ: //')"
     fi
     installed="$(cat "$DATA/current.ver" 2>/dev/null)"
     put restarting

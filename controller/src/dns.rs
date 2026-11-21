@@ -86,7 +86,7 @@ pub fn dnsmasq_conf(plan: &DnsPlan, adblock: Option<&AdblockConfig>, blocked: &[
         }
     }
     if !plan.sets.is_empty() {
-        s.push_str(&format!("# mi-trusttunnel: адреса доменов правил → ipset ({} доменов)\n", plan.sets.len()));
+        s.push_str(&format!("# mi-lumruri: адреса доменов правил → ipset ({} доменов)\n", plan.sets.len()));
         for (d, sets) in &plan.sets {
             s.push_str(&format!("ipset=/{d}/{}\n", sets.iter().cloned().collect::<Vec<_>>().join(",")));
         }

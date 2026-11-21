@@ -119,7 +119,7 @@ printf '[[client]]\nusername = "tv-user"\npassword = "%s"\n' "$TTPASS" >"$W/tt/c
 nsx vpn "$TTBIN" "$W/tt/vpn.toml" "$W/tt/hosts.toml" >>"$OUT/trusttunnel-server.log" 2>&1 &
 # Zapret: эхо на порту 443 (TCP и UDP) — трафик телефона идёт через очередь nfqws2; веб-цели подбора стратегии
 nsx inet "${PY[@]}" "$ROOT/tools/lab/echo.py" serve 10.99.0.12 443 "$OUT/echo-zapret.jsonl" echo-zapret &
-WS="$W/web"; mkdir -p "$WS"; printf 'mi-trusttunnel lab\n' >"$WS/index.html"
+WS="$W/web"; mkdir -p "$WS"; printf 'mi-lumruri lab\n' >"$WS/index.html"
 printf 'required https://10.99.0.13/\nrequired http://10.99.0.13/\noptional https://10.99.0.13/index.html\n' >"$W/zapret-targets.txt"
 nsx inet "${PY[@]}" "$ROOT/tools/lab/web.py" 10.99.0.13 80 "$WS" "$OUT/web-zapret.jsonl" &
 nsx inet "${PY[@]}" "$ROOT/tools/lab/web.py" 10.99.0.13 443 "$WS" "$OUT/web-zapret.jsonl" "$W/tls/cert.pem" "$W/tls/key.pem" &
@@ -131,7 +131,7 @@ nsx router "$W/dnsmasq-restart" || die "dnsmasq"
 # --- установка пакета (штатный BusyBox, без запуска) и настройки владельца ---
 bb() { env -i "${ENVR[@]}" "$Q" -L "$F" "$F/bin/busybox" ash "$@"; }
 bb "$PKG/install.sh" install --no-start >"$OUT/install.out" 2>&1 || { cat "$OUT/install.out"; die "установка"; }
-E="$RR/data/mi-trusttunnel/etc"
+E="$RR/data/mi-lumruri/etc"
 "${PY[@]}" -c 'import json,sys
 cert=open(sys.argv[2]).read()
 d={"version":1,
@@ -156,12 +156,12 @@ ip -n router -4 neigh show | awk '{for(i=2;i<NF;i++) if($i=="lladdr") print 1999
 # вход в панель: пароль и TOTP (секреты — только в этом прогоне)
 PW="$("${PY[@]}" -c 'import secrets;print(secrets.token_urlsafe(18))')"
 ADM="$W/admin.arm64"; "$Q" -L "$F" "$F/bin/busybox" unxz -c "$PKG/payload/bin/mi-tt.xz" >"$ADM"; chmod +x "$ADM"
-printf '%s\n%s\n' "$PW" "$PW" | env -i MI_TT_AUTH_DIR="$E/auth" MI_TT_SESSION_DIR="$RR/tmp/mi-trusttunnel/sessions" "$Q" "$ADM" auth init --stdin --with-totp >"$W/auth.json" || die "auth init"
+printf '%s\n%s\n' "$PW" "$PW" | env -i MI_TT_AUTH_DIR="$E/auth" MI_TT_SESSION_DIR="$RR/tmp/mi-lumruri/sessions" "$Q" "$ADM" auth init --stdin --with-totp >"$W/auth.json" || die "auth init"
 export TOTP_SECRET; TOTP_SECRET="$("${PY[@]}" -c 'import json,sys;print(json.load(open(sys.argv[1]))["totp_secret_base32"])' "$W/auth.json")"
 totp() { "${PY[@]}" -c 'import base64,hashlib,hmac,os,struct,sys,time
 s=os.environ["TOTP_SECRET"];k=base64.b32decode(s+"="*(-len(s)%8));c=struct.pack(">Q",int((time.time()+int(sys.argv[1]))//30))
 h=hmac.new(k,c,hashlib.sha1).digest();o=h[-1]&15;print("%06d"%((struct.unpack(">I",h[o:o+4])[0]&0x7fffffff)%1000000))' "${1:-0}"; }
-totp 0 | env -i MI_TT_AUTH_DIR="$E/auth" MI_TT_SESSION_DIR="$RR/tmp/mi-trusttunnel/sessions" "$Q" "$ADM" auth confirm --stdin >/dev/null || die "auth confirm"
+totp 0 | env -i MI_TT_AUTH_DIR="$E/auth" MI_TT_SESSION_DIR="$RR/tmp/mi-lumruri/sessions" "$Q" "$ADM" auth confirm --stdin >/dev/null || die "auth confirm"
 
 : >"$OUT/probes.jsonl"; : >"$OUT/phases.jsonl"
 probe() { local id="$1" ns="$2" host="${3:-10.99.0.10}" port="${4:-7007}" t0 out rc; t0="$(now)"; out="$(nsx "$ns" "${PY[@]}" "$ROOT/tools/lab/echo.py" probe tcp "$host" "$port" "$id" 2>&1)"; rc=$?
@@ -176,19 +176,19 @@ snapz() { { nsx router ip rule show | awk -F: '$1>=3000 && $1<=3199'; nsx router
 # WAN поднялся: на роутере netifd/DHCP возвращает маршрут по умолчанию (ядро сняло его при link down)
 wan_on() { ip -n router link set r-wan up; ip -n router route replace default via 10.20.0.1; }
 wait_tunnel() { for i in $(seq 60); do nsx tv "${PY[@]}" "$ROOT/tools/lab/echo.py" probe tcp 10.99.0.10 7007 "wait" 2>/dev/null | grep -q 10.30.0.2 && return 0; sleep 1; done; return 1; }
-RN="$RR/tmp/mi-trusttunnel/run"
+RN="$RR/tmp/mi-lumruri/run"
 cp_status() { cp "$RN/status.json" "$OUT/status.$1.json" 2>/dev/null; cp "$RN/last-apply.json" "$OUT/last-apply.$1.json" 2>/dev/null; }
-boot() { nsx router env -i "${ENVR[@]}" "$Q" -L "$F" "$F/bin/busybox" ash "$RR/data/mi-trusttunnel/mitt-boot.sh" "$@"; }
+boot() { nsx router env -i "${ENVR[@]}" "$Q" -L "$F" "$F/bin/busybox" ash "$RR/data/mi-lumruri/mitt-boot.sh" "$@"; }
 
 # 1) холодный старт без WAN (как fw3 при загрузке): защита сразу, панель локально
 phase cold_boot_no_wan
 ip -n router link set r-wan down
 T0="$(now)"; boot >"$OUT/boot1.out" 2>&1; echo "exit=$?" >>"$OUT/boot1.out"
-T1="$(now)"; snapz boot-guard; cp_status boot; cp "$RR/tmp/mi-trusttunnel/log/mitt.log" "$OUT/mitt.boot1.log" 2>/dev/null; cp "$RN/apply.boot-guard.json" "$RN/render.json" "$OUT/" 2>/dev/null
+T1="$(now)"; snapz boot-guard; cp_status boot; cp "$RR/tmp/mi-lumruri/log/mitt.log" "$OUT/mitt.boot1.log" 2>/dev/null; cp "$RN/apply.boot-guard.json" "$RN/render.json" "$OUT/" 2>/dev/null
 printf '{"boot_seconds":%s}\n' "$("${PY[@]}" -c "print(round($T1-$T0,1))")" >"$OUT/boot-time.json"
 probe B-tv-no-wan tv; probe B-phone-no-wan phone
 boot auth status >"$OUT/auth-status.json" 2>&1
-ls "$RR/tmp/mi-trusttunnel/bin" >"$OUT/engines.ls" 2>&1
+ls "$RR/tmp/mi-lumruri/bin" >"$OUT/engines.ls" 2>&1
 # панель: https через штатный nginx стока → uhttpd стока → CGI ARM64; вход паролем и TOTP из сети LAN
 sleep 2
 CJ="$W/cookies"; cu() { nsx tv curl -sk -m 20 -c "$CJ" -b "$CJ" "$@"; }
@@ -222,14 +222,14 @@ nsx router ip route show >"$OUT/routes.main.txt"; nsx router ip rule show >"$OUT
 # через очередь 200
 phase zapret
 TAG="$(sed -n 's/.*"tag":"\([^"]*\)".*/\1/p' "$RN/last-apply.json")"; cp "$RN/apply.$TAG.json" "$OUT/apply.wan.json" 2>/dev/null
-RD="$RR/tmp/mi-trusttunnel/render"; cp "$RD/nfqws2.args" "$OUT/nfqws2.args" 2>/dev/null
-nsx router "$RR/tmp/mi-trusttunnel/bin/nfqws2" --dry-run $(cat "$RD/nfqws2.args") >"$OUT/nfqws2-dry-run.out" 2>&1; echo "exit=$?" >>"$OUT/nfqws2-dry-run.out"
+RD="$RR/tmp/mi-lumruri/render"; cp "$RD/nfqws2.args" "$OUT/nfqws2.args" 2>/dev/null
+nsx router "$RR/tmp/mi-lumruri/bin/nfqws2" --dry-run $(cat "$RD/nfqws2.args") >"$OUT/nfqws2-dry-run.out" 2>&1; echo "exit=$?" >>"$OUT/nfqws2-dry-run.out"
 probe Z-phone-443 phone 10.99.0.12 443
 nsx phone "${PY[@]}" "$ROOT/tools/lab/echo.py" probe udp 10.99.0.12 443 Z-phone-udp443 >"$OUT/zapret-udp.json" 2>&1
 nsx router cat /proc/net/netfilter/nfnetlink_queue >"$OUT/nfqueue.wan.txt" 2>&1
 ipt -t mangle -S >"$OUT/mangle.wan.txt"; ipt -t mangle -L -v -x -n >"$OUT/mangle-counters.wan.txt"
 kill -0 "$(cat "$RN/nfqws2.pid")" 2>/dev/null && echo alive >"$OUT/nfqws2.wan.alive"
-cp "$RR/tmp/mi-trusttunnel/log/nfqws2.log" "$OUT/nfqws2.wan.log" 2>/dev/null
+cp "$RR/tmp/mi-lumruri/log/nfqws2.log" "$OUT/nfqws2.wan.log" 2>/dev/null
 
 # 2a) домен из правила: до вопроса DNS адрес не в наборе (напрямую), вопрос ТВ к dnsmasq роутера уходит к резолверу
 # через туннель, ответ попадает в ipset — и трафик ТВ к этому адресу идёт в туннель; телефон без правила — напрямую
@@ -307,8 +307,8 @@ for i in $(seq 900); do grep -qE '"state":"(done|failed)"' "$RN/zapret-test.json
 kill "$SAMP" 2>/dev/null
 cp "$RN/zapret-test.json" "$OUT/zapret-test.json" 2>/dev/null
 ipt -t mangle -L "$ZP" -v -x -n >"$OUT/zapret-test.P.after.txt" 2>&1
-grep 'подбор Zapret' "$RR/tmp/mi-trusttunnel/log/mitt.log" >"$OUT/zapret-test.log" 2>/dev/null
-cp "$RR/tmp/mi-trusttunnel/log/zapret-nfqws.log" "$OUT/zapret-nfqws.log" 2>/dev/null
+grep 'подбор Zapret' "$RR/tmp/mi-lumruri/log/mitt.log" >"$OUT/zapret-test.log" 2>/dev/null
+cp "$RR/tmp/mi-lumruri/log/zapret-nfqws.log" "$OUT/zapret-nfqws.log" 2>/dev/null
 kill -0 "$(cat "$RN/nfqws2.pid")" 2>/dev/null && echo alive >"$OUT/nfqws2.after-test.alive"
 probe Z-phone-after-test phone 10.99.0.12 443
 
@@ -327,7 +327,7 @@ for i in $(seq 60); do [ "$(at_of)" -gt "${A0:-0}" ] 2>/dev/null && grep -q '"pa
 cp "$RN/last-apply.json" "$OUT/last-apply.ipv6.json"
 { nsx router ip -6 rule show | awk -F: '$1>=3000 && $1<=3199'; echo "--- route"; nsx router ip -6 route show table 3100 2>/dev/null
   echo "--- mangle"; nsx router "$NFBIN/ip6tables" -w -t mangle -S | grep MITT; echo "--- filter"; nsx router "$NFBIN/ip6tables" -w -S | grep MITT; } >"$OUT/zone.ipv6.txt" 2>&1
-grep -o 'has_ipv6 = [a-z]*' "$RR/tmp/mi-trusttunnel/render/client.toml" >"$OUT/client.ipv6.txt" 2>/dev/null
+grep -o 'has_ipv6 = [a-z]*' "$RR/tmp/mi-lumruri/render/client.toml" >"$OUT/client.ipv6.txt" 2>/dev/null
 cp "$W/config.before-ipv6.json" "$E/config.json"
 A0="$(at_of)"; post apply-request '{}' >/dev/null
 for i in $(seq 60); do [ "$(at_of)" -gt "${A0:-0}" ] 2>/dev/null && grep -q '"panel-request' "$RN/last-apply.json" && break; sleep 1; done
@@ -338,7 +338,7 @@ wait_tunnel
 phase reboot
 boot stop >"$OUT/stop.out" 2>&1
 pkill -f "$TTCLIENT" 2>/dev/null; pkill -f "usr/sbin/nginx" 2>/dev/null; pkill -f "usr/sbin/uhttpd" 2>/dev/null; sleep 1
-rm -rf "$RR/tmp/mi-trusttunnel"; ip -n router link set r-wan down
+rm -rf "$RR/tmp/mi-lumruri"; ip -n router link set r-wan down
 snapz after-reboot
 boot >"$OUT/boot2.out" 2>&1; echo "exit=$?" >>"$OUT/boot2.out"
 snapz boot2; probe R-tv-no-wan tv
@@ -348,8 +348,8 @@ cp "$RN/lists.json" "$OUT/lists.json" 2>/dev/null
 boot stop >>"$OUT/stop.out" 2>&1
 pkill -f "$TTCLIENT" 2>/dev/null; pkill -f "usr/sbin/nginx" 2>/dev/null; pkill -f "usr/sbin/uhttpd" 2>/dev/null
 [ -f "$W/dnsmasq.pid" ] && kill "$(cat "$W/dnsmasq.pid")" 2>/dev/null
-cp "$RR/tmp/mi-trusttunnel/log/mitt.log" "$OUT/mitt.log" 2>/dev/null
-cp "$RR/tmp/mi-trusttunnel/log/trusttunnel.log" "$OUT/trusttunnel-client.log" 2>/dev/null
+cp "$RR/tmp/mi-lumruri/log/mitt.log" "$OUT/mitt.log" 2>/dev/null
+cp "$RR/tmp/mi-lumruri/log/trusttunnel.log" "$OUT/trusttunnel-client.log" 2>/dev/null
 MITT_TLSKEY="$W/tls/key.pem" MITT_PW="$PW" MITT_TT="$TTPASS" "${PY[@]}" -c 'import json,os,sys
 from pathlib import Path
 out=Path(sys.argv[1]);sec={"panel_password":os.environ["MITT_PW"],"totp":os.environ["TOTP_SECRET"],"trusttunnel":os.environ["MITT_TT"]}

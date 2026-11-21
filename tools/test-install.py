@@ -20,10 +20,10 @@ class InstallerTest(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        self.package = Path(tmp.name) / "mi-trusttunnel-ci-123456789abc.tar"
+        self.package = Path(tmp.name) / "mi-lumruri-ci-123456789abc.tar"
         script = b"printf 'installed\\n'\n"
         with tarfile.open(self.package, "w") as archive:
-            entry = tarfile.TarInfo("mi-trusttunnel/install.sh")
+            entry = tarfile.TarInfo("mi-lumruri/install.sh")
             entry.size = len(script)
             archive.addfile(entry, io.BytesIO(script))
         self.digest = hashlib.sha256(self.package.read_bytes()).hexdigest()

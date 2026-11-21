@@ -2,7 +2,7 @@
 
 [Русский](guide.md) · [English](guide.en.md) · **简体中文**
 
-本说明适用于 Mi Lumruri 0.4.0 版本。内部名称保持不变：安装包文件名为 `mi-trusttunnel-*.tar`，在路由器上安装包位于 `/data/mi-trusttunnel` 和 `/tmp/mi-trusttunnel`。
+本说明适用于 Mi Lumruri 0.5.0 版本。安装包文件名为 `mi-lumruri-*.tar`，在路由器上安装包位于 `/data/mi-lumruri` 和 `/tmp/mi-lumruri`。0.5.0 之前项目名为 mi-trusttunnel：在旧版本之上安装 0.5.0 时，会自动把 `/data/mi-trusttunnel` 连同全部设置移动到 `/data/mi-lumruri`，并在原位置留下链接。发布版中除主安装包外还有一份名为 `mi-trusttunnel-*.tar` 的副本，供 0.4 版本面板中的更新功能查找。
 
 你需要：固件版本为 1.1.38 的 BE7000（RC06）、可从家庭网络通过 SSH 获得的 root 权限、安装用 TAR 包，以及你的 TrustTunnel 服务器参数。官方发布的原厂固件通常默认关闭 SSH。
 
@@ -29,7 +29,7 @@ Host 192.168.31.1
 
 ## 从电脑快速安装
 
-从[最新发布版本](https://github.com/NooBiToo/mi-lumruri/releases/latest)下载 `mi-trusttunnel-*.tar`、`SHA256SUMS` 和 `install.py` 到同一文件夹（或解压 GitHub Actions 中的 ZIP），然后在包含 `install.py`、TAR 和 `SHA256SUMS` 的文件夹中打开终端。请保留原始文件名。在 Windows 上执行：
+从[最新发布版本](https://github.com/NooBiToo/mi-lumruri/releases/latest)下载 `mi-lumruri-*.tar`、`SHA256SUMS` 和 `install.py` 到同一文件夹（或解压 GitHub Actions 中的 ZIP），然后在包含 `install.py`、TAR 和 `SHA256SUMS` 的文件夹中打开终端。请保留原始文件名。在 Windows 上执行：
 
 ```powershell
 python install.py 192.168.31.1
@@ -71,10 +71,10 @@ ssh root@192.168.31.1 "grep /mnt/usb /proc/mounts"
 将该存储设备上的目录传给安装程序：
 
 ```powershell
-python install.py 192.168.31.1 --store /mnt/usb-XXXX/mi-trusttunnel
+python install.py 192.168.31.1 --store /mnt/usb-XXXX/mi-lumruri
 ```
 
-手动安装时，`sh install.sh install --store=/mnt/usb-XXXX/mi-trusttunnel` 的作用相同。该选择会被记住：之后的更新无需再加 `--store`。
+手动安装时，`sh install.sh install --store=/mnt/usb-XXXX/mi-lumruri` 的作用相同。该选择会被记住：之后的更新无需再加 `--store`。
 
 使用存储设备时需要注意：
 
@@ -108,15 +108,15 @@ ssh root@192.168.31.1
 ```sh
 stage=$(mktemp -d /tmp/mitt-install.XXXXXX) &&
   tar xf /tmp/mitt-install.tar -C "$stage" &&
-  cd "$stage/mi-trusttunnel" &&
+  cd "$stage/mi-lumruri" &&
   sh install.sh
 ```
 
 安装成功后，配置登录：
 
 ```sh
-sh /data/mi-trusttunnel/mitt-boot.sh auth init
-openssl x509 -in /data/mi-trusttunnel/etc/tls/cert.pem -noout -fingerprint -sha256
+sh /data/mi-lumruri/mitt-boot.sh auth init
+openssl x509 -in /data/mi-lumruri/etc/tls/cert.pem -noout -fingerprint -sha256
 ```
 
 设置面板密码，不少于 12 个字符。从家庭网络中打开 **`https://192.168.31.1:8443/`**。首次登录时，请将浏览器中证书的 SHA-256 与 SSH 会话中输出的指纹进行核对。
@@ -126,8 +126,8 @@ openssl x509 -in /data/mi-trusttunnel/etc/tls/cert.pem -noout -fingerprint -sha2
 默认情况下仅凭密码即可登录面板。若要启用验证器应用中的一次性验证码，请在路由器上执行：
 
 ```sh
-sh /data/mi-trusttunnel/mitt-boot.sh auth reset-totp
-sh /data/mi-trusttunnel/mitt-boot.sh auth confirm
+sh /data/mi-lumruri/mitt-boot.sh auth reset-totp
+sh /data/mi-lumruri/mitt-boot.sh auth confirm
 ```
 
 第一条命令会显示二维码（请用验证器应用扫描），并给出一次性恢复码。请离线保存这些恢复码。第二条命令会要求输入应用中的验证码。在验证码确认之前，面板无法登录。
@@ -278,7 +278,7 @@ trusttunnel_endpoint vpn.toml hosts.toml -c <用户名> -a <IP:端口>
 
 服务列表取自 [itdoginfo/allow-domains](https://github.com/itdoginfo/allow-domains) 项目。安装包内含列表快照，因此安装后即使没有互联网也能立即工作。
 
-路由器会自动在 `raw.githubusercontent.com` 上检查更新，默认每天一次。列表在「网站」页面的 **「网站列表」**卡片中管理：显示列表的更新时间和最近一次检查的结果，**「更新」**按钮（立即检查，同时更新广告屏蔽列表），以及检查频率：每 6 小时、每天、每周或仅手动。每个下载的文件都会经过校验：看起来不像列表的响应，或条目数不到原来一半的列表，都不会被应用，继续使用原列表。新版本存放在 `/data/mi-trusttunnel/lists` 中并立即生效。如果没有网络连接，一小时后重试。如果 `/data` 已满或不可写，更新不会保存，错误会显示在「概览」和「网站列表」卡片中，同样一小时后重试。频率设为「手动」时，路由器不会自动检查，只在点击「更新」时检查。如果设置了[订阅链接](#服务器)，路由器会按同样的计划、通过同一按钮更新服务器参数。
+路由器会自动在 `raw.githubusercontent.com` 上检查更新，默认每天一次。列表在「网站」页面的 **「网站列表」**卡片中管理：显示列表的更新时间和最近一次检查的结果，**「更新」**按钮（立即检查，同时更新广告屏蔽列表），以及检查频率：每 6 小时、每天、每周或仅手动。每个下载的文件都会经过校验：看起来不像列表的响应，或条目数不到原来一半的列表，都不会被应用，继续使用原列表。新版本存放在 `/data/mi-lumruri/lists` 中并立即生效。如果没有网络连接，一小时后重试。如果 `/data` 已满或不可写，更新不会保存，错误会显示在「概览」和「网站列表」卡片中，同样一小时后重试。频率设为「手动」时，路由器不会自动检查，只在点击「更新」时检查。如果设置了[订阅链接](#服务器)，路由器会按同样的计划、通过同一按钮更新服务器参数。
 
 安装新版本的安装包后，在下一次检查下载到新列表之前，使用该版本快照中的列表。
 
@@ -317,7 +317,7 @@ Zapret（来自 [zapret2](https://github.com/bol-van/zapret2) 的 nfqws2）会�
 
 列表在「高级」中选择：**HaGeZi Light**（默认，约 9 万个域名，涵盖广告和跟踪器，几乎不影响网站）、**HaGeZi Normal**（约 20 万个，范围更广，偶尔可能影响个别网站），或 **自定义链接**：指向域名列表或 hosts 格式行（`0.0.0.0 域名`；`#` 为注释）的 https 链接，文件不超过 12 MiB。[HaGeZi](https://github.com/hagezi/dns-blocklists) 列表（GPL-3.0）采用「域名及其子域名」格式。
 
-路由器会自动下载列表：启用或更换列表后立即下载，之后按与网站列表相同的频率更新；「网站」页面「网站列表」卡片中的「更新」按钮也会同时更新它。如果网站列表设为仅手动更新，广告列表在首次下载后也只通过这个按钮（或更换列表时）更新。下载失败时，一小时后重试。下载的列表会经过校验：HTML 页面、空响应，或无法解析的行超过 5% 的文件不会被应用，继续使用原列表；个别格式错误的行会被跳过。工作副本保存在 RAM 中，压缩副本（约 0.6–1.2 MB）保存在 `/data/mi-trusttunnel/adblock.list.gz`，因此重启后屏蔽立即生效。在「高级」中可以看到列表包含多少域名、更新时间，或未能更新的原因。
+路由器会自动下载列表：启用或更换列表后立即下载，之后按与网站列表相同的频率更新；「网站」页面「网站列表」卡片中的「更新」按钮也会同时更新它。如果网站列表设为仅手动更新，广告列表在首次下载后也只通过这个按钮（或更换列表时）更新。下载失败时，一小时后重试。下载的列表会经过校验：HTML 页面、空响应，或无法解析的行超过 5% 的文件不会被应用，继续使用原列表；个别格式错误的行会被跳过。工作副本保存在 RAM 中，压缩副本（约 0.6–1.2 MB）保存在 `/data/mi-lumruri/adblock.list.gz`，因此重启后屏蔽立即生效。在「高级」中可以看到列表包含多少域名、更新时间，或未能更新的原因。
 
 ## DNS
 
@@ -325,7 +325,7 @@ Zapret（来自 [zapret2](https://github.com/bol-van/zapret2) 的 nfqws2）会�
 
 走 VPN 的网站域名由路由器通过单独的 DNS 服务器解析，发往该服务器的查询经隧道传输。服务器在 **「高级」**页面的「经 VPN 网站的 DNS」区块中选择：Cloudflare `1.1.1.1`（默认）、Quad9 `9.9.9.9`、Google `8.8.8.8`、AdGuard DNS `94.140.14.14`、NextDNS `45.90.28.0`，或「自定义地址」，可填写任意公网 IPv4 地址。使用 NextDNS 时，请在 NextDNS 账户中绑定你的 VPN 服务器 IP（Linked IP），否则过滤规则不会生效。其他域名由路由器照常解析，或通过[安全 DNS](#安全-dnsdohdot) 解析。
 
-**自定义 DNS 记录**：域名及其所有子域名解析为指定的 IPv4 或 IPv6 地址，查询不会发出（dnsmasq `address=/домен/адрес`）。示例：`192.168.31.10` 上运行 Traefik 的家庭服务器和域名 `home.example.com`，一条记录即可覆盖 `traefik.home.example.com`、`pve.home.example.com` 等。对从路由器获取 DNS 的设备有效；记录仅在 mi-trusttunnel 服务运行时生效。不要将这类域名加入走 VPN 或 Zapret 的网站列表：家庭服务器应当直连访问。
+**自定义 DNS 记录**：域名及其所有子域名解析为指定的 IPv4 或 IPv6 地址，查询不会发出（dnsmasq `address=/домен/адрес`）。示例：`192.168.31.10` 上运行 Traefik 的家庭服务器和域名 `home.example.com`，一条记录即可覆盖 `traefik.home.example.com`、`pve.home.example.com` 等。对从路由器获取 DNS 的设备有效；记录仅在 Mi Lumruri 服务运行时生效。不要将这类域名加入走 VPN 或 Zapret 的网站列表：家庭服务器应当直连访问。
 
 ## IPv6 走 VPN
 
@@ -362,7 +362,7 @@ Zapret（来自 [zapret2](https://github.com/bol-van/zapret2) 的 nfqws2）会�
 
 **从面板更新**（自 0.4.0 版本起）。「高级」中有「更新」区块。路由器本身不会自动查找新版本：「检查」按钮会查询 GitHub 上的最新发布版本。路由器需要能访问 `api.github.com` 和 `github.com`。如果有更新的版本，会出现「更新到 …」按钮。路由器会自动下载安装包，将 SHA-256 与发布版本的 `SHA256SUMS` 文件核对，用已固定的密钥校验签名，然后重启服务。面板会消失约半分钟，配置会保留。如果路由器上安装的是用你自己的密钥签名的自行构建版本，面板会提供「改用 GitHub 发布版并更新」。此时路由器会接受使用 GitHub 发布版本密钥（`e4a271890e5643ab`）签名的安装包并固定该密钥。面板不接受其他密钥。
 
-**从电脑更新。** 更新时，重复快速安装，或者复制新的 TAR 并重复第 2 步直至配置登录之前。现有配置和第二因素会保留。版本存放在 `/data/mi-trusttunnel/releases`（或 `--store` 指定的目录）中：保留当前版本和上一版本，更早的版本会被删除。新版本需要约 4.5 MB 加 2 MiB 余量。如果空间不够，安装程序会删除旧版本；空间极少时则在不保留旧版本的情况下安装更新，此时无法回滚，详见[「`/data` 空间不足时」](#data-空间不足时)。
+**从电脑更新。** 更新时，重复快速安装，或者复制新的 TAR 并重复第 2 步直至配置登录之前。现有配置和第二因素会保留。版本存放在 `/data/mi-lumruri/releases`（或 `--store` 指定的目录）中：保留当前版本和上一版本，更早的版本会被删除。新版本需要约 4.5 MB 加 2 MiB 余量。如果空间不够，安装程序会删除旧版本；空间极少时则在不保留旧版本的情况下安装更新，此时无法回滚，详见[「`/data` 空间不足时」](#data-空间不足时)。
 
 更新包必须使用与首次安装相同的密钥签名：首次安装时路由器会固定安装包的公钥，此后只接受用该密钥签名的安装包。GitHub 发布版本和 GitHub Actions 构建的安装包使用 CI 密钥签名，而在你自己电脑上构建的安装包使用 `.tools/keys/` 中你自己的密钥签名。如果在发布版本的安装之上安装自行构建的包，或者反之，安装程序会拒绝并显示两个指纹：「安装包使用其他密钥签名：已固定 …，安装包为 …」（«пакет подписан другим ключом: закреплён …, у пакета …»）。如需切换到其他密钥，请加上 `--trust-key` 参数和该提示中新密钥的指纹重新安装：
 
@@ -375,7 +375,7 @@ python install.py 192.168.31.1 --trust-key <指纹>
 当前固定的密钥可以在路由器上查看：
 
 ```sh
-/tmp/mi-trusttunnel/bin/mi-tt-admin release key-fingerprint /data/mi-trusttunnel/keys/release.pub
+/tmp/mi-lumruri/bin/mi-tt-admin release key-fingerprint /data/mi-lumruri/keys/release.pub
 ```
 
 返回结果是形如 `{"ok":true,"key_fingerprint":"…"}` 的一行。
@@ -383,7 +383,7 @@ python install.py 192.168.31.1 --trust-key <指纹>
 要查看运行中服务的状态，请通过 SSH 执行：
 
 ```sh
-sh /data/mi-trusttunnel/mitt-boot.sh status
+sh /data/mi-lumruri/mitt-boot.sh status
 ```
 
 回滚时，在已解压安装包中 `install.sh` 所在的目录下执行**一条**命令。如果重启后该目录已消失，请重新复制并解压 TAR。回滚无需运行安装。
@@ -399,29 +399,29 @@ sh install.sh rollback
 在已解压安装包中 `install.sh` 所在的目录下执行：
 
 ```sh
-sh install.sh uninstall          # 保留 /data/mi-trusttunnel/etc 中的配置
+sh install.sh uninstall          # 保留 /data/mi-lumruri/etc 中的配置
 sh install.sh uninstall --purge  # 连同配置一起删除
 ```
 
 没有安装包时，可以通过 SSH 手动完成同样的操作：
 
 ```sh
-sh /data/mi-trusttunnel/mitt-boot.sh stop
+sh /data/mi-lumruri/mitt-boot.sh stop
 uci -q delete firewall.mitt
 uci commit firewall
-rm -rf /tmp/mi-trusttunnel /data/mi-trusttunnel
+rm -rf /tmp/mi-lumruri /data/mi-lumruri
 ```
 
-第一条命令会停止服务、移除路由规则，并从 dnsmasq 配置中移除 mi-trusttunnel 的文件。如果版本存放在 USB 存储设备上，`install.sh uninstall` 会自动删除它们；手动卸载时，还请删除传给 `--store` 的目录。
+第一条命令会停止服务、移除路由规则，并从 dnsmasq 配置中移除 mi-lumruri 的文件。如果版本存放在 USB 存储设备上，`install.sh uninstall` 会自动删除它们；手动卸载时，还请删除传给 `--store` 的目录。
 
-不加 `--purge` 时，`/data/mi-trusttunnel` 中会保留配置和已固定的签名密钥。此后安装使用其他密钥签名的安装包时，需要加上 `--trust-key` 参数。
+不加 `--purge` 时，`/data/mi-lumruri` 中会保留配置和已固定的签名密钥。此后安装使用其他密钥签名的安装包时，需要加上 `--trust-key` 参数。
 
 ## 无法登录时
 
 - **SSH 提示拒绝连接。** 请检查 LAN 地址以及当前固件上 SSH 是否可用。安装程序需要在 SSH 会话内运行。
 - **安装程序提示空间不足。** 它会分别输出 `/data` 和 `/tmp` 所需的空间和可用空间。请用第 1 步中的命令检查这两个分区。如果是 `/data` 空间不足，请将版本迁移到 USB 存储设备，详见[「`/data` 空间不足时」](#data-空间不足时)。
 - **安装程序提示「安装包签名或哈希校验未通过」（«подпись или хэши пакета не прошли проверку»）。** 安装包已损坏：请重新下载。如果安装程序提示「安装包使用其他密钥签名」（«пакет подписан другим ключом»），说明是在发布版本之上安装了自行构建的包，或者反之：请加上 `--trust-key` 重新安装，详见[「更新与回滚」](#更新与回滚)。
-- **「概览」中一直显示「设置未应用」。** 打开「诊断」并点击「检查」，即可看到哪一部分不工作。路由器会将应用失败的报告保存到 `/tmp/mi-trusttunnel/run/apply.<标记>.fail.json`，可以与诊断报告一起附在问题反馈中。
+- **「概览」中一直显示「设置未应用」。** 打开「诊断」并点击「检查」，即可看到哪一部分不工作。路由器会将应用失败的报告保存到 `/tmp/mi-lumruri/run/apply.<标记>.fail.json`，可以与诊断报告一起附在问题反馈中。
 - **重启后面板拒绝验证码。** 用 `date -u` 命令检查时间。等待时钟同步，或者使用一次性恢复码。已使用过的 TOTP 验证码不会再次被接受。
 
 [返回项目概览](../README.zh-CN.md)

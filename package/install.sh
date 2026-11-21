@@ -1,9 +1,9 @@
 #!/bin/sh
-# mi-trusttunnel: установка и обновление по SSH во внутреннюю память (/data), без сети.
+# mi-lumruri: установка и обновление по SSH во внутреннюю память (/data), без сети.
 # Запуск на роутере из распакованного пакета:  sh install.sh [install|rollback|uninstall [--purge]|status] [--no-start]
 #   install --trust-key=<отпечаток> — принять пакет, подписанный другим ключом (с этим отпечатком), и закрепить этот
 #               ключ: переход между своими сборками и релизами GitHub без удаления настроек.
-#   install --store=<каталог> — хранить релизы на внешнем накопителе (например /mnt/usb-XXXX/mi-trusttunnel), если они
+#   install --store=<каталог> — хранить релизы на внешнем накопителе (например /mnt/usb-XXXX/mi-lumruri), если они
 #               не помещаются в /data. Настройки, ключи и автозапуск остаются в /data. Выбор запоминается в файле store.
 #   install   — проверки (модель, ARM64, прошивка, место на /data и в /tmp, исполнение в /tmp), проверка подписи
 #               и хэшей, пробный запуск всех программ в RAM, затем атомарное переключение current; прежний релиз — previous.
@@ -12,6 +12,24 @@
 # Ничего не меняется, пока все проверки не пройдены. Прерывание (питание, обрыв SSH) оставляет прежний current.
 set -u
 PKG="$(cd "$(dirname "$0")" && pwd)"
+# Переименование mi-trusttunnel → mi-lumruri (0.5.0): установка переносит /data/mi-trusttunnel в /data/mi-lumruri одним
+# mv (тот же раздел: настройки, пароли, ключи, релизы), на старом месте остаётся ссылка — для отката на 0.4 и старых
+# команд. Прежняя служба останавливается своим же загрузчиком: он снимает её правила по её журналу. Если она работала,
+# после установки служба запускается и при --no-start (иначе роутер остался бы без неё).
+OLD_D="${MITT_ROOT:-}/data/mi-trusttunnel"; NEW_D="${MITT_ROOT:-}/data/mi-lumruri"; WAS_RUNNING=""
+if [ "${1:-install}" = install ] && [ -d "$OLD_D" ] && [ ! -L "$OLD_D" ] && [ ! -e "$NEW_D" ]; then
+  echo "mi-lumruri: перенос /data/mi-trusttunnel → /data/mi-lumruri (настройки сохраняются)"
+  p="$(cat "${MITT_ROOT:-}/tmp/mi-trusttunnel/run/service.pid" 2>/dev/null)"
+  [ -n "$p" ] && kill -0 "$p" 2>/dev/null && WAS_RUNNING=1
+  [ -f "$OLD_D/mitt-boot.sh" ] && sh "$OLD_D/mitt-boot.sh" stop >/dev/null 2>&1
+  rmdir "$NEW_D" 2>/dev/null   # пустой каталог, если его успела создать остановка: mv не должен вложить данные в него
+  if [ -e "$NEW_D" ] || ! mv "$OLD_D" "$NEW_D"; then
+    [ -n "$WAS_RUNNING" ] && sh "$OLD_D/mitt-boot.sh" start >/dev/null 2>&1
+    echo "mi-lumruri: ОТКАЗ: не удалось перенести /data/mi-trusttunnel в /data/mi-lumruri"; exit 3
+  fi
+  ln -s mi-lumruri "$OLD_D" 2>/dev/null || true
+  rm -rf "${MITT_ROOT:-}/tmp/mi-trusttunnel"
+fi
 . "$PKG/payload/scripts/mitt-lib.sh"
 CMD="${1:-install}"; [ $# -gt 0 ] && shift
 NOSTART=""; PURGE=""; NEWSTORE=""; TRUSTKEY=""; REPIN=""
@@ -25,8 +43,13 @@ RESERVE_TIGHT=$((512 * 1024))       # впритык: прежний релиз 
 TIGHT=""
 RESERVE_TMP=$((16 * 1024 * 1024))   # RAM для работы движков сверх распакованных файлов
 UCI="uci ${MITT_UCI_CONF:+-c $MITT_UCI_CONF}"
-say() { echo "mi-trusttunnel: $*"; }
-fail() { say "ОТКАЗ: $*"; exit 3; }
+say() { echo "mi-lumruri: $*"; }
+fail() {
+  say "ОТКАЗ: $*"
+  # после переноса прежняя служба остановлена: вернуть её (загрузчик прежней версии работает через ссылку)
+  [ -n "$WAS_RUNNING" ] && [ -f "$NEW_D/mitt-boot.sh" ] && sh "$NEW_D/mitt-boot.sh" start >/dev/null 2>&1
+  exit 3
+}
 fault() { lab && [ "${MITT_LAB_FAIL_AT:-}" = "$1" ] && { say "лаборатория: прерывание на шаге $1"; kill -9 $$; }; return 0; }
 
 jget() { sed -n "s/.*\"$1\": *\"\{0,1\}\([^\",}]*\)\"\{0,1\}.*/\1/p" "$PKG/manifest.json" | head -1; }
@@ -74,7 +97,7 @@ checks() {
     if [ "$have_d" -lt $((need_d + RESERVE_DATA)) ]; then
       # /data маленький (около 20 МБ, около 9 МБ из них занимает прошивка): ставим, а прежний релиз удаляем после установки —
       # место вернётся, но откатиться на прошлую версию будет нельзя (настройки сохраняются)
-      [ "$have_d" -ge $((need_d + RESERVE_TIGHT)) ]         || fail "на /data свободно $have_d байт, нужно не меньше $((need_d + RESERVE_TIGHT)); храните релизы на USB: --store=/mnt/usb-…/mi-trusttunnel"
+      [ "$have_d" -ge $((need_d + RESERVE_TIGHT)) ]         || fail "на /data свободно $have_d байт, нужно не меньше $((need_d + RESERVE_TIGHT)); храните релизы на USB: --store=/mnt/usb-…/mi-lumruri"
       TIGHT=1
       say "на /data мало места: после установки прежний релиз будет удалён, откат на него будет недоступен"
     fi
@@ -87,7 +110,7 @@ checks() {
 }
 
 verify_and_try() { # подпись и хэши; пробный запуск всех программ из RAM
-  local st="$R/tmp/mi-trusttunnel.check.$$" f pinned=""
+  local st="$R/tmp/mi-lumruri.check.$$" f pinned=""
   rm -rf "$st"; mkdir -p "$st"
   mkdir -p "$st/pre"
   if [ -f "$PKG/payload/bin/mi-tt.xz" ]; then
@@ -136,8 +159,8 @@ verify_and_try() { # подпись и хэши; пробный запуск в�
 write_stub() {
   cat >"$DATA/mitt-boot.sh.new" <<'STUB' || fail "запись точки входа"
 #!/bin/sh
-# mi-trusttunnel: вход автозапуска (fw3 include)
-D="${MITT_ROOT:-}/data/mi-trusttunnel"; T="${MITT_ROOT:-}/tmp/mi-trusttunnel"
+# mi-lumruri: вход автозапуска (fw3 include)
+D="${MITT_ROOT:-}/data/mi-lumruri"; T="${MITT_ROOT:-}/tmp/mi-lumruri"
 V="$(cat "$D/current.ver" 2>/dev/null)" || exit 0
 S="$(cat "$D/store" 2>/dev/null)"; [ -n "$S" ] || S="$D"
 B="$S/releases/$V/payload/scripts/mitt-boot.sh"
@@ -151,7 +174,7 @@ mkdir -p "${MITT_ROOT:-}/tmp" && mkdir "$T.wait" 2>/dev/null || exit 0
 ( n=0; while [ ! -f "$B" ] && [ "$n" -lt "${MITT_STORE_WAIT:-60}" ]; do sleep 5; n=$((n + 1)); done
   rmdir "$T.wait"
   [ -f "$B" ] && exec sh "$B"
-  logger -t mi-trusttunnel "накопитель $S не появился, служба не запущена" ) >/dev/null 2>&1 </dev/null &
+  logger -t mi-lumruri "накопитель $S не появился, служба не запущена" ) >/dev/null 2>&1 </dev/null &
 exit 0
 STUB
   chmod 755 "$DATA/mitt-boot.sh.new" && mv -f "$DATA/mitt-boot.sh.new" "$DATA/mitt-boot.sh" || fail "запись точки входа"
@@ -176,7 +199,7 @@ first_setup() {
   [ -f "$DATA/keys/release.pub" ] || jget pubkey >"$DATA/keys/release.pub"
   if [ ! -f "$ETC/tls/key.pem" ]; then
     # свой ключ и сертификат панели для этого устройства (штатный сертификат прошивки общий для всех роутеров)
-    ${MITT_OPENSSL:-openssl} req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 -subj "/CN=mi-trusttunnel" \
+    ${MITT_OPENSSL:-openssl} req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 -subj "/CN=mi-lumruri" \
       -keyout "$ETC/tls/key.pem" -out "$ETC/tls/cert.pem" >/dev/null 2>&1 || fail "не удалось выпустить сертификат панели (openssl)"
     chmod 600 "$ETC/tls/key.pem"
   fi
@@ -219,6 +242,12 @@ install_release() {
   fi
   # места впритык: прежний релиз не хранится (см. проверку места)
   [ -n "$TIGHT" ] && rm -f "$DATA/previous.ver"
+  # служба релиза 0.4 (после отката на него) работает из /tmp/mi-trusttunnel: остановить её копией её же загрузчика
+  local oldrun="${MITT_ROOT:-}/tmp/mi-trusttunnel" op
+  if [ -f "$oldrun/scripts/mitt-boot.sh" ]; then
+    op="$(cat "$oldrun/run/service.pid" 2>/dev/null)"; [ -n "$op" ] && kill -0 "$op" 2>/dev/null && WAS_RUNNING=1
+    sh "$oldrun/scripts/mitt-boot.sh" stop >/dev/null 2>&1; rm -rf "$oldrun"
+  fi
   # старые релизы, кроме current и previous, удаляются (место в хранилище)
   local keep_c keep_p
   keep_c="$(cat "$DATA/current.ver")"; keep_p="$(cat "$DATA/previous.ver" 2>/dev/null)"
@@ -229,7 +258,7 @@ install_release() {
   autostart_on
   rm -f "$RUN/.release"   # загрузчик распакует новый релиз
   say "установлен релиз $ver (current), предыдущий: $(cat "$DATA/previous.ver" 2>/dev/null || echo нет); релизы в $STORE/releases"
-  if [ -z "$NOSTART" ]; then boot_sh stop >/dev/null 2>&1; boot_sh start; fi
+  if [ -z "$NOSTART" ] || [ -n "$WAS_RUNNING" ]; then boot_sh stop >/dev/null 2>&1; boot_sh start; fi
 }
 
 case "$CMD" in
@@ -237,12 +266,17 @@ case "$CMD" in
   rollback)
     p="$(cat "$DATA/previous.ver" 2>/dev/null)"; [ -n "$p" ] && [ -d "$STORE/releases/$p" ] || fail "нет предыдущего релиза для отката"
     c="$(cat "$DATA/current.ver")"
+    # остановка сценариями текущего релиза, до переключения: у релизов разных версий бывают разные пути
+    # (0.4 — /tmp/mi-trusttunnel), и загрузчик прежнего не нашёл бы работающую службу
+    [ -n "$NOSTART" ] || boot_sh stop >/dev/null 2>&1
     setver current "$p"; setver previous "$c"
     autostart_on; rm -f "$RUN/.release"; say "откат: current → $p, previous → $c"
-    [ -n "$NOSTART" ] || { boot_sh stop >/dev/null 2>&1; boot_sh start; };;
+    [ -n "$NOSTART" ] || boot_sh start;;
   uninstall)
     [ -f "$DATA/mitt-boot.sh" ] && boot_sh stop
     autostart_off; rm -rf "$RUN"
+    [ -L "$OLD_D" ] && rm -f "$OLD_D"   # ссылка, оставленная переносом из mi-trusttunnel
+    rm -rf "${MITT_ROOT:-}/tmp/mi-trusttunnel"   # каталог выполнения релиза 0.4 (после отката на него)
     [ "$STORE" = "$DATA" ] || { rm -rf "$STORE/releases"; rmdir "$STORE" 2>/dev/null; }
     if [ -n "$PURGE" ]; then rm -rf "$DATA"; say "удалено вместе с настройками"; else rm -rf "$DATA/releases" "$DATA/current.ver" "$DATA/previous.ver" "$DATA/mitt-boot.sh" "$DATA/store"; say "удалено; настройки сохранены в $ETC"; fi;;
   status)

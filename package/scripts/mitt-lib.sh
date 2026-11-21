@@ -1,9 +1,9 @@
-# mi-trusttunnel: общие функции установщика, загрузчика и службы (BusyBox ash 1.25.1 стока RC06 1.1.38).
+# mi-lumruri: общие функции установщика, загрузчика и службы (BusyBox ash 1.25.1 стока RC06 1.1.38).
 # Все пути строятся от MITT_ROOT: на роутере он пуст; в лаборатории — каталог эмуляции файловой системы роутера.
 # Лабораторные переопределения (MITT_LAB_*) учитываются только при непустом MITT_ROOT и в работе на роутере не действуют.
 
 R="${MITT_ROOT:-}"
-DATA="$R/data/mi-trusttunnel"
+DATA="$R/data/mi-lumruri"
 ETC="$DATA/etc"
 # Текущий релиз — файл-указатель current.ver (замена обычного файла через mv атомарна; BusyBox 1.25 не умеет mv -T
 # для символических ссылок на каталоги). Релиз: releases/<версия>/{manifest.json,manifest.sig,payload/}.
@@ -13,7 +13,7 @@ CURV="$(cat "$DATA/current.ver" 2>/dev/null)"
 STORE="$(cat "$DATA/store" 2>/dev/null)"; [ -n "$STORE" ] || STORE="$DATA"
 REL="$STORE/releases/$CURV"
 [ -d "$REL" ] || [ ! -d "$DATA/releases/$CURV" ] || REL="$DATA/releases/$CURV"
-RUN="$R/tmp/mi-trusttunnel"
+RUN="$R/tmp/mi-lumruri"
 # Сценарии работают из копии в RAM: после холодного старта служба не зависит от накопителя с релизами.
 SCR="$RUN/scripts"
 BIN="$RUN/bin"
@@ -24,7 +24,7 @@ LEASES="${MITT_LEASES:-$R/tmp/dhcp.leases}"
 PANEL_PORT="${MITT_PANEL_PORT:-8443}"
 CGI_PORT=18081
 
-mlog() { mkdir -p "$LOG"; printf '%s %s\n' "$(date +%Y-%m-%dT%H:%M:%S)" "$*" >>"$LOG/mitt.log"; [ -n "${MITT_QUIET:-}" ] || echo "mi-trusttunnel: $*" >&2
+mlog() { mkdir -p "$LOG"; printf '%s %s\n' "$(date +%Y-%m-%dT%H:%M:%S)" "$*" >>"$LOG/mitt.log"; [ -n "${MITT_QUIET:-}" ] || echo "mi-lumruri: $*" >&2
   # журнал ограниченного размера (RAM): оставляем последние 400 строк
   if [ "$(wc -l <"$LOG/mitt.log")" -gt 800 ]; then tail -n 400 "$LOG/mitt.log" >"$LOG/mitt.log.t" && mv -f "$LOG/mitt.log.t" "$LOG/mitt.log"; fi; }
 die() { mlog "ОШИБКА: $*"; exit 1; }
