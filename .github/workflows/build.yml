@@ -21,6 +21,13 @@ jobs:
         with:
           node-version: '24'
 
+      # сценарии роутера: синтаксис, конструкции, которых нет в BusyBox стока (дробный sleep и др.), ошибки shellcheck
+      - name: Lint router scripts
+        run: |
+          for f in package/install.sh package/scripts/*.sh tools/device/*.sh; do sh -n "$f"; done
+          python3 -I tools/lint-sh.py
+          shellcheck -s sh -S error package/install.sh package/scripts/*.sh tools/device/*.sh
+
       - name: Test and compile controller
         working-directory: controller
         run: |
