@@ -84,6 +84,10 @@ while [ -f "$STATE/service.wanted" ]; do
   if [ -f "$STATE/diag.request" ] && ! pid_alive diag; then
     mv -f "$STATE/diag.request" "$STATE/diag.request.run"; start_bg diag sh "$SCR/mitt-diag.sh"
   fi
+  # замер скорости — в фоне, один одновременно (итог в $STATE/speed.json)
+  if [ -f "$STATE/speed.request" ] && ! pid_alive speed; then
+    mv -f "$STATE/speed.request" "$STATE/speed.request.run"; start_bg speed sh "$SCR/mitt-speed.sh"
+  fi
   # обновление из релизов GitHub — в фоне, одно одновременно (проверка или установка; итог в $STATE/update.json)
   if [ -f "$STATE/update.request" ] && ! pid_alive update; then
     mv -f "$STATE/update.request" "$STATE/update.request.run"; start_bg update sh "$SCR/mitt-update.sh"

@@ -276,6 +276,10 @@ export interface StatsResponse {
   devices: { key: string; name: string | null; known: boolean; day: number; week: number }[]
   issues: Issue[]; error?: ApiError
 }
+/** Замер скорости и задержки (mitt-speed.sh): Мбит/с по пути или ошибка; задержка — мс до TCP-подключения. */
+export type SpeedPath = { mbps: number; bytes: number } | { error: string }
+export interface SpeedState { state: 'running' | 'done'; started: number; at: number; ping: { primary: number | null; backup: number | null }; direct: SpeedPath | null; tunnel: SpeedPath | null }
+export interface SpeedResponse { ok: boolean; running?: boolean; speed: SpeedState | null; issues: Issue[]; error?: ApiError }
 export interface UpdateResponse { ok: boolean; running?: boolean; update?: UpdateState | null; queued?: boolean; issues: Issue[]; error?: ApiError }
 
 /** Итог обновления по подписке TrustTunnel (mitt-sub.sh); время — unix-секунды; updated — когда параметры менялись. */
@@ -293,6 +297,8 @@ export const manage = {
   applyRequest: () => call<ManageResponse>('/apply-request', json({})),
   notifyState: () => call<NotifyResponse>('/notify'),
   stats: () => call<StatsResponse>('/stats'),
+  speed: () => call<SpeedResponse>('/speed'),
+  startSpeed: () => call<SpeedResponse>('/speed', json({})),
   setNotify: (b: NotifySet) => call<ManageResponse>('/notify', json(b)),
   testNotify: () => call<ManageResponse>('/notify/test', json({})),
   exportBackup: (secrets: boolean, passphrase?: string) => call<BackupExportResponse>('/backup/export', json({ secrets, passphrase })),

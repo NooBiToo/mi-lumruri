@@ -203,10 +203,10 @@ check v "итог прежний (ready, newer)" 's["state"]=="ready" and s["new
 echo "(р) расписание: вручную — не проверять; первая проверка — через 10 минут после запуска; затем раз в период"
 due() { timeout 60 env -i PATH="$SB" MITT_ROOT="$W/v/root" MITT_QUIET=1 "$Q" -L "$F" "$F/bin/busybox" ash -c \
   ". \"$W/v/root/tmp/mi-lumruri/scripts/mitt-lib.sh\"; $1; update_check_due && echo due || echo wait"; }
-mkdir -p "$W/v/root/tmp/mi-lumruri/run/render" "$W/v/root/data/mi-lumruri/etc"; E="$W/v/root/data/mi-lumruri/etc/update-check.last"
-printf 'lists=86400\nzapret_check=0\nupdate_check=0\n' >"$W/v/root/tmp/mi-lumruri/run/render/schedule"; rm -f "$E"
+mkdir -p "$W/v/root/tmp/mi-lumruri/render" "$W/v/root/data/mi-lumruri/etc"; E="$W/v/root/data/mi-lumruri/etc/update-check.last"
+printf 'lists=86400\nzapret_check=0\nupdate_check=0\n' >"$W/v/root/tmp/mi-lumruri/render/schedule"; rm -f "$E"
 [ "$(due :)" = wait ] && ok "v: update_check=0 — вручную" || bad "v: вручную, но due"
-printf 'lists=86400\nzapret_check=0\nupdate_check=86400\n' >"$W/v/root/tmp/mi-lumruri/run/render/schedule"
+printf 'lists=86400\nzapret_check=0\nupdate_check=86400\n' >"$W/v/root/tmp/mi-lumruri/render/schedule"
 [ "$(due :)" = wait ] && [ -s "$E" ] && ok "v: первая проверка отложена (метка записана)" || bad "v: первая: $(cat "$E" 2>/dev/null)"
 echo $(( $(date +%s) - 90000 )) >"$E"
 [ "$(due :)" = due ] && ok "v: прошли сутки — пора" || bad "v: сутки прошли, но wait"

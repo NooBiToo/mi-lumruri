@@ -21,7 +21,7 @@ pub const MAX_LIST_BODY: usize = 8 * 1024 * 1024;
 
 pub const PATHS: &[&str] = &["/rules/delete", "/rules/move", "/profiles", "/profiles/delete", "/groups", "/groups/delete", "/categories",
     "/categories/delete", "/networks", "/networks/delete", "/devices", "/devices/delete", "/leases", "/dns", "/zapret", "/adblock/list",
-    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update", "/router", "/diag", "/service/restart", "/update", "/subscription", "/subscription/update", "/backup/export", "/backup/restore", "/notify", "/notify/test", "/stats"];
+    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update", "/router", "/diag", "/service/restart", "/update", "/subscription", "/subscription/update", "/backup/export", "/backup/restore", "/notify", "/notify/test", "/stats", "/speed"];
 
 pub fn is_manage_path(path: &str) -> bool {
     PATHS.contains(&path.trim_end_matches('/'))
@@ -676,6 +676,24 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
         ("POST", "/backup/export") => crate::backup::export(b, config_path),
         ("GET", "/notify") => crate::notify::get(config_path),
         ("GET", "/stats") => crate::stats::get(config_path),
+        ("GET", "/speed") => {
+            let d = run_dir();
+            let st = std::fs::read(d.join("speed.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
+            let running = d.join("speed.request").exists() || d.join("speed.request.run").exists();
+            Response { status: 200, body: json!({ "ok": true, "running": running, "speed": st, "issues": [] }) }
+        }
+        ("POST", "/speed") => {
+            // замер выполняет служба (CGI сам в сеть не ходит): скачивание через туннель и напрямую, задержка до серверов
+            let d = run_dir();
+            if d.join("speed.request").exists() || d.join("speed.request.run").exists() {
+                return Some(Response::error(409, "speed_running", "замер уже идёт"));
+            }
+            let req = json!({ "requested_unix": crate::auth::now() });
+            match std::fs::create_dir_all(&d).map_err(|e| e.to_string()).and_then(|_| store::write_atomic(&d.join("speed.request"), req.to_string().as_bytes())) {
+                Ok(()) => Response { status: 202, body: json!({ "ok": true, "queued": true, "issues": [] }) },
+                Err(m) => Response::error(500, "write_failed", m),
+            }
+        }
         ("POST", "/notify") => crate::notify::set(b, config_path),
         ("POST", "/notify/test") => crate::notify::test(config_path),
         ("POST", "/backup/restore") => crate::backup::restore(b, config_path),

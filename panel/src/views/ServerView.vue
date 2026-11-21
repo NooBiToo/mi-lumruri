@@ -16,6 +16,7 @@ import { when } from '../status'
 import { t } from '../i18n'
 import Segmented from '../components/Segmented.vue'
 import BackupServer from '../components/BackupServer.vue'
+import SpeedCard from '../components/SpeedCard.vue'
 
 const emit = defineEmits<{ navigate: [tab: 'sites'] }>()
 
@@ -212,6 +213,7 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
           <p v-if="tunnel.detail" class="hint">{{ tunnel.detail }}</p>
         </div>
         <BackupServer v-if="!firstTime" />
+        <SpeedCard v-if="!firstTime" />
       </div>
 
       <form class="card" @submit.prevent="submit">
