@@ -40,8 +40,7 @@ fn setup(endpoint: Option<Value>) -> Dir {
     d
 }
 
-const SUB: &str = r#"{"version":1,"hostname":"vpn.example.com","address":"203.0.113.1:443","username":"alice","password":"s3cret-pw","has_ipv6":true,
-"upstream_protocol":"http2","anti_dpi":true,"skip_verification":false,"client_random_prefix":"a0b0/f0f0","name":"Acme VPN"}"#; // secret-scan: allow тестовый ответ подписки
+const SUB: &str = r#"{"version":1,"hostname":"vpn.example.com","address":"203.0.113.1:443","username":"alice","password":"s3cret-pw","has_ipv6":true,"upstream_protocol":"http2","anti_dpi":true,"skip_verification":false,"client_random_prefix":"a0b0/f0f0","name":"Acme VPN"}"#; // secret-scan: allow тестовый ответ подписки
 
 #[test]
 fn subscription_only_profile_gets_endpoint_and_password() {
