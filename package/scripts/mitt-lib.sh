@@ -110,7 +110,7 @@ render_now() {
   if [ ! -f "$RUN/adblock.list" ] && [ -f "$DATA/adblock.list.gz" ]; then
     gzip -dc "$DATA/adblock.list.gz" >"$RUN/adblock.list.t" 2>/dev/null && mv -f "$RUN/adblock.list.t" "$RUN/adblock.list"       && cp -f "$DATA/adblock.src" "$RUN/adblock.src" 2>/dev/null || rm -f "$RUN/adblock.list.t"
   fi
-  if MI_TT_ADBLOCK_LIST="$RUN/adblock.list" ctl render "$ETC/config.json" "$ETC/secrets.json" "$RENDER.new" >"$STATE/render.json" 2>&1; then
+  if MI_TT_ADBLOCK_LIST="$RUN/adblock.list" MI_TT_SERVER_ADDRS="$ETC/server-addrs" ctl render "$ETC/config.json" "$ETC/secrets.json" "$RENDER.new" >"$STATE/render.json" 2>&1; then
     rm -rf "$RENDER.prev"; [ -d "$RENDER" ] && mv "$RENDER" "$RENDER.prev"; mv "$RENDER.new" "$RENDER"
     printf '{"ok":true,"at":%s}\n' "$(date +%s)" >"$STATE/last-render.json"; return 0
   fi
@@ -135,6 +135,19 @@ admin_apply() { # admin_apply <метка> [--guard-only]
 
 # пауза 0,2 с: sleep в BusyBox стока не понимает дробные секунды (сразу выходит с ошибкой), usleep — понимает
 nap() { usleep 200000 2>/dev/null || sleep 1; }
+# Запасной адрес сервера: после удачного подключения клиент пишет «Using endpoint: name=<имя>, address=<IP>:<порт>».
+# Последние адреса (до трёх, свежий первым) — в $ETC/server-addrs «имя IP»: рендер добавляет их в addresses за доменом,
+# и при сбое DNS на старте клиент подключается по IP, а не завершается. Файл переписывается, только если адрес новый.
+server_addr_learn() {
+  local l name ip f="$ETC/server-addrs"
+  l="$(tail -n 60 "$LOG/trusttunnel.log" 2>/dev/null | grep 'Using endpoint: name=' | tail -n 1)"
+  [ -n "$l" ] || return 0
+  name="$(echo "$l" | sed -n 's/.*Using endpoint: name=\([^,]*\), address=.*/\1/p')"
+  ip="$(echo "$l" | sed -n 's/.*, address=\([^,]*\),.*/\1/p' | sed 's/:[0-9]*$//; s/^\[//; s/\]$//')"
+  [ -n "$name" ] && [ -n "$ip" ] || return 0
+  [ "$(head -n 1 "$f" 2>/dev/null)" = "$name $ip" ] && return 0
+  { echo "$name $ip"; grep -v "^$name $ip\$" "$f" 2>/dev/null; } | head -n 3 >"$f.t" && mv -f "$f.t" "$f"
+}
 # TUN клиента готов: есть, поднят и с IPv4-адресом (клиент настраивает его не сразу после создания)
 tun_ready() { ip link show mitt0 2>/dev/null | grep -q '[<,]UP[,>]' && ip -4 addr show dev mitt0 2>/dev/null | grep -q 'inet '; }
 pid_alive() { [ -f "$STATE/$1.pid" ] && kill -0 "$(cat "$STATE/$1.pid")" 2>/dev/null; }

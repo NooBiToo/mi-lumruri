@@ -146,12 +146,39 @@ fn toml_str(v: &str) -> String {
 /// client.toml для trusttunnel_client 1.3.x. Маршруты (`included_routes`) пустые: выбор маршрута держит
 /// mi-tt-admin (метка и таблица 3100), клиент только создаёт TUN `mitt0` и передаёт в туннель то, что в него пришло.
 pub fn client_toml(e: &Endpoint, password: &str) -> String {
+    client_toml_with(e, password, &[])
+}
+
+/// Запасные адреса сервера, заданного доменом: строки «домен IP» (файл службы `server-addrs`, последний удачный адрес
+/// подключения). Берутся только IP этого домена, не больше трёх, без повторов.
+pub fn fallback_addrs(server: &str, text: &str) -> Vec<std::net::IpAddr> {
+    let Ok(domain) = normalize_domain(server, 1) else { return Vec::new() };
+    let mut out = Vec::new();
+    for l in text.lines() {
+        let mut p = l.split_whitespace();
+        let (Some(d), Some(ip)) = (p.next(), p.next()) else { continue };
+        let Ok(ip) = ip.parse::<std::net::IpAddr>() else { continue };
+        if d.eq_ignore_ascii_case(&domain) && !out.contains(&ip) && out.len() < 3 && !ip.is_loopback() && !ip.is_unspecified() {
+            out.push(ip);
+        }
+    }
+    out
+}
+
+/// client.toml с запасными IP: домен идёт первым, за ним IP — если DNS при запуске не отвечает, клиент не завершается
+/// («Failed to resolve endpoint»), а подключается по IP. Имя в TLS (`hostname`) остаётся прежним.
+pub fn client_toml_with(e: &Endpoint, password: &str, fallback: &[std::net::IpAddr]) -> String {
     // домен в addresses клиент разрешает сам (проверено на trusttunnel_client 1.1.12 и 1.3.0)
     let server = match e.server.parse::<std::net::IpAddr>() {
         Ok(ip) => ip.to_string(),
         Err(_) => normalize_domain(&e.server, 1).unwrap_or_else(|_| e.server.clone()),
     };
-    let addr = if server.contains(':') { format!("[{server}]:{}", e.port) } else { format!("{server}:{}", e.port) };
+    let fmt = |h: &str| if h.contains(':') { format!("[{h}]:{}", e.port) } else { format!("{h}:{}", e.port) };
+    let mut addrs = vec![toml_str(&fmt(&server))];
+    if server.parse::<std::net::IpAddr>().is_err() {
+        addrs.extend(fallback.iter().map(|ip| toml_str(&fmt(&ip.to_string()))));
+    }
+    let addr = addrs.join(", ");
     let host = e.sni.as_deref().map(|s| normalize_domain(s, 1).unwrap_or_else(|_| s.to_string())).unwrap_or_else(|| server.clone());
     let cert = match &e.certificate {
         Some(c) => format!("certificate = '''\n{}\n'''", c.trim()),
@@ -188,7 +215,7 @@ excluded_routes = []\n\
 mtu_size = {TUN_MTU}\n\
 change_system_dns = false\n",
         host = toml_str(&host),
-        addr = toml_str(&addr),
+        addr = addr,
         user = toml_str(&e.username),
         pass = toml_str(password),
         random = toml_str(e.client_random.as_deref().unwrap_or_default()),
@@ -390,7 +417,10 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
     let uses_zapret = rules.iter().any(|r| r.act == Act::Zapret);
     let client = tunnel_profile.map(|p| {
         let e = p.endpoint.as_ref().expect("проверено");
-        client_toml(e, secrets.profiles[p.id.as_str()].password.as_deref().unwrap_or_default())
+        // запасные IP сервера-домена (служба: MI_TT_SERVER_ADDRS — файл «домен IP» после удачных подключений)
+        let fallback = std::env::var("MI_TT_SERVER_ADDRS").ok().filter(|s| !s.is_empty())
+            .and_then(|f| std::fs::read_to_string(f).ok()).map(|t| fallback_addrs(&e.server, &t)).unwrap_or_default();
+        client_toml_with(e, secrets.profiles[p.id.as_str()].password.as_deref().unwrap_or_default(), &fallback)
     });
     if let Some(p) = tunnel_profile {
         if !plain_text(&p.endpoint.as_ref().expect("проверено").username) {
@@ -434,6 +464,21 @@ mod tests {
 
     fn ep() -> Endpoint {
         Endpoint { server: "203.0.113.10".into(), port: 443, sni: Some("vpn.example".into()), username: "user1".into(), quic: false, anti_dpi: true, certificate: None, tls_profile: None, client_random: None, client_random_auth_key: None }
+    }
+
+    #[test]
+    fn client_toml_fallback_ips_for_domain_server() {
+        let text = "tunnel.example.com 203.0.113.7\nother.example.com 198.51.100.1\nTUNNEL.example.com 203.0.113.8\nbad line\ntunnel.example.com 127.0.0.1\ntunnel.example.com 203.0.113.7\n";
+        let fb = fallback_addrs("Tunnel.Example.com", text);
+        assert_eq!(fb, ["203.0.113.7".parse::<std::net::IpAddr>().unwrap(), "203.0.113.8".parse().unwrap()]);
+        let e = Endpoint { server: "tunnel.example.com".into(), ..ep() };
+        let t = client_toml_with(&e, "p", &fb);
+        assert!(t.contains("addresses = [\"tunnel.example.com:443\", \"203.0.113.7:443\", \"203.0.113.8:443\"]\n"), "{t}");
+        // сервер задан IP — запасные не добавляются; домена в файле нет — пусто
+        assert!(client_toml_with(&ep(), "p", &fb).contains("addresses = [\"203.0.113.10:443\"]\n"));
+        assert!(fallback_addrs("203.0.113.10", text).is_empty());
+        let v6 = client_toml_with(&e, "p", &["2001:db8::7".parse().unwrap()]);
+        assert!(v6.contains("\"[2001:db8::7]:443\"]"), "{v6}");
     }
 
     #[test]

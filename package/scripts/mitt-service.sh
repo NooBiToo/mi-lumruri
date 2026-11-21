@@ -115,6 +115,8 @@ while [ -f "$STATE/service.wanted" ]; do
       engines_start; admin_apply "$e-restart" && echo full >"$STATE/protection"; status_write; break
     fi
   done
+  # запасной IP сервера-домена для следующего запуска клиента (см. server_addr_learn)
+  pid_alive trusttunnel && server_addr_learn
   # полное применение не прошло (туннель не успел подняться) и действует только защита: повтор, когда mitt0 готов,
   # не чаще раза в минуту
   if [ "$(cat "$STATE/protection" 2>/dev/null)" = guard ] && [ -f "$STATE/trusttunnel.wanted" ] && tun_ready; then
