@@ -15,6 +15,7 @@ export const CHECK_TITLES: Record<string, string> = {
   tunnelsecure: 'Шифрованный DNS через VPN',
   zapret: 'Обход блокировок (Zapret)',
   restarts: 'Стабильность программ',
+  watch: 'Сторож туннеля',
 }
 
 export const checkTitle = (c: DiagCheck) => CHECK_TITLES[c.id] ?? c.id

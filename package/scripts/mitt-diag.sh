@@ -23,8 +23,14 @@ if [ -f "$RENDER/client.toml" ]; then
   if pid_alive trusttunnel; then
     st="$(grep -o 'VPN_SS_[A-Z_]*' "$LOG/trusttunnel.log" 2>/dev/null | tail -n 1)"
     ping="$(grep -o 'ping=[0-9]*ms' "$LOG/trusttunnel.log" 2>/dev/null | tail -n 1 | sed 's/ping=\([0-9]*\)ms/\1 мс/')"
+    ver="$("$BIN/trusttunnel_client" --version 2>/dev/null | sed -n 's/^trusttunnel_client //p' | head -n 1)"
+    # на связи с последнего VPN_SS_CONNECTED: время журнала клиента — UTC, «дд.мм.гггг чч:мм:сс.мкс»
+    since=""; t="$(grep 'VPN_SS_CONNECTED' "$LOG/trusttunnel.log" 2>/dev/null | tail -n 1 | cut -c1-19)"
+    if [ -n "$t" ] && s="$(date -u -D '%d.%m.%Y %H:%M:%S' -d "$t" +%s 2>/dev/null)"; then
+      m=$(( ($(date +%s) - s) / 60 )); [ "$m" -ge 0 ] && since="$( [ $m -ge 1440 ] && echo "$((m / 1440)) д $(((m % 1440) / 60)) ч" || { [ $m -ge 60 ] && echo "$((m / 60)) ч $((m % 60)) мин" || echo "$m мин"; })"
+    fi
     case "$st" in
-      VPN_SS_CONNECTED) ch client ok "подключён к серверу${ping:+, задержка $ping}" ;;
+      VPN_SS_CONNECTED) ch client ok "подключён к серверу${ping:+, задержка $ping}${since:+, на связи $since}${ver:+, клиент $ver}" ;;
       VPN_SS_CONNECTING|VPN_SS_RECOVERING*|VPN_SS_WAITING*) ch client warn "подключается к серверу" ;;
       *) ch client bad "нет связи с сервером${st:+ ($st)}" ;;
     esac
@@ -42,6 +48,17 @@ if [ -f "$RENDER/client.toml" ]; then
   r=$(ip rule 2>/dev/null | grep -c 'lookup 3100'); t=$(ip route show table 3100 2>/dev/null | grep -c 'dev mitt0')
   if [ "$r" -gt 0 ] && [ "$t" -gt 0 ]; then ch route ok "трафик сайтов из списка уходит в туннель"
   else ch route bad "нет правила или маршрута в туннель (правил: $r, маршрутов: $t)"; fi
+  # сторож туннеля (tunnel_watch): последняя проверка и перезапуски клиента за последний час
+  w="$(cat "$STATE/watch.json" 2>/dev/null)"
+  if [ -n "$w" ]; then
+    wc_="$(echo "$w" | sed -n 's/.*"checked":\([0-9]*\).*/\1/p')"; wr="$(echo "$w" | sed -n 's/.*"restarted":\([0-9]*\).*/\1/p')"
+    wf="$(echo "$w" | sed -n 's/.*"fails":\([0-9]*\).*/\1/p')"; now=$(date +%s)
+    if [ "${wr:-0}" -gt 0 ] && [ $((now - wr)) -lt 3600 ]; then ch watch warn "перезапускал клиент $((  (now - wr) / 60 )) мин назад: трафик через туннель не шёл"
+    elif [ "${wf:-0}" -gt 0 ]; then ch watch warn "последние проверки через туннель не прошли ($wf подряд)"
+    else ch watch ok "трафик через туннель идёт, проверка $(( (now - ${wc_:-$now}) / 60 )) мин назад"; fi
+  else
+    ch watch skip "проверок ещё не было"
+  fi
 else
   ch client skip "VPN выключен или сервер не настроен"
 fi
