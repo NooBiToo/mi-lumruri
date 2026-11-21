@@ -30,6 +30,11 @@ pub struct Config {
     /// Как часто служба сама обновляет списки сайтов и перепроверяет способ Zapret. Без раздела — по умолчанию.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schedule: Option<ScheduleConfig>,
+    /// IPv6 через VPN для источников, у которых через туннель идёт весь интернет («Всё через VPN»): клиент с has_ipv6,
+    /// весь их IPv6 — в туннель (исключения и сайты с Zapret сопоставляются только по IPv4, по IPv6 они тоже идут в
+    /// туннель). Выборочные правила по доменам IPv6 не используют: адреса доменов попадают в наборы только по IPv4.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ipv6_via_vpn: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]

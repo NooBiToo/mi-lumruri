@@ -124,6 +124,32 @@ fn single_profile_limit() {
 }
 
 #[test]
+fn ipv6_via_vpn_only_for_all_via_vpn_sources() {
+    let pw = format!("p-{}", rand_hex(8));
+    // выборочные сайты: IPv6 через VPN включён, но источников «весь интернет» нет — has_ipv6 выключен, предупреждение
+    let mut c = lab();
+    c["ipv6_via_vpn"] = json!(true);
+    let (code, v, out) = render(&c, &secrets(&pw));
+    assert_eq!(code, 0, "{v}");
+    assert!(std::fs::read_to_string(out.join("client.toml")).unwrap().contains("has_ipv6 = false\n"));
+    assert!(v["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("IPv6 через VPN")), "{v}");
+    let pol: Value = serde_json::from_str(&std::fs::read_to_string(out.join("policy.json")).unwrap()).unwrap();
+    assert!(pol.get("v6_tunnel").is_none(), "{pol}");
+    // правило ТВ → весь интернет (0.0.0.0/1 и 128.0.0.0/1) через туннель: IPv6 ТВ — в туннель, клиент с IPv6
+    c["groups"] = json!([{ "id": "all", "name": "Весь интернет", "destinations": [{ "type": "cidr", "value": "0.0.0.0/1" }, { "type": "cidr", "value": "128.0.0.0/1" }] }]);
+    c["rules"][0]["destination"] = json!({ "type": "group", "id": "all" });
+    let (code, v, out) = render(&c, &secrets(&pw));
+    assert_eq!(code, 0, "{v}");
+    assert!(std::fs::read_to_string(out.join("client.toml")).unwrap().contains("has_ipv6 = true\n"));
+    let pol: Value = serde_json::from_str(&std::fs::read_to_string(out.join("policy.json")).unwrap()).unwrap();
+    assert_eq!(pol["v6_tunnel"].as_array().map(Vec::len), Some(1), "{pol}");
+    // выключено — как раньше
+    c["ipv6_via_vpn"] = json!(false);
+    let (_, _, out) = render(&c, &secrets(&pw));
+    assert!(std::fs::read_to_string(out.join("client.toml")).unwrap().contains("has_ipv6 = false\n"));
+}
+
+#[test]
 fn render_writes_backup_client_toml_with_its_password() {
     let mut c = lab();
     c["profiles"][0]["backup"] = json!({ "server": "backup.example.com", "port": 8443, "username": "tv-backup", "quic": true, "anti_dpi": false });

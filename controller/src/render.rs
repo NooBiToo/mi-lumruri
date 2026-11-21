@@ -204,6 +204,16 @@ pub fn client_toml(e: &Endpoint, password: &str) -> String {
     client_toml_with(e, password, &[])
 }
 
+/// IPv6 через VPN: клиент поднимает IPv6 в туннеле (`has_ipv6`).
+fn with_ipv6(toml: String, on: bool) -> String {
+    if on { toml.replace("has_ipv6 = false\n", "has_ipv6 = true\n") } else { toml }
+}
+
+/// Весь интернет IPv4: 0.0.0.0/0 или две половины 0.0.0.0/1 и 128.0.0.0/1 («всё через VPN» для выбранных устройств).
+fn covers_all_v4(nets: &BTreeSet<String>) -> bool {
+    nets.contains("0.0.0.0/0") || (nets.contains("0.0.0.0/1") && nets.contains("128.0.0.0/1"))
+}
+
 /// Запасные адреса сервера, заданного доменом: строки «домен IP» (файл службы `server-addrs`, последний удачный адрес
 /// подключения). Берутся только IP этого домена, не больше трёх, без повторов.
 pub fn fallback_addrs(server: &str, text: &str) -> Vec<std::net::IpAddr> {
@@ -348,6 +358,8 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
     let mut sets: BTreeMap<String, SetSpec> = BTreeMap::new();
     let mut dns = DnsPlan { resolver: cfg.dns.as_ref().map(|d| d.resolver().to_string()).unwrap_or_else(|| DEFAULT_TUNNEL_RESOLVER.into()), ..Default::default() };
     let mut v6_block: BTreeSet<SrcMatch> = BTreeSet::new();
+    // источники, у которых через туннель идёт весь интернет («всё через VPN»): им — IPv6 через VPN, если он включён
+    let mut tunnel_all: BTreeSet<SrcMatch> = BTreeSet::new();
     let (mut exact_warned, mut v6_warned) = (false, false);
 
     for r in evaluation_order(&cfg.rules) {
@@ -431,11 +443,15 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
             }
             add_rule(name, SetKind::Dns, Vec::new());
         }
+        let all_v4 = covers_all_v4(&nets);
         if !nets.is_empty() {
             add_rule(format!("{base}n"), SetKind::Static, nets.into_iter().collect());
         }
         if act != Act::Direct {
             v6_block.extend(srcs.iter().cloned());
+        }
+        if act == Act::Tunnel && all_v4 {
+            tunnel_all.extend(srcs.iter().cloned());
         }
     }
     if let Some(act) = act_of(&cfg.default_action, "default_action", &mut issues) {
@@ -445,6 +461,9 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
                     for bridge in b {
                         let src = SrcMatch::Bridge { bridge };
                         rules.push(PolicyRule { from: "default_action".into(), src: src.clone(), set: None, act });
+                        if act == Act::Tunnel {
+                            tunnel_all.insert(src.clone());
+                        }
                         v6_block.insert(src);
                     }
                 }
@@ -468,6 +487,8 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
         warnings.push("доменные правила срабатывают по ответам DNS роутера: устройство со своим DoH/DoT обходит сопоставление".into());
     }
 
+    // IPv6 через VPN: включён в настройках, есть туннель и источники «всё через VPN»
+    let ipv6 = cfg.ipv6_via_vpn && tunnel_profile.is_some() && !tunnel_all.is_empty();
     let zcfg = cfg.zapret.clone().unwrap_or_default();
     let uses_zapret = rules.iter().any(|r| r.act == Act::Zapret);
     let client = tunnel_profile.map(|p| {
@@ -475,12 +496,12 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
         // запасные IP сервера-домена (служба: MI_TT_SERVER_ADDRS — файл «домен IP» после удачных подключений)
         let fallback = std::env::var("MI_TT_SERVER_ADDRS").ok().filter(|s| !s.is_empty())
             .and_then(|f| std::fs::read_to_string(f).ok()).map(|t| fallback_addrs(&e.server, &t)).unwrap_or_default();
-        client_toml_with(e, secrets.profiles[p.id.as_str()].password.as_deref().unwrap_or_default(), &fallback)
+        with_ipv6(client_toml_with(e, secrets.profiles[p.id.as_str()].password.as_deref().unwrap_or_default(), &fallback), ipv6)
     });
     let client_backup = tunnel_profile.and_then(|p| {
         let b = p.backup.as_ref()?;
         let pw = secrets.profiles.get(p.id.as_str())?.backup_password.as_deref()?;
-        Some(client_toml(b, pw))
+        Some(with_ipv6(client_toml(b, pw), ipv6))
     });
     let primary_addr = client_backup.as_ref().and(tunnel_profile).and_then(|p| p.endpoint.as_ref()).map(|e| format!("{} {}\n", e.server, e.port));
     if let Some(p) = tunnel_profile {
@@ -497,7 +518,11 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
         zapret_queue: if uses_zapret { zapret_queue(&zcfg) } else { Vec::new() },
         dns_resolver: (client.is_some() && !dns.tunnel_domains.is_empty()).then(|| dns.resolver.clone()),
         v6_block: v6_block.into_iter().collect(),
+        v6_tunnel: if ipv6 { tunnel_all.iter().cloned().collect() } else { Vec::new() },
     };
+    if cfg.ipv6_via_vpn && client.is_some() && tunnel_all.is_empty() {
+        warnings.push("IPv6 через VPN действует только для «всё через VPN»: при выборе отдельных сайтов IPv6 устройств закрыт".into());
+    }
     if client.is_none() {
         dns.tunnel_domains.clear();
     }

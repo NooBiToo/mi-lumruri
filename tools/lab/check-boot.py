@@ -193,6 +193,13 @@ ls_ = js("lists.json")
 check("состояние проверки списков пережило «перезагрузку» (копия в /data): после неё — итог обновления",
       ls_.get("ok") is True and ls_.get("updated") == lu.get("updated"), ls_)
 
+z6 = text("zone.ipv6.txt")
+check("IPv6 через VPN («всё через VPN» для ТВ): применение прошло, ip -6 rule метка → 3100, маршрут IPv6 через mitt0, цепочки ip6tables mangle и ACCEPT в filter, клиент с has_ipv6",
+      js("last-apply.ipv6.json").get("exit") == 0 and "fwmark 0x4000/0x4000 lookup 3100" in z6 and "default dev mitt0" in z6
+      and "-A MITT_C" in z6 and "-o mitt0 -j ACCEPT" in z6 and "has_ipv6 = true" in text("client.ipv6.txt"),
+      [js("last-apply.ipv6.json"), z6[:600], text("client.ipv6.txt")])
+check("IPv6 через VPN выключен обратно: правил IPv6 в зоне 3000–3199 нет", text("zone.ipv6-off.txt").strip() == "", text("zone.ipv6-off.txt"))
+
 # --- подбор стратегии по кнопке панели: настоящие nfqws2 и curl стока, очередь 201
 zt = js("zapret-test.json")
 zl = text("zapret-test.log")

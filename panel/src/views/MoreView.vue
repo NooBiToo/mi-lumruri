@@ -6,7 +6,7 @@ import { ChevronDown, ChevronRight } from 'lucide-vue-next'
 import { CUSTOM_DNS, DNS_PRESETS, dnsPresetIp, dnsPresetOf, dnsToForm, formToDns, tunnelSecureModes, type DnsForm } from '../manage'
 import { config, save, service } from '../store'
 import { when } from '../status'
-import { useAutosave, type Blocker } from '../autosave'
+import { saveNow, useAutosave, type Blocker } from '../autosave'
 import { dnsIcon } from '../brand'
 import ServiceLogo from '../components/ServiceLogo.vue'
 import Segmented from '../components/Segmented.vue'
@@ -39,6 +39,18 @@ function chooseDns(id: string) {
 }
 
 const totpHelp = ref(false)
+
+// ---- IPv6 через VPN (для источников «весь интернет через VPN») ----
+const ipv6 = ref(!!config.value?.ipv6_via_vpn)
+watch(() => config.value?.ipv6_via_vpn, (v) => { ipv6.value = !!v })
+async function setIpv6(v: boolean) {
+  const c = config.value
+  if (!c || !!c.ipv6_via_vpn === v) return
+  const next = { ...c }
+  if (v) next.ipv6_via_vpn = true
+  else delete next.ipv6_via_vpn
+  if (!(await saveNow(() => save(next, '')))) ipv6.value = !!config.value?.ipv6_via_vpn
+}
 
 
 // ---- автосохранение ----
@@ -237,6 +249,14 @@ useAutosave({
           <span id="dns-hint" :class="resolverOk ? 'field__hint' : 'field__error'">{{ resolverOk ? t('Публичный адрес IPv4.') : t('Нужен адрес IPv4, например 1.0.0.1.') }}</span>
         </div>
       </div>
+
+      <label class="setrow">
+        <span class="setrow__text">
+          <span class="setrow__title">{{ t('IPv6 через VPN') }}</span>
+          <span class="setrow__desc">{{ t('Для устройств, у которых через VPN идёт весь интернет («Всё через VPN» или «Весь интернет» у устройства), IPv6 тоже пойдёт через туннель. Нужен IPv6 на VPN-сервере. Остальным устройствам с правилами IPv6 по-прежнему закрыт: сайты из списков сопоставляются только по IPv4') }}</span>
+        </span>
+        <ToggleSwitch v-model="ipv6" input-id="ipv6" @update:model-value="(v: boolean) => setIpv6(v)" />
+      </label>
 
       <div class="setblock" role="group" aria-labelledby="secure-title">
         <span class="setrow__text">

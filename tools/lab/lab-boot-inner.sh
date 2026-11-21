@@ -312,6 +312,28 @@ cp "$RR/tmp/mi-trusttunnel/log/zapret-nfqws.log" "$OUT/zapret-nfqws.log" 2>/dev/
 kill -0 "$(cat "$RN/nfqws2.pid")" 2>/dev/null && echo alive >"$OUT/nfqws2.after-test.alive"
 probe Z-phone-after-test phone 10.99.0.12 443
 
+# 6в) IPv6 через VPN при «всё через VPN» для ТВ: правило ТВ → весь интернет IPv4 через туннель, ipv6_via_vpn —
+# применение проходит, появляются ip -6 rule (метка → 3100), маршрут IPv6 через mitt0 и цепочки ip6tables; затем возврат
+phase ipv6_via_vpn
+cp "$E/config.json" "$W/config.before-ipv6.json"
+"${PY[@]}" -c 'import json,sys
+p=sys.argv[1]; c=json.load(open(p))
+c["groups"].append({"id":"all-net","name":"Весь интернет","destinations":[{"type":"cidr","value":"0.0.0.0/1"},{"type":"cidr","value":"128.0.0.0/1"}]})
+c["rules"].insert(0,{"id":"tv-all","source":{"type":"device","id":"tv"},"destination":{"type":"group","id":"all-net"},"action":{"type":"profile","id":c["profiles"][0]["id"]}})
+c["ipv6_via_vpn"]=True
+json.dump(c,open(p,"w"),ensure_ascii=False,indent=2)' "$E/config.json"
+A0="$(at_of)"; post apply-request '{}' >/dev/null
+for i in $(seq 60); do [ "$(at_of)" -gt "${A0:-0}" ] 2>/dev/null && grep -q '"panel-request' "$RN/last-apply.json" && break; sleep 1; done
+cp "$RN/last-apply.json" "$OUT/last-apply.ipv6.json"
+{ nsx router ip -6 rule show | awk -F: '$1>=3000 && $1<=3199'; echo "--- route"; nsx router ip -6 route show table 3100 2>/dev/null
+  echo "--- mangle"; nsx router "$NFBIN/ip6tables" -w -t mangle -S | grep MITT; echo "--- filter"; nsx router "$NFBIN/ip6tables" -w -S | grep MITT; } >"$OUT/zone.ipv6.txt" 2>&1
+grep -o 'has_ipv6 = [a-z]*' "$RR/tmp/mi-trusttunnel/render/client.toml" >"$OUT/client.ipv6.txt" 2>/dev/null
+cp "$W/config.before-ipv6.json" "$E/config.json"
+A0="$(at_of)"; post apply-request '{}' >/dev/null
+for i in $(seq 60); do [ "$(at_of)" -gt "${A0:-0}" ] 2>/dev/null && grep -q '"panel-request' "$RN/last-apply.json" && break; sleep 1; done
+nsx router ip -6 rule show | awk -F: '$1>=3000 && $1<=3199' >"$OUT/zone.ipv6-off.txt" 2>&1
+wait_tunnel
+
 # 7) «перезагрузка роутера»: RAM очищена, правила ядра сняты; снова холодный старт без WAN
 phase reboot
 boot stop >"$OUT/stop.out" 2>&1

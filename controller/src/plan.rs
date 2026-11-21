@@ -156,6 +156,9 @@ pub struct PolicySpec {
     /// Источники, внешний IPv6 которых запрещён.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub v6_block: Vec<SrcMatch>,
+    /// Источники, весь IPv6 которых идёт в туннель (IPv6 через VPN при «всё через VPN»).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub v6_tunnel: Vec<SrcMatch>,
 }
 
 impl PolicySpec {
@@ -168,7 +171,7 @@ impl PolicySpec {
     /// Мосты и порты, которые должны существовать до применения: (интерфейс, мост, если это порт).
     pub fn interfaces(&self) -> Vec<(String, Option<String>)> {
         let mut v: BTreeSet<(String, Option<String>)> = BTreeSet::new();
-        for s in self.rules.iter().map(|r| &r.src).chain(self.v6_block.iter()) {
+        for s in self.rules.iter().map(|r| &r.src).chain(self.v6_block.iter()).chain(self.v6_tunnel.iter()) {
             match s {
                 SrcMatch::Mac { bridge, .. } | SrcMatch::Bridge { bridge } => {
                     v.insert((bridge.clone(), None));
@@ -404,7 +407,7 @@ fn src_variants(s: &SrcMatch, bridge_ports: &BTreeMap<String, BTreeSet<String>>)
 
 /// Нужен ли physdev (сеть на части моста).
 pub fn needs_physdev(spec: &PolicySpec, bridge_ports: &BTreeMap<String, BTreeSet<String>>) -> bool {
-    spec.rules.iter().map(|r| &r.src).chain(spec.v6_block.iter()).any(|s| src_variants(s, bridge_ports).iter().any(|v| v.iter().any(|w| w == "physdev")))
+    spec.rules.iter().map(|r| &r.src).chain(spec.v6_block.iter()).chain(spec.v6_tunnel.iter()).any(|s| src_variants(s, bridge_ports).iter().any(|v| v.iter().any(|w| w == "physdev")))
 }
 
 /// Классификация: правила по порядку, у каждого — цель в этой цепочке или RETURN (совпадение без действия здесь
@@ -475,6 +478,34 @@ pub fn build_plan(spec: &PolicySpec, v6_lan_prefixes: &[String], bridge_ports: &
             p.insert(c);
         }
     }
+    // IPv6 через VPN: весь IPv6 источников «всё через VPN» (кроме LAN, link-local и multicast) — метка в mangle
+    // ip6tables, ip -6 rule в таблицу 3100, там маршрут через TUN (или unreachable при отказе туннеля)
+    if tunnel && !spec.v6_tunnel.is_empty() {
+        if !spec.fail_open {
+            p.insert(Entry::Route { v6: true, dev: None, metric: METRIC_GUARD });
+        }
+        if !guard_only {
+            p.insert(Entry::Route { v6: true, dev: Some(spec.tun.clone()), metric: METRIC_TUN });
+        }
+        for x in v6_lan_prefixes {
+            p.insert(Entry::Rule { v6: true, prio: PRIO_LAN, from: None, to: Some(norm_prefix(x)), iif: None, fwmark: None, lookup: Some("main".into()) });
+        }
+        p.insert(Entry::Rule { v6: true, prio: PRIO_MARK, from: None, to: None, iif: None, fwmark: Some(fmt_mark(NF_MARK, NF_MARK)), lookup: Some(TABLE.to_string()) });
+        let leaf = chain(true, m, 'T', vec![vec![s("-j"), s("MARK"), s("--set-xmark"), fmt_mark(NF_MARK, NF_MARK)]]);
+        let tt = chain_name(&leaf);
+        p.insert(leaf);
+        let local: Vec<String> = v6_lan_prefixes.iter().cloned().chain(["fe80::/10".to_string(), "ff00::/8".to_string()]).collect();
+        let mut rows: Vec<Vec<String>> = local.iter().map(|x| vec![s("-d"), ipt_prefix(x), s("-j"), s("RETURN")]).collect();
+        for src in &spec.v6_tunnel {
+            for mut v in src_variants(src, bridge_ports) {
+                v.extend([s("-g"), tt.clone()]);
+                rows.push(v);
+            }
+        }
+        let c = chain(true, m, 'C', rows);
+        p.insert(Entry::Jump { v6: true, table: m.into(), from: "PREROUTING".into(), chain: chain_name(&c) });
+        p.insert(c);
+    }
     // filter FORWARD: выход в TUN разрешён явно (fw3 стока отклоняет пересылку на интерфейс вне зон), затем запреты
     let block = classify(spec, bridge_ports, |a| (a == Act::Block).then(|| vec![s("-j"), s("REJECT"), s("--reject-with"), s("icmp-port-unreachable")]));
     if tunnel || block.is_some() {
@@ -520,7 +551,12 @@ pub fn build_plan(spec: &PolicySpec, v6_lan_prefixes: &[String], bridge_ports: &
         p.insert(c);
     }
     if !spec.v6_block.is_empty() {
-        let mut rows: Vec<Vec<String>> = v6_lan_prefixes.iter().map(|x| vec![s("-d"), ipt_prefix(x), s("-j"), s("RETURN")]).collect();
+        let mut rows: Vec<Vec<String>> = Vec::new();
+        // IPv6 через VPN: помеченное уходит в TUN — пропустить до запрета (fw3 стока отклоняет пересылку вне зон)
+        if tunnel && !spec.v6_tunnel.is_empty() {
+            rows.push(vec![s("-o"), spec.tun.clone(), s("-j"), s("ACCEPT")]);
+        }
+        rows.extend(v6_lan_prefixes.iter().map(|x| vec![s("-d"), ipt_prefix(x), s("-j"), s("RETURN")]));
         for src in &spec.v6_block {
             for mut v in src_variants(src, bridge_ports) {
                 v.extend([s("-j"), s("REJECT"), s("--reject-with"), s("icmp6-port-unreachable")]);
@@ -883,7 +919,8 @@ fn chain_name_of(e: &Entry) -> String {
 
 /// Таблицы iptables, состояние которых нужно прочитать (наши цепочки и переходы бывают только в них).
 pub fn ipt_tables() -> BTreeSet<(bool, String)> {
-    [(false, "filter"), (false, "mangle"), (true, "filter")].iter().map(|(v6, t)| (*v6, t.to_string())).collect()
+    // mangle IPv6 — метка «IPv6 через VPN»; без наших цепочек там ничего нет, чтение безопасно
+    [(false, "filter"), (false, "mangle"), (true, "filter"), (true, "mangle")].iter().map(|(v6, t)| (*v6, t.to_string())).collect()
 }
 
 #[cfg(test)]
@@ -910,6 +947,7 @@ mod tests {
             zapret_queue: vec![QueueRule { proto: "tcp".into(), ports: "80,443".into() }, QueueRule { proto: "udp".into(), ports: "443".into() }],
             dns_resolver: Some("1.1.1.1".into()),
             v6_block: vec![SrcMatch::Mac { bridge: "br-lan".into(), mac: "02:00:00:00:0a:02".into() }],
+            v6_tunnel: vec![],
         }
     }
 
@@ -958,6 +996,39 @@ mod tests {
         assert_eq!(v6[0].join(" "), "-d fd00:10::/64 -j RETURN");
         assert!(p.iter().any(|e| matches!(e, Entry::Jump { v6: true, from, .. } if from == "FORWARD")));
         assert_eq!(our_mark_mask(&p), NF_MARK);
+    }
+
+    #[test]
+    fn ipv6_via_vpn_entries() {
+        let mut sp = spec();
+        let lan = SrcMatch::Bridge { bridge: "br-lan".into() };
+        sp.v6_tunnel = vec![lan.clone()];
+        sp.v6_block.push(lan);
+        let p = build_plan(&sp, &["fd00:1::/64".into()], &BTreeMap::new(), false);
+        let has = |e: &Entry| p.contains(e);
+        assert!(has(&Entry::Route { v6: true, dev: Some("mitt0".into()), metric: METRIC_TUN }));
+        assert!(has(&Entry::Route { v6: true, dev: None, metric: METRIC_GUARD }));
+        assert!(has(&Entry::Rule { v6: true, prio: PRIO_MARK, from: None, to: None, iif: None, fwmark: Some(fmt_mark(NF_MARK, NF_MARK)), lookup: Some(TABLE.to_string()) }));
+        assert!(has(&Entry::Rule { v6: true, prio: PRIO_LAN, from: None, to: Some("fd00:1::/64".into()), iif: None, fwmark: None, lookup: Some("main".into()) }));
+        // mangle ip6tables: LAN, link-local и multicast — мимо, источник — в туннель
+        let c6 = p.iter().find_map(|e| match e {
+            Entry::Chain { v6: true, table, rows, .. } if table == "mangle" && rows.iter().any(|r| r.contains(&"-g".to_string())) => Some(rows.clone()),
+            _ => None,
+        }).expect("цепочка классификации IPv6");
+        assert_eq!(c6[0], ["-d", "fd00:1::/64", "-j", "RETURN"]);
+        assert!(c6.iter().any(|r| r[..2] == ["-d", "fe80::/10"]) && c6.iter().any(|r| r[..2] == ["-d", "ff00::/8"]));
+        assert!(c6.last().unwrap().starts_with(&["-i".to_string(), "br-lan".to_string(), "-g".to_string()]));
+        assert!(p.iter().any(|e| matches!(e, Entry::Jump { v6: true, table, from, .. } if table == "mangle" && from == "PREROUTING")));
+        // filter: выход в TUN разрешён до запрета IPv6
+        let f6 = p.iter().find_map(|e| match e {
+            Entry::Chain { v6: true, table, rows, .. } if table == "filter" => Some(rows.clone()),
+            _ => None,
+        }).unwrap();
+        assert_eq!(f6[0], ["-o", "mitt0", "-j", "ACCEPT"]);
+        // без IPv6 через VPN — ни маршрутов, ни правил IPv6, кроме запрета
+        let p0 = build_plan(&spec(), &["fd00:1::/64".into()], &BTreeMap::new(), false);
+        assert!(!p0.iter().any(|e| matches!(e, Entry::Route { v6: true, .. } | Entry::Rule { v6: true, .. })));
+        assert!(!p0.iter().any(|e| matches!(e, Entry::Chain { v6: true, rows, .. } if rows.iter().any(|r| r.contains(&"ACCEPT".to_string())))));
     }
 
     #[test]
