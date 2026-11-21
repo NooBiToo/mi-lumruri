@@ -286,6 +286,32 @@ update_check_due() {
   [ $((now - last)) -ge "$p" ] || [ "$now" -lt "$last" ]
 }
 
+# --- статистика трафика (mi-tt-ctl stats-sample, GET /stats) ---
+# раз в MITT_STATS_EVERY (5 мин): байты туннеля (mitt0), WAN (интерфейс маршрута по умолчанию) и по устройствам
+# (штатный trafficd: ubus call trafficd ip). Копия в /data — раз в час (переживает перезагрузку, флеш не изнашивается).
+SYS="${MITT_SYS:-/sys}"
+if_bytes() { local d="$SYS/class/net/$1/statistics"; [ -r "$d/rx_bytes" ] || { echo -; return; }; echo $(( $(cat "$d/rx_bytes") + $(cat "$d/tx_bytes") )); }
+wan_dev() { ip -4 route show default 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p' | head -n 1; }
+stats_sample() {
+  local now last w
+  now=$(date +%s); last="$(cat "$STATE/stats.last" 2>/dev/null || echo 0)"
+  [ $((now - last)) -ge "${MITT_STATS_EVERY:-300}" ] || [ "$now" -lt "$last" ] || return 0
+  echo "$now" >"$STATE/stats.last"
+  [ -f "$STATE/stats.json" ] || { [ -f "$ETC/stats.json" ] && cp -f "$ETC/stats.json" "$STATE/stats.json"; }
+  w="$(wan_dev)"
+  ${MITT_UBUS:-ubus} call trafficd ip >"$STATE/trafficd.json" 2>/dev/null || rm -f "$STATE/trafficd.json"
+  if [ -f "$STATE/trafficd.json" ]; then
+    MI_TT_LEASES="$LEASES" "$BIN/mi-tt-ctl" stats-sample "$STATE/stats.json" "$(if_bytes mitt0)" "$( [ -n "$w" ] && if_bytes "$w" || echo -)" "$STATE/trafficd.json" 2>>"$LOG/service.log"
+  else
+    MI_TT_LEASES="$LEASES" "$BIN/mi-tt-ctl" stats-sample "$STATE/stats.json" "$(if_bytes mitt0)" "$( [ -n "$w" ] && if_bytes "$w" || echo -)" 2>>"$LOG/service.log"
+  fi
+  rm -f "$STATE/trafficd.json"
+  # раз в час — копия в /data
+  if [ $((now / 3600)) != "$(cat "$STATE/stats.saved" 2>/dev/null)" ] && [ -f "$STATE/stats.json" ]; then
+    cp -f "$STATE/stats.json" "$ETC/stats.json.t" 2>/dev/null && mv -f "$ETC/stats.json.t" "$ETC/stats.json" && echo $((now / 3600)) >"$STATE/stats.saved"
+  fi
+}
+
 # --- уведомления в Telegram (mitt-notify.sh) ---
 # notify <событие> <ключ сообщения> [параметр]: в очередь; mitt-notify.sh отправит, если событие выбрано в панели
 notify() {

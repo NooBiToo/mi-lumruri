@@ -9,6 +9,7 @@ import { AUTO, deviceRows, plural, when, zapretIdle } from '../status'
 import { dateTag, t } from '../i18n'
 import { avatarHue, initials } from '../ui'
 import TopoMap, { type TopoBranch, type Tone } from '../components/TopoMap.vue'
+import StatsCard from '../components/StatsCard.vue'
 
 const emit = defineEmits<{ navigate: [tab: 'server' | 'sites' | 'devices' | 'more'] }>()
 
@@ -143,5 +144,7 @@ onMounted(async () => {
       </div>
       <p v-if="!simple.enabled" class="hint">{{ t('VPN выключен: выбор сохранён и заработает, когда вы включите VPN') }}</p>
     </div>
+
+    <StatsCard v-if="serverReady" />
   </section>
 </template>

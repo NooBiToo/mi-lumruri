@@ -86,6 +86,11 @@ pub fn main() -> ExitCode {
         },
         ["cgi"] => cgi(),
         // параметры уведомлений для mitt-notify.sh; код 1 — не настроены
+        // показания счётчиков для статистики трафика (служба, раз в несколько минут)
+        ["stats-sample", file, vpn, wan, rest @ ..] if rest.len() <= 1 => match mi_tt::stats::sample_cmd(file, vpn, wan, rest.first().copied(), auth::now()) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(m) => { eprintln!("{m}"); ExitCode::from(2) }
+        },
         ["notify-conf", secrets] => match read_limited(secrets, 256 * 1024).ok().and_then(|b| serde_json::from_slice::<render::Secrets>(&b).ok()).and_then(|s| mi_tt::notify::conf_lines(&s)) {
             Some(l) => { print!("{l}"); ExitCode::SUCCESS }
             None => ExitCode::from(1),

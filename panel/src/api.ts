@@ -268,6 +268,14 @@ export interface NotifyResponse {
   last: { ok: boolean; at: number; sent: number; via: string; error: string | null } | null; test_pending?: boolean; issues: Issue[]; error?: ApiError
 }
 export interface NotifySet { telegram_token?: string; chat_id?: string; events?: string[]; lang?: string; disable?: boolean }
+/** Статистика трафика (controller/src/stats.rs): байты; devices — по MAC (или IP без аренды), имя из настроек или аренды. */
+export interface StatsResponse {
+  ok: boolean; since: number | null; sampled: number | null; per_device: boolean
+  vpn: { day: number; week: number }; wan: { day: number; week: number }
+  hours: { t: number; vpn: number; wan: number }[]
+  devices: { key: string; name: string | null; known: boolean; day: number; week: number }[]
+  issues: Issue[]; error?: ApiError
+}
 export interface UpdateResponse { ok: boolean; running?: boolean; update?: UpdateState | null; queued?: boolean; issues: Issue[]; error?: ApiError }
 
 /** Итог обновления по подписке TrustTunnel (mitt-sub.sh); время — unix-секунды; updated — когда параметры менялись. */
@@ -284,6 +292,7 @@ export const manage = {
   setSecret: (profile_id: string, secret: ProfileSecret) => call<ManageResponse>('/secrets', json({ profile_id, secret })),
   applyRequest: () => call<ManageResponse>('/apply-request', json({})),
   notifyState: () => call<NotifyResponse>('/notify'),
+  stats: () => call<StatsResponse>('/stats'),
   setNotify: (b: NotifySet) => call<ManageResponse>('/notify', json(b)),
   testNotify: () => call<ManageResponse>('/notify/test', json({})),
   exportBackup: (secrets: boolean, passphrase?: string) => call<BackupExportResponse>('/backup/export', json({ secrets, passphrase })),

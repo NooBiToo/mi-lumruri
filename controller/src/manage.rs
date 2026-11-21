@@ -21,7 +21,7 @@ pub const MAX_LIST_BODY: usize = 8 * 1024 * 1024;
 
 pub const PATHS: &[&str] = &["/rules/delete", "/rules/move", "/profiles", "/profiles/delete", "/groups", "/groups/delete", "/categories",
     "/categories/delete", "/networks", "/networks/delete", "/devices", "/devices/delete", "/leases", "/dns", "/zapret", "/adblock/list",
-    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update", "/router", "/diag", "/service/restart", "/update", "/subscription", "/subscription/update", "/backup/export", "/backup/restore", "/notify", "/notify/test"];
+    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update", "/router", "/diag", "/service/restart", "/update", "/subscription", "/subscription/update", "/backup/export", "/backup/restore", "/notify", "/notify/test", "/stats"];
 
 pub fn is_manage_path(path: &str) -> bool {
     PATHS.contains(&path.trim_end_matches('/'))
@@ -675,6 +675,7 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
         },
         ("POST", "/backup/export") => crate::backup::export(b, config_path),
         ("GET", "/notify") => crate::notify::get(config_path),
+        ("GET", "/stats") => crate::stats::get(config_path),
         ("POST", "/notify") => crate::notify::set(b, config_path),
         ("POST", "/notify/test") => crate::notify::test(config_path),
         ("POST", "/backup/restore") => crate::backup::restore(b, config_path),

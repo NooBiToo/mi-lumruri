@@ -144,8 +144,8 @@ while [ -f "$STATE/service.wanted" ]; do
       admin_apply tun-ready && echo full >"$STATE/protection"
     fi
   fi
-  # уведомления: состояние туннеля и отправка очереди
-  tunnel_track; notify_flush
+  # уведомления: состояние туннеля и отправка очереди; статистика трафика
+  tunnel_track; notify_flush; stats_sample
   # автозапуск: запись в firewall могли снять (сброс, прошивка, штатный интерфейс) — раз в 10 минут
   now=$(date +%s)
   if [ $((now - ${AS_LAST:-0})) -ge "${MITT_AUTOSTART_CHECK:-600}" ] || [ "$now" -lt "${AS_LAST:-0}" ]; then AS_LAST=$now; autostart_heal; fi
