@@ -270,6 +270,23 @@ describe('simple', () => {
     expect(fromConfig(ip)).toMatchObject({ canonical: false, reason: expect.stringMatching(/вручную/) })
   })
 
+  it('весь интернет через VPN для отдельного устройства: правила до источников и туда-обратно', () => {
+    const tv = 'a4:77:33:10:20:30'
+    const s = simple({ services: ['youtube'], exceptions: ['bank.example'], vpnAll: [tv] })
+    const c = toConfig(base, s, lan, catalog, known)
+    expect(c.devices.map((d) => d.mac)).toEqual([tv])
+    expect(c.rules.map((r) => r.id)).toEqual(['except-dev-a47733102030', 'vpnall-dev-a47733102030', 'except-lan', 'vpn-lan', 'rest-lan'])
+    expect(c.rules[1]).toMatchObject({ destination: { type: 'group', id: 'vpn-all' }, action: { type: 'profile', id: 'tt' } })
+    expect(roundTrip(s)).toEqual({ canonical: true, simple: { ...s, vpnAll: [tv] } })
+    // выбранные устройства и отдельное «весь интернет»
+    const sel = simple({ services: ['youtube'], devices: ['3c:22:fb:01:02:03'], vpnAll: [tv] })
+    expect(roundTrip(sel)).toEqual({ canonical: true, simple: sel })
+    // в режиме «всё через VPN» список не нужен: так идут все
+    const all = simple({ mode: 'all', vpnAll: [tv] })
+    expect(toConfig(base, all, lan, catalog, known).rules.some((r) => r.id.startsWith('vpnall-'))).toBe(false)
+    expect(roundTrip(all)).toEqual({ canonical: true, simple: simple({ mode: 'all' }) })
+  })
+
   it('requires a profile only when something goes through VPN', () => {
     const none = { ...base, profiles: [] }
     expect(() => toConfig(none, simple({ services: ['youtube'] }), lan, catalog, known)).toThrow(/сервер/)

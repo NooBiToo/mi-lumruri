@@ -11,6 +11,8 @@
 // - для каждого источника (`lan` или выбранное устройство) по порядку: `except-<src>` → `vpn-except` → «остальные
 //   сайты»; `zapret-<src>` → `zapret-sites` → напрямую с Zapret; `vpn-<src>` → `vpn-sites` (режим «выбранные») или
 //   `vpn-all` (режим «всё») → профиль. Исключения важнее всего, а сайты с обходом не уходят в VPN и в режиме «всё»;
+// - устройства «весь интернет через VPN» (режим «выбранные»): перед правилами источников — `except-<dev>`,
+//   `zapret-<dev>` и `vpnall-<dev>` → `vpn-all` → профиль;
 // - `default_action`: профиль в режиме «всё» для всей сети, иначе «остальные сайты» (напрямую или с Zapret);
 // - последнее правило-метка, всегда выключенное (на маршрутизацию не влияет): `rest-lan`, а при выключенном VPN —
 //   `vpn-off`; его действие — выбор «остальные сайты», чтобы выбор не терялся, когда по правилам его не видно.
@@ -37,6 +39,8 @@ export interface Simple {
   rest: 'direct' | 'zapret'
   /** 'all' — все устройства дома, иначе MAC выбранных устройств. */
   devices: 'all' | string[]
+  /** MAC устройств, у которых в режиме «выбранные» через VPN идёт весь интернет (исключения и сайты с обходом — как у всех). */
+  vpnAll?: string[]
 }
 
 /** Устройство, известное панели (аренды DHCP и настройки); `name` — как его показывать и сохранять. */
@@ -160,18 +164,28 @@ export function toConfig(base: Config, s: Simple, lan: Lan, catalog: ListCatalog
     const n = cleanName(k.name)
     if (m && n) names.set(m, n)
   }
-  const devices: Device[] = s.devices === 'all' ? [] : [...new Set(s.devices.map(normalizeMac).filter((m): m is string => m !== null))]
+  const selectedMacs = s.devices === 'all' ? [] : [...new Set(s.devices.map(normalizeMac).filter((m): m is string => m !== null))]
+  // «весь интернет через VPN» — только в режиме «выбранные»; в режиме «всё» так идут все устройства
+  const allMacs = s.mode === 'all' ? [] : [...new Set((s.vpnAll ?? []).map(normalizeMac).filter((m): m is string => m !== null))]
+  const devices: Device[] = [...new Set([...selectedMacs, ...allMacs])]
     .map((mac) => ({ id: deviceId(mac), name: names.get(mac) || mac, mac, network: HOME }))
-  const sources: [string, Source][] = s.devices === 'all' ? [['lan', { type: 'lan' }]] : devices.map((d) => [d.id, { type: 'device', id: d.id }])
+  const sources: [string, Source][] = s.devices === 'all' ? [['lan', { type: 'lan' }]] : selectedMacs.map((m) => [deviceId(m), { type: 'device', id: deviceId(m) }])
 
   const vpnTarget = s.mode === 'all' ? ALL : sites.length ? SITES : null
   const lanAll = s.mode === 'all' && s.devices === 'all'
   const profile = base.profiles[0]
-  const needsProfile = lanAll || (vpnTarget !== null && sources.length > 0)
+  const needsProfile = lanAll || allMacs.length > 0 || (vpnTarget !== null && sources.length > 0)
   if (needsProfile && !profile) throw new Error('сначала настройте сервер VPN')
   const toVpn: Action = { type: 'profile', id: profile?.id ?? '' }
 
   const rules: Rule[] = []
+  for (const mac of allMacs) {
+    const key = deviceId(mac)
+    const src: Source = { type: 'device', id: key }
+    if (except.length) rules.push(rule(`except-${key}`, src, EXCEPT, rest, s.enabled))
+    if (zapretSites.length) rules.push(rule(`zapret-${key}`, src, ZAPRET_SITES, { type: 'direct_zapret' }, true))
+    rules.push(rule(`vpnall-${key}`, src, ALL, toVpn, s.enabled))
+  }
   for (const [key, src] of sources) {
     if (except.length) rules.push(rule(`except-${key}`, src, EXCEPT, rest, s.enabled))
     // обход блокировок без VPN от VPN не зависит: правило включено и при выключенном VPN
@@ -194,6 +208,7 @@ export function toConfig(base: Config, s: Simple, lan: Lan, catalog: ListCatalog
   if (base.dns !== undefined) out.dns = base.dns
   if (base.zapret !== undefined) out.zapret = base.zapret
   if (base.schedule !== undefined) out.schedule = base.schedule
+  if (base.ipv6_via_vpn) out.ipv6_via_vpn = true
   return out
 }
 
@@ -249,9 +264,18 @@ export function fromConfig(cfg: Config): FromConfig {
   }
 
   const working = cfg.rules.filter((r) => r !== marker)
-  const lanRules = working.some((r) => r.source.type === 'lan')
-  const ruleDevices = [...new Set(working.flatMap((r) => (r.source.type === 'device' ? [r.source.id] : [])))]
-  const devIds = lanRules ? [] : ruleDevices.length ? ruleDevices : cfg.devices.map((d) => d.id)
+  // устройства «весь интернет через VPN»: у них есть правило vpnall-<устройство>
+  const allIds = [...new Set(working.flatMap((r) => (r.id.startsWith('vpnall-') && r.source.type === 'device' ? [r.source.id] : [])))]
+  const vpnAll: string[] = []
+  for (const id of allIds) {
+    const mac = normalizeMac(cfg.devices.find((x) => x.id === id)?.mac ?? '')
+    if (!mac) return notSimple(t('устройство «{id}» настроено вручную', { id }))
+    vpnAll.push(mac)
+  }
+  const regular = working.filter((r) => !(r.source.type === 'device' && allIds.includes(r.source.id)))
+  const lanRules = regular.some((r) => r.source.type === 'lan')
+  const ruleDevices = [...new Set(regular.flatMap((r) => (r.source.type === 'device' ? [r.source.id] : [])))]
+  const devIds = lanRules ? [] : ruleDevices.length ? ruleDevices : cfg.devices.map((d) => d.id).filter((id) => !allIds.includes(id))
   const macs: string[] = []
   for (const id of devIds) {
     const d = cfg.devices.find((x) => x.id === id)
@@ -259,7 +283,7 @@ export function fromConfig(cfg: Config): FromConfig {
     if (!mac) return notSimple(t('устройство «{id}» настроено вручную', { id }))
     macs.push(mac)
   }
-  const mode = working.some((r) => r.destination.type === 'group' && r.destination.id === ALL) || cfg.default_action.type === 'profile' ? 'all' : 'selected'
+  const mode = regular.some((r) => r.destination.type === 'group' && r.destination.id === ALL) || cfg.default_action.type === 'profile' ? 'all' : 'selected'
   const simple: Simple = {
     enabled: marker.id === REST_ON,
     mode,
@@ -271,6 +295,7 @@ export function fromConfig(cfg: Config): FromConfig {
     rest: restFrom === 'direct_zapret' ? 'zapret' : 'direct',
     devices: lanRules || macs.length === 0 ? 'all' : macs,
   }
+  if (vpnAll.length) simple.vpnAll = vpnAll
 
   // проверка: из этих ответов получаются ровно те же настройки
   const catalog: ListCatalog = { source: '', commit: '', date: '', services: [] }

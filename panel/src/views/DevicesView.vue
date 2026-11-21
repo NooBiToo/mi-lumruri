@@ -13,8 +13,11 @@ import Segmented from '../components/Segmented.vue'
 
 const emit = defineEmits<{ navigate: [tab: 'server' | 'sites'] }>()
 
-interface Draft { mode: 'all' | 'selected'; macs: string[] }
-const toDraft = (s: Simple): Draft => (s.devices === 'all' ? { mode: 'all', macs: [] } : { mode: 'selected', macs: [...s.devices] })
+/** all — устройства, у которых через VPN идёт весь интернет (при выборе отдельных сайтов). */
+interface Draft { mode: 'all' | 'selected'; macs: string[]; all: string[] }
+const toDraft = (s: Simple): Draft => ({ ...(s.devices === 'all' ? { mode: 'all' as const, macs: [] } : { mode: 'selected' as const, macs: [...s.devices] }), all: [...(s.vpnAll ?? [])] })
+/** Переключатель «весь интернет» нужен, только когда через VPN идут отдельные сайты (а не «всё через VPN»). */
+const sitesMode = computed(() => simple.value?.mode === 'selected')
 const draft = ref<Draft | null>(simple.value ? toDraft(simple.value) : null)
 /** Переименования этого сеанса: MAC → новое имя. Без них имена из настроек не трогаем. */
 const renames = ref<Record<string, string>>({})
@@ -36,7 +39,8 @@ const dirty = computed(() => {
   if (!s || !d) return false
   const was = s.devices === 'all' ? [] : [...s.devices].sort()
   const now = d.mode === 'all' ? [] : [...d.macs].sort()
-  return (s.devices === 'all') !== (d.mode === 'all') || was.join() !== now.join() || (d.mode === 'selected' && renamed.value)
+  const allWas = [...(s.vpnAll ?? [])].sort().join()
+  return (s.devices === 'all') !== (d.mode === 'all') || was.join() !== now.join() || (d.mode === 'selected' && renamed.value) || allWas !== [...d.all].sort().join()
 })
 watch(simple, (s) => { if (s && (!draft.value || !dirty.value)) { draft.value = toDraft(s); renames.value = {} } })
 
@@ -44,6 +48,11 @@ function toggle(mac: string) {
   if (!draft.value) return
   const m = draft.value.macs
   draft.value.macs = m.includes(mac) ? m.filter((x) => x !== mac) : [...m, mac]
+}
+function toggleAll(mac: string) {
+  if (!draft.value) return
+  const a = draft.value.all
+  draft.value.all = a.includes(mac) ? a.filter((x) => x !== mac) : [...a, mac]
 }
 
 // ---- переименование в строке ----
@@ -66,7 +75,7 @@ function finishRename() {
 }
 
 // ---- автосохранение ----
-const vpnUsed = computed(() => !!simple.value && (simple.value.mode === 'all' || simple.value.services.length > 0 || simple.value.customDomains.length > 0))
+const vpnUsed = computed(() => !!simple.value && (simple.value.mode === 'all' || simple.value.services.length > 0 || simple.value.customDomains.length > 0 || !!draft.value?.all.length))
 function blocker(): Blocker | null {
   if (draft.value?.mode === 'selected' && !draft.value.macs.length) return { text: t('Отметьте хотя бы одно устройство — или выберите «Все устройства».') }
   if (vpnUsed.value && !serverReady.value) return { text: t('Сначала настройте сервер VPN.'), action: { label: t('Открыть «Сервер»'), run: () => emit('navigate', 'server') } }
@@ -80,6 +89,8 @@ useAutosave({
   run: async () => {
     if (!simple.value || !draft.value) return t('Настройки ещё не загружены.')
     const s: Simple = { ...simple.value, devices: draft.value.mode === 'all' ? 'all' : [...draft.value.macs] }
+    if (draft.value.all.length) s.vpnAll = [...draft.value.all]
+    else delete s.vpnAll
     const cfg = build(s, knownDevicesNow(renames.value))
     if (typeof cfg === 'string') return cfg
     const r = await save(cfg, '')
@@ -147,10 +158,16 @@ onMounted(() => void loadLeases())
               <span class="dev__sw-label">{{ t('Через VPN') }}</span>
               <span class="sw" aria-hidden="true"><span class="sw__knob" /></span>
             </button>
+            <button v-if="sitesMode" type="button" role="switch" :aria-checked="draft.all.includes(d.mac)"
+              :aria-label="t('Весь интернет через VPN: {name}', { name: d.name || d.mac })" class="dev__sw" @click="toggleAll(d.mac)">
+              <span class="dev__sw-label">{{ t('Весь интернет') }}</span>
+              <span class="sw" aria-hidden="true"><span class="sw__knob" /></span>
+            </button>
           </li>
           <li v-if="!shown.length" class="muted pad">{{ t('Ничего не нашлось.') }}</li>
         </ul>
         <p v-if="draft.mode === 'selected'" class="hint pad">{{ t('Имя нужно только вам, чтобы узнавать устройство в списке. Переименованное устройство отмечается само.') }}</p>
+        <p v-if="sitesMode" class="hint pad">{{ t('«Весь интернет» — у этого устройства через VPN идут все сайты, а не только выбранные. Исключения и сайты с обходом блокировок действуют и для него.') }}</p>
       </div>
     </template>
   </section>
