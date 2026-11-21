@@ -1,6 +1,8 @@
 #!/bin/sh
 # mi-trusttunnel: установка и обновление по SSH во внутреннюю память (/data), без сети.
 # Запуск на роутере из распакованного пакета:  sh install.sh [install|rollback|uninstall [--purge]|status] [--no-start]
+#   install --trust-key=<отпечаток> — принять пакет, подписанный другим ключом (с этим отпечатком), и закрепить этот
+#               ключ: переход между своими сборками и релизами GitHub без удаления настроек.
 #   install --store=<каталог> — хранить релизы на внешнем накопителе (например /mnt/usb-XXXX/mi-trusttunnel), если они
 #               не помещаются в /data. Настройки, ключи и автозапуск остаются в /data. Выбор запоминается в файле store.
 #   install   — проверки (модель, ARM64, прошивка, место на /data и в /tmp, исполнение в /tmp), проверка подписи
@@ -12,8 +14,12 @@ set -u
 PKG="$(cd "$(dirname "$0")" && pwd)"
 . "$PKG/payload/scripts/mitt-lib.sh"
 CMD="${1:-install}"; [ $# -gt 0 ] && shift
-NOSTART=""; PURGE=""; NEWSTORE=""
-for a in "$@"; do case "$a" in --no-start) NOSTART=1;; --purge) PURGE=1;; --store=/*) NEWSTORE="${a#--store=}"; NEWSTORE="${NEWSTORE%/}";; *) echo "неизвестный аргумент $a"; exit 2;; esac; done
+NOSTART=""; PURGE=""; NEWSTORE=""; TRUSTKEY=""; REPIN=""
+for a in "$@"; do case "$a" in --no-start) NOSTART=1;; --purge) PURGE=1;; --store=/*) NEWSTORE="${a#--store=}"; NEWSTORE="${NEWSTORE%/}";;
+  --trust-key=*) TRUSTKEY="$(echo "${a#--trust-key=}" | tr 'A-F' 'a-f')"
+    case "$TRUSTKEY" in *[!0-9a-f]*|'') echo "--trust-key: отпечаток ключа — 16 знаков 0-9 a-f"; exit 2;; esac
+    [ ${#TRUSTKEY} -eq 16 ] || { echo "--trust-key: отпечаток ключа — 16 знаков 0-9 a-f"; exit 2; };;
+  *) echo "неизвестный аргумент $a"; exit 2;; esac; done
 RESERVE_DATA=$((2 * 1024 * 1024))   # оставить штатной прошивке на /data
 RESERVE_TIGHT=$((512 * 1024))       # впритык: прежний релиз удаляется после установки, отката не будет
 TIGHT=""
@@ -91,7 +97,25 @@ verify_and_try() { # подпись и хэши; пробный запуск в�
   # при обновлении пакет проверяет уже установленный mi-tt-admin закреплённым ключом
   local verifier="$st/mi-tt-admin.run"; [ -n "$pinned" ] && [ -x "$BIN/mi-tt-admin" ] && verifier="$BIN/mi-tt-admin"
   # shellcheck disable=SC2086
-  "$verifier" release verify "$PKG" $pinned >"$st/verify.json" 2>&1 || { cat "$st/verify.json"; rm -rf "$st"; fail "подпись или хэши пакета не прошли проверку"; }
+  if ! "$verifier" release verify "$PKG" $pinned >"$st/verify.json" 2>&1; then
+    # другой ключ подписи (например, свой и ключ релизов GitHub): пакет должен сойтись со своим ключом, а смена
+    # ключа — быть явной: --trust-key=<отпечаток нового ключа>. Без неё — отказ с обоими отпечатками.
+    local newfp oldfp
+    if [ -n "$pinned" ] && "$st/mi-tt-admin.run" release verify "$PKG" >"$st/own.json" 2>&1; then
+      newfp="$(sed -n 's/.*"key_fingerprint": *"\([0-9a-f]*\)".*/\1/p' "$st/own.json")"
+      oldfp="$("$st/mi-tt-admin.run" release key-fingerprint "$DATA/keys/release.pub" 2>/dev/null | sed -n 's/.*"key_fingerprint": *"\([0-9a-f]*\)".*/\1/p')"
+      if [ -n "$TRUSTKEY" ] && [ "$TRUSTKEY" = "$newfp" ]; then
+        say "ключ подписи меняется: закреплённый ${oldfp:-?} → новый $newfp (--trust-key)"
+        cp "$st/own.json" "$st/verify.json"; REPIN=1; pinned=""
+      else
+        cat "$st/verify.json"; rm -rf "$st"
+        [ -n "$TRUSTKEY" ] && fail "--trust-key=$TRUSTKEY не совпадает с ключом пакета $newfp"
+        fail "пакет подписан другим ключом: закреплён ${oldfp:-?}, у пакета $newfp. Если это ваш новый ключ (например, переход на релизы GitHub), повторите с --trust-key=$newfp — настройки сохранятся"
+      fi
+    else
+      cat "$st/verify.json"; rm -rf "$st"; fail "подпись или хэши пакета не прошли проверку"
+    fi
+  fi
   unpack_payload "$PKG" "$st" || fail "распаковка пакета в RAM"
   "$st/mi-tt-admin.run" release verify "$PKG" --unpacked "$st" >"$st/unpacked.json" 2>&1 || { cat "$st/unpacked.json"; rm -rf "$st"; fail "распакованные файлы не совпали с манифестом"; }
   lab_override "$st"
@@ -100,7 +124,7 @@ verify_and_try() { # подпись и хэши; пробный запуск в�
   "$st/mi-tt-dns" --version >/dev/null 2>&1 || fail "mi-tt-dns не запускается"
   "$st/trusttunnel_client" --version >/dev/null 2>&1 || fail "trusttunnel_client не запускается"
   "$st/nfqws2" --version >/dev/null 2>&1; [ $? -le 1 ] || fail "nfqws2 не запускается"
-  say "подпись: $(sed -n 's/.*"key_fingerprint": *"\([0-9a-f]*\)".*/\1/p' "$st/verify.json") ($( [ -n "$pinned" ] && echo "закреплённый ключ" || echo "первая установка: сверьте отпечаток"))"
+  say "подпись: $(sed -n 's/.*"key_fingerprint": *"\([0-9a-f]*\)".*/\1/p' "$st/verify.json") ($( [ -n "$pinned" ] && echo "закреплённый ключ" || { [ -n "$REPIN" ] && echo "новый ключ, закрепится после установки"; } || echo "первая установка: сверьте отпечаток"))"
   rm -rf "$st"
 }
 
@@ -184,6 +208,11 @@ install_release() {
     setver current "$ver"
   fi
   [ -n "$oldstore" ] && rm -rf "$oldstore/releases"
+  # смена ключа (--trust-key): новый ключ закрепляется только после переключения current
+  if [ -n "$REPIN" ]; then
+    jget pubkey >"$DATA/keys/release.pub.new" && sync && mv -f "$DATA/keys/release.pub.new" "$DATA/keys/release.pub" || fail "запись нового ключа"
+    say "закреплён новый ключ подписи; дальше принимаются только пакеты с ним"
+  fi
   # места впритык: прежний релиз не хранится (см. проверку места)
   [ -n "$TIGHT" ] && rm -f "$DATA/previous.ver"
   # старые релизы, кроме current и previous, удаляются (место в хранилище)
@@ -215,5 +244,5 @@ case "$CMD" in
   status)
     echo "current: $(cat "$DATA/current.ver" 2>/dev/null)"; echo "previous: $(cat "$DATA/previous.ver" 2>/dev/null)"; echo "store: $STORE"
     cat "$STATE/status.json" 2>/dev/null;;
-  *) echo "использование: sh install.sh [install [--store=<каталог>]|rollback|uninstall [--purge]|status] [--no-start]"; exit 2;;
+  *) echo "использование: sh install.sh [install [--store=<каталог>] [--trust-key=<отпечаток>]|rollback|uninstall [--purge]|status] [--no-start]"; exit 2;;
 esac

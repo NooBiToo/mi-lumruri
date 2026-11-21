@@ -51,6 +51,18 @@ class InstallerTest(unittest.TestCase):
             installer.main()
         self.assertTrue(commands[0][-1].endswith("sh install.sh install --store=/mnt/usb-1a2b/mitt\n"))
 
+    def test_trust_key_is_passed_to_router_installer(self):
+        commands = []
+        with patch.object(sys, "argv", ["install.py", "--package", str(self.package), "--trust-key", "E4A271890E5643AB"]), \
+             patch.object(subprocess, "run", lambda command, **kwargs: commands.append(command)):
+            installer.main()
+        self.assertTrue(commands[0][-1].endswith("sh install.sh install --trust-key=e4a271890e5643ab\n"))
+        for bad in ["e4a2", "e4a271890e5643ab; reboot", "zz" * 8]:
+            with patch.object(sys, "argv", ["install.py", "--package", str(self.package), "--trust-key", bad]), \
+                 patch.object(subprocess, "run") as run, self.assertRaises(ValueError):
+                installer.main()
+            run.assert_not_called()
+
     def test_unsafe_store_stops_before_ssh(self):
         with patch.object(sys, "argv", ["install.py", "--package", str(self.package), "--store", "/mnt/usb; reboot"]), \
              patch.object(subprocess, "run") as run, self.assertRaises(ValueError):

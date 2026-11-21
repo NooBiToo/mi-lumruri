@@ -39,6 +39,7 @@ const USAGE: &str = "mi-tt-admin — применение собственных
   mi-tt-admin revert --state-dir D
   mi-tt-admin auth …                                                   # вход в панель: см. mi-tt-admin auth help
   mi-tt-admin release verify <пакет> [--pinned K] [--unpacked D]       # подпись и хэши пакета релиза
+  mi-tt-admin release key-fingerprint <release.pub>                     # отпечаток закреплённого ключа
   mi-tt-admin sha256 <файл>…                                           # SHA-256 (на стоке нет sha256sum)
 
 --guard-only: правила и запреты без маршрута через TUN — для старта до запуска клиента TrustTunnel или при его отсутствии.
@@ -622,6 +623,13 @@ fn caps_cmd(_a: &Args) -> ExitCode {
 /// `release verify <пакет> [--pinned <файл ключа>] [--unpacked <каталог>]` — подпись, файлы пакета и распакованные файлы.
 fn release_cmd(args: &[String]) -> ExitCode {
     let a: Vec<&str> = args.iter().map(String::as_str).collect();
+    // отпечаток закреплённого ключа (release.pub, hex): установщик показывает его при смене ключа
+    if let ["key-fingerprint", file] = a.as_slice() {
+        return match fs::read_to_string(file).ok().and_then(|s| mi_tt::release::key_fingerprint(s.trim())) {
+            Some(fp) => out(0, json!({ "ok": true, "key_fingerprint": fp })),
+            None => fail(2, "bad_key", format!("{file}: не открытый ключ релиза")),
+        };
+    }
     let (dir, rest) = match a.as_slice() {
         ["verify", dir, rest @ ..] => (*dir, rest),
         _ => return fail(2, "usage", "mi-tt-admin release verify <каталог пакета> [--pinned <release.pub>] [--unpacked <каталог>]"),

@@ -85,7 +85,12 @@ def main():
     parser.add_argument("--package", type=Path, help="TAR из распакованного артефакта с SHA256SUMS")
     parser.add_argument("--store", help="каталог на USB-накопителе роутера для релизов, например "
                         "/mnt/usb-XXXX/mi-trusttunnel (если пакет не помещается в /data)")
+    parser.add_argument("--trust-key", metavar="FINGERPRINT",
+                        help="принять пакет, подписанный другим ключом с этим отпечатком (16 знаков), и закрепить его; "
+                        "настройки сохраняются. Отпечаток показывает установщик при отказе")
     args = parser.parse_args()
+    if args.trust_key and not re.fullmatch(r"[0-9a-fA-F]{16}", args.trust_key):
+        raise ValueError("--trust-key: отпечаток ключа — 16 знаков 0-9 a-f")
     if args.store and not re.fullmatch(r"/[A-Za-z0-9._/-]+", args.store):
         raise ValueError("--store: нужен абсолютный путь из латинских букв, цифр и знаков . _ - /")
     target = f"root@{args.router}"
@@ -100,8 +105,11 @@ def main():
         print(f"SHA-256 проверен. Устанавливаю пакет на {target}…", flush=True)
         with package.open("rb") as stream:
             script = INSTALL.replace("EXPECTED_SHA", digest)
-            if args.store:
-                script = script.rstrip("\n") + f" install --store={args.store}\n"
+            extra = [f"--store={args.store}"] if args.store else []
+            if args.trust_key:
+                extra.append(f"--trust-key={args.trust_key.lower()}")
+            if extra:
+                script = script.rstrip("\n") + " install " + " ".join(extra) + "\n"
             subprocess.run(["ssh", "-T", *SSH_OPTS, target, script], stdin=stream, check=True)
     print("Пакет установлен. Проверяю вход в панель…", flush=True)
     subprocess.run(["ssh", "-t", *SSH_OPTS, target, LOGIN], check=True)

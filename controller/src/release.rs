@@ -70,6 +70,12 @@ pub struct Verified {
     pub key_fingerprint: String,
 }
 
+/// Отпечаток открытого ключа релиза (hex): первые 16 знаков SHA-256 от 32 байт ключа, как в `verify_package`.
+pub fn key_fingerprint(key_hex: &str) -> Option<String> {
+    let key = unhex(key_hex).and_then(|k| ed25519_compact::PublicKey::from_slice(&k).ok())?;
+    Some(crate::auth::hex(&Sha256::digest(key.as_ref()))[..16].to_string())
+}
+
 /// Подпись и файлы пакета. `pinned` — закреплённый ключ (hex); без него используется ключ из манифеста.
 pub fn verify_package(dir: &Path, pinned: Option<&str>) -> Result<Verified, String> {
     let mbytes = std::fs::read(dir.join("manifest.json")).map_err(|e| format!("manifest.json: {e}"))?;

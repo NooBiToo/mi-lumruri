@@ -52,6 +52,19 @@ check("другая модель (RA70): отказ до изменений", st
 ns = (OUT / "no-space-data.txt").read_text(encoding="utf-8").strip() if (OUT / "no-space-data.txt").exists() else "?"
 check("мало места на /data (tmpfs 4 МиБ): отказ с указанием свободного и нужного объёма, /data не изменён",
       st("I11-no-space")[0] == 3 and "свободно" in S.get("I11-no-space", {}).get("out", "") and ns == "", [S.get("I11-no-space", {}).get("out", "")[-200:], ns])
+V4 = "0.1.3-stage12"
+ffp = (OUT / "foreign-fp.txt").read_text(encoding="utf-8").strip() if (OUT / "foreign-fp.txt").exists() else ""
+k2 = S.get("K2-foreign-no-flag", {}).get("out", "")
+check("другой ключ без --trust-key: отказ, в сообщении оба отпечатка и подсказка --trust-key=<новый>, current = v1",
+      st("K2-foreign-no-flag")[:2] == (3, V1) and len(ffp) == 16 and f"--trust-key={ffp}" in k2 and "закреплён" in k2, k2[-300:])
+check("--trust-key с чужим отпечатком: отказ, current = v1",
+      st("K3-foreign-wrong-fp")[:2] == (3, V1) and "не совпадает" in S.get("K3-foreign-wrong-fp", {}).get("out", ""), S.get("K3-foreign-wrong-fp", {}).get("out", "")[-200:])
+kat = (OUT / "key-after-trust.txt").read_text(encoding="utf-8").strip() if (OUT / "key-after-trust.txt").exists() else ""
+check("--trust-key с верным отпечатком: установлено, current = v4, previous = v1, закреплён новый ключ",
+      st("K4-foreign-trusted")[:3] == (0, V4, V1) and "закреплён новый ключ" in S.get("K4-foreign-trusted", {}).get("out", "") and kat and kat != L.get("pinned"),
+      [st("K4-foreign-trusted"), S.get("K4-foreign-trusted", {}).get("out", "")[-200:], kat])
+check("после смены ключа пакет со старым ключом не принимается: отказ, current = v4",
+      st("K5-old-key-refused")[:2] == (3, V4), S.get("K5-old-key-refused", {}).get("out", "")[-200:])
 X = {}
 if (OUT / "store.jsonl").exists():
     for line in (OUT / "store.jsonl").read_text(encoding="utf-8").splitlines():

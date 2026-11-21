@@ -67,6 +67,18 @@ RS="$W/root-small"; newroot "$RS"; mount -t tmpfs -o size=4m tmpfs "$RS/data"
 RR="$RS" inst I11-no-space "$PKGS/v1" install --no-start
 ls -A "$RS/data" >"$OUT/no-space-data.txt"
 
+# смена ключа подписи (--trust-key): без флага — отказ с отпечатками, с чужим отпечатком — отказ, с верным — установка
+# и закрепление нового ключа; после этого пакет со старым ключом уже не принимается
+RK="$W/root-key"; newroot "$RK"
+RR="$RK" inst K1-fresh "$PKGS/v1" install --no-start
+RR="$RK" inst K2-foreign-no-flag "$PKGS/v4-foreign" install --no-start
+FFP="$(sed -n 's/.*у пакета \([0-9a-f]\{16\}\).*/\1/p' "$OUT/K2-foreign-no-flag.out" | head -n 1)"
+echo "$FFP" >"$OUT/foreign-fp.txt"
+RR="$RK" inst K3-foreign-wrong-fp "$PKGS/v4-foreign" install --no-start --trust-key=0123456789abcdef
+RR="$RK" inst K4-foreign-trusted "$PKGS/v4-foreign" install --no-start "--trust-key=${FFP:-none}"
+head -c 16 "$RK/data/mi-trusttunnel/keys/release.pub" >"$OUT/key-after-trust.txt"
+RR="$RK" inst K5-old-key-refused "$PKGS/v2" install --no-start
+
 # внешнее хранилище релизов (--store): свежая установка, обновление, перенос из /data, накопитель не подключён
 storestate() { # storestate <id> <корень> <каталог хранилища>
   "$PY" -c 'import json,os,sys;d=sys.argv[2]+"/data/mi-trusttunnel";s=sys.argv[3]
