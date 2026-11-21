@@ -88,6 +88,11 @@ while [ -f "$STATE/service.wanted" ]; do
   if [ -f "$STATE/update.request" ] && ! pid_alive update; then
     mv -f "$STATE/update.request" "$STATE/update.request.run"; start_bg update sh "$SCR/mitt-update.sh"
   fi
+  # проверка новой версии пакета по расписанию (только проверка; итог — update.json и уведомление)
+  if ! pid_alive update && [ ! -f "$STATE/update.request" ] && update_check_due; then
+    date +%s >"$ETC/update-check.last" 2>/dev/null
+    printf '{"action":"check","auto":true}' >"$STATE/update.request.run"; start_bg update sh "$SCR/mitt-update.sh"
+  fi
   # подбор стратегии Zapret — в фоне, один одновременно (заявку повторного нажатия панель не ставит, пока идёт подбор);
   # сценарий умер без итога (KILL, сбой) — вернуть прежние стратегии и пометить подбор failed
   pid_alive zapret-test || zt_service_recover

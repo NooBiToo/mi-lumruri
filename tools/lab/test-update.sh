@@ -61,7 +61,7 @@ latest() { # latest <каталог lt> <тег> <файл пакета>
 }
 root() { # root <имя> <установленная версия>
   local d="$W/$1/root" lt="$W/$1/lt"
-  mkdir -p "$d/data/mi-lumruri" "$d/tmp/mi-lumruri/bin" "$d/tmp/mi-lumruri/scripts" "$d/tmp/mi-lumruri/run" "$lt/remote"
+  mkdir -p "$d/data/mi-lumruri/etc" "$d/tmp/mi-lumruri/bin" "$d/tmp/mi-lumruri/scripts" "$d/tmp/mi-lumruri/run" "$lt/remote"
   echo "$2" >"$d/data/mi-lumruri/current.ver"
   cp "$ROOT"/package/scripts/*.sh "$d/tmp/mi-lumruri/scripts/"
   printf '#!/bin/sh\nexec %s %s "$@"\n' "$Q" "$ADM" >"$d/tmp/mi-lumruri/bin/mi-tt-admin"; chmod +x "$d/tmp/mi-lumruri/bin/mi-tt-admin"
@@ -184,5 +184,33 @@ check s "error, rolled_back, причина из apply" 's["state"]=="error" and
 echo "(н) до обновления настройки не применялись — их сбой после обновления не повод для отката"
 inst_case u apply
 check u "done без отката" 's["state"]=="done" and s["rolled_back"] is False'
+
+echo "(о) проверка по расписанию (auto): новая версия — итог ready и одно уведомление на тег"
+root v 0.5.0; latest "$W/v/lt" v0.6.0 mi-lumruri-ci-0123456789ab.tar
+upd v '{"action":"check","auto":true}'
+check v "ready, newer" 's["state"]=="ready" and s["newer"] is True'
+NQ="$W/v/root/tmp/mi-lumruri/run/notify.queue"
+[ "$(grep -c 'update_available' "$NQ" 2>/dev/null)" = 1 ] && grep -q 'v0.6.0' "$NQ" && ok "v: уведомление update_available v0.6.0" || bad "v: очередь: $(cat "$NQ" 2>/dev/null)"
+upd v '{"action":"check","auto":true}'
+[ "$(grep -c 'update_available' "$NQ")" = 1 ] && ok "v: повторная проверка того же тега — без второго уведомления" || bad "v: очередь: $(cat "$NQ")"
+upd v '{"action":"check"}'
+[ "$(grep -c 'update_available' "$NQ")" = 1 ] && ok "v: проверка кнопкой — без уведомления" || bad "v: очередь: $(cat "$NQ")"
+
+echo "(п) проверка по расписанию без сети: прежний итог в панели не затирается"
+echo offline >"$W/v/lt/scenario"; upd v '{"action":"check","auto":true}'
+check v "итог прежний (ready, newer)" 's["state"]=="ready" and s["newer"] is True and s["error"] is None'
+
+echo "(р) расписание: вручную — не проверять; первая проверка — через 10 минут после запуска; затем раз в период"
+due() { timeout 60 env -i PATH="$SB" MITT_ROOT="$W/v/root" MITT_QUIET=1 "$Q" -L "$F" "$F/bin/busybox" ash -c \
+  ". \"$W/v/root/tmp/mi-lumruri/scripts/mitt-lib.sh\"; $1; update_check_due && echo due || echo wait"; }
+mkdir -p "$W/v/root/tmp/mi-lumruri/run/render" "$W/v/root/data/mi-lumruri/etc"; E="$W/v/root/data/mi-lumruri/etc/update-check.last"
+printf 'lists=86400\nzapret_check=0\nupdate_check=0\n' >"$W/v/root/tmp/mi-lumruri/run/render/schedule"; rm -f "$E"
+[ "$(due :)" = wait ] && ok "v: update_check=0 — вручную" || bad "v: вручную, но due"
+printf 'lists=86400\nzapret_check=0\nupdate_check=86400\n' >"$W/v/root/tmp/mi-lumruri/run/render/schedule"
+[ "$(due :)" = wait ] && [ -s "$E" ] && ok "v: первая проверка отложена (метка записана)" || bad "v: первая: $(cat "$E" 2>/dev/null)"
+echo $(( $(date +%s) - 90000 )) >"$E"
+[ "$(due :)" = due ] && ok "v: прошли сутки — пора" || bad "v: сутки прошли, но wait"
+echo $(( $(date +%s) - 3600 )) >"$E"
+[ "$(due :)" = wait ] && ok "v: час назад — рано" || bad "v: час назад, но due"
 
 [ $FAIL -eq 0 ] && echo "ИТОГ: ПРОЙДЕНО" || { echo "ИТОГ: ЕСТЬ ОШИБКИ"; exit 1; }

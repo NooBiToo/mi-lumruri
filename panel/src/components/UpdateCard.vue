@@ -1,11 +1,14 @@
 <script setup lang="ts">
 // Обновление пакета из релизов GitHub: проверка, установка и перезапуск службы на роутере (mitt-update.sh).
 // Во время перезапуска панель недолго недоступна — опрос переживает ошибки сети.
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import { Download, RefreshCw } from 'lucide-vue-next'
 import { api, type UpdateResponse, type UpdateState } from '../api'
-import { notify, service } from '../store'
+import { config, loadUpdate, notify, save, service } from '../store'
+import { saveNow } from '../autosave'
+import Segmented from './Segmented.vue'
+import type { UpdateCheck } from '../api'
 import { dateTag, t } from '../i18n'
 
 const resp = ref<UpdateResponse | null>(null)
@@ -38,6 +41,19 @@ const text = computed(() => {
 })
 const tone = computed(() => (u.value?.state === 'error' ? 'warn' : u.value?.newer || u.value?.state === 'done' ? 'vpn' : busy.value ? 'idle' : 'ok'))
 
+// как часто роутер сам проверяет новую версию (только проверка; ставит пользователь)
+const CHECKS = computed(() => [
+  { value: 'daily' as const, label: t('Раз в сутки') }, { value: 'weekly' as const, label: t('Раз в неделю') }, { value: 'manual' as const, label: t('Вручную') },
+])
+const checkEvery = ref<UpdateCheck>(config.value?.schedule?.update_check ?? 'daily')
+watch(() => config.value?.schedule?.update_check, (v) => { checkEvery.value = v ?? 'daily' })
+watch(checkEvery, async (v) => {
+  const c = config.value
+  if (!c || (c.schedule?.update_check ?? 'daily') === v) return
+  const ok = await saveNow(() => save({ ...c, schedule: { ...c.schedule, update_check: v } }, ''))
+  if (!ok) checkEvery.value = config.value?.schedule?.update_check ?? 'daily'
+})
+
 let timer: number | undefined
 async function poll() {
   clearTimeout(timer)
@@ -47,6 +63,7 @@ async function poll() {
     // перезапуск службы: панель на время недоступна
   }
   if (busy.value) timer = window.setTimeout(() => void poll(), 2000)
+  else void loadUpdate()
 }
 async function send(kind: 'check' | 'install' | 'trust') {
   const r = kind === 'check' ? await api.checkUpdate() : await api.installUpdate(kind === 'trust')
@@ -83,6 +100,9 @@ onBeforeUnmount(() => clearTimeout(timer))
       </Button>
       <a v-if="u?.page && u.newer" :href="u.page" target="_blank" rel="noopener" class="update__notes">{{ t('Что нового') }}</a>
     </div>
+    <span id="update-every" class="field__label">{{ t('Проверять новую версию') }}</span>
+    <Segmented v-model="checkEvery" class="self-start" :options="CHECKS" :label="t('Как часто роутер сам проверяет новую версию')" name="update-check" />
+    <span class="field__hint">{{ t('Роутер только проверяет и сообщает — в панели и в Telegram, если уведомления включены. Ставите вы, кнопкой') }}</span>
     <span v-if="officialSwitch && !busy" class="field__hint">{{ t('Ключ релизов GitHub: {k}. После перехода роутер будет принимать только пакеты с этим ключом. Вернуться к своим сборкам — установкой с флагом --trust-key', { k: u?.official_key ?? '' }) }}</span>
   </div>
 </template>

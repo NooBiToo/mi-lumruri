@@ -23,4 +23,10 @@ export default {
   'Проверить': 'Check',
   'Что нового': 'What’s new',
   'Ключ релизов GitHub: {k}. После перехода роутер будет принимать только пакеты с этим ключом. Вернуться к своим сборкам — установкой с флагом --trust-key': 'GitHub release key: {k}. After switching, the router accepts only packages signed with this key. To go back to your own builds, install with the --trust-key flag',
+  "Раз в сутки": "Once a day",
+  "Раз в неделю": "Once a week",
+  "Вручную": "Manually",
+  "Проверять новую версию": "Check for a new version",
+  "Как часто роутер сам проверяет новую версию": "How often the router checks for a new version on its own",
+  "Роутер только проверяет и сообщает — в панели и в Telegram, если уведомления включены. Ставите вы, кнопкой": "The router only checks and tells you, in the panel and in Telegram if notifications are on. You install it with the button",
 }

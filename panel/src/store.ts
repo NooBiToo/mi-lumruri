@@ -2,7 +2,7 @@
 // Сохраняет любой экран одной функцией `save` (замена настроек целиком, POST /config).
 
 import { computed, ref } from 'vue'
-import { api, manage, type ApiResult, type Config, type Issue, type Lan, type Lease, type ListsResponse, type ManageResponse, type ReplaceResponse, type SaveResponse, type ZapretConfig } from './api'
+import { api, manage, type ApiResult, type Config, type Issue, type Lan, type Lease, type ListsResponse, type ManageResponse, type ReplaceResponse, type SaveResponse, type ZapretConfig, type UpdateState } from './api'
 import { knownDevices, readSimple, tunnelState } from './status'
 import { HOME, toConfig, type KnownDevice, type Simple } from './simple'
 import { t } from './i18n'
@@ -112,10 +112,19 @@ export async function loadSecrets() {
   hasBackupPassword.value = !!(id && r.body.backups?.[id])
 }
 
+/** Итог последней проверки обновления (для отметки в меню «Дополнительно»). */
+export const updateInfo = ref<UpdateState | null>(null)
+export async function loadUpdate() {
+  const r = await api.update()
+  if (r.status === 200) updateInfo.value = r.body.update ?? null
+}
+/** Есть версия новее установленной и она ещё не поставлена. */
+export const updateAvailable = computed(() => !!updateInfo.value?.newer && updateInfo.value.state !== 'done')
+
 export async function loadAll(): Promise<void> {
   // неразобранные настройки: каталог и LAN всё равно нужны, чтобы собрать простые настройки заново
   if (!(await loadConfig()) && !broken.value) return
-  await Promise.all([loadStatus(), loadLists(), loadLeases(), loadLan(), loadSecrets()])
+  await Promise.all([loadStatus(), loadLists(), loadLeases(), loadLan(), loadSecrets(), loadUpdate().catch(() => {})])
 }
 
 /** LAN для простых настроек: с роутера, а если он не ответил — из уже сохранённой домашней сети. */

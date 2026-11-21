@@ -17,6 +17,8 @@ mkdir -p "$STATE" "$LOG"
 req="$(cat "$STATE/update.request.run" 2>/dev/null)"
 action="$(echo "$req" | sed -n 's/.*"action": *"\([a-z]*\)".*/\1/p')"
 trust=""; echo "$req" | grep -q '"trust_official": *true' && trust=1
+# проверка по расписанию: сбой сети не затирает прежний итог в панели (только журнал)
+auto=""; echo "$req" | grep -q '"auto": *true' && auto=1
 W="$R/tmp/mitt-update.$$"
 installed="$(cat "$DATA/current.ver" 2>/dev/null)"
 tag=""; asset=""; sums=""; page=""; published=""; newer=false; avail=""; rolled=false; failed_ver=""
@@ -30,7 +32,7 @@ put() { # put <состояние> [ошибка] [ключ_пакета]: ит�
     >"$OUT.t" && mv -f "$OUT.t" "$OUT"
 }
 done_() { rm -rf "$W" "$STATE/update.request.run"; exit "${1:-0}"; }
-fail() { mlog "обновление: $1"; put error "$1" "${2:-}"; done_ 1; }
+fail() { mlog "обновление: $1"; [ -n "$auto" ] || put error "$1" "${2:-}"; done_ 1; }
 
 # состояние службы из status.json (одна строка): поле apply — последнее полное применение
 st_apply() { sed -n 's/.*"apply":{"tag":"[^"]*","exit":\([0-9]*\),"at":\([0-9]*\).*/\1 \2/p' "$STATE/status.json" 2>/dev/null; }
@@ -79,7 +81,13 @@ check() {
 
 case "$action" in
   check)
-    put checking; check; put ready; mlog "обновление: последний релиз $tag ($avail), установлен $installed"; done_ 0;;
+    [ -n "$auto" ] || put checking
+    check; put ready; mlog "обновление: последний релиз $tag ($avail), установлен $installed"
+    # новая версия — уведомление один раз на тег (проверка по расписанию)
+    if [ -n "$auto" ] && [ "$newer" = true ] && [ "$(cat "$ETC/update-notified" 2>/dev/null)" != "$tag" ]; then
+      notify update update_available "$tag"; echo "$tag" >"$ETC/update-notified" 2>/dev/null
+    fi
+    done_ 0;;
   install)
     put checking; check
     [ "$avail" = "$installed" ] && { put ready "эта версия уже установлена"; done_ 0; }

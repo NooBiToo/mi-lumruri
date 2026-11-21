@@ -44,6 +44,19 @@ pub struct ScheduleConfig {
     pub lists: ListsUpdate,
     #[serde(default)]
     pub zapret_check: ZapretCheck,
+    /// Проверка новой версии пакета на GitHub (только проверка: ставит пользователь кнопкой).
+    #[serde(default)]
+    pub update_check: UpdateCheck,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateCheck {
+    #[default]
+    Daily,
+    Weekly,
+    /// Только по кнопке в панели.
+    Manual,
 }
 
 /// Проверка обновлений готовых списков сайтов.
@@ -74,7 +87,8 @@ impl ScheduleConfig {
     pub fn file(&self) -> String {
         let lists = match self.lists { ListsUpdate::Hours6 => 6 * 3600, ListsUpdate::Daily => 86_400, ListsUpdate::Weekly => 7 * 86_400, ListsUpdate::Manual => 0 };
         let zapret = match self.zapret_check { ZapretCheck::Off => 0, ZapretCheck::Daily => 86_400, ZapretCheck::Weekly => 7 * 86_400 };
-        format!("lists={lists}\nzapret_check={zapret}\n")
+        let update = match self.update_check { UpdateCheck::Daily => 86_400, UpdateCheck::Weekly => 7 * 86_400, UpdateCheck::Manual => 0 };
+        format!("lists={lists}\nzapret_check={zapret}\nupdate_check={update}\n")
     }
 }
 
@@ -527,12 +541,13 @@ mod schedule_tests {
 
     #[test]
     fn schedule_file_for_service() {
-        assert_eq!(ScheduleConfig::default().file(), "lists=86400\nzapret_check=0\n");
+        assert_eq!(ScheduleConfig::default().file(), "lists=86400\nzapret_check=0\nupdate_check=86400\n");
         let s: ScheduleConfig = serde_json::from_str(r#"{"lists":"6h","zapret_check":"weekly"}"#).unwrap();
-        assert_eq!(s.file(), "lists=21600\nzapret_check=604800\n");
-        assert_eq!(serde_json::from_str::<ScheduleConfig>(r#"{"lists":"manual"}"#).unwrap().file(), "lists=0\nzapret_check=0\n");
+        assert_eq!(s.file(), "lists=21600\nzapret_check=604800\nupdate_check=86400\n");
+        assert_eq!(serde_json::from_str::<ScheduleConfig>(r#"{"lists":"manual","update_check":"manual"}"#).unwrap().file(), "lists=0\nzapret_check=0\nupdate_check=0\n");
+        assert_eq!(serde_json::from_str::<ScheduleConfig>(r#"{"update_check":"weekly"}"#).unwrap().file(), "lists=86400\nzapret_check=0\nupdate_check=604800\n");
         assert!(serde_json::from_str::<ScheduleConfig>(r#"{"lists":"hourly"}"#).is_err());
-        assert_eq!(serde_json::to_string(&s).unwrap(), r#"{"lists":"6h","zapret_check":"weekly"}"#);
+        assert_eq!(serde_json::to_string(&s).unwrap(), r#"{"lists":"6h","zapret_check":"weekly","update_check":"daily"}"#);
     }
 }
 

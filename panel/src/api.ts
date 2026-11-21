@@ -48,7 +48,8 @@ export interface DnsProxyStatus { at: number; upstream: string; queries: number;
 export interface AdblockStatus { ok: boolean; checked: number; updated: number | null; domains: number | null; url: string; error: string | null }
 export type ListsUpdate = '6h' | 'daily' | 'weekly' | 'manual'
 export type ZapretCheck = 'off' | 'daily' | 'weekly'
-export interface ScheduleConfig { lists?: ListsUpdate; zapret_check?: ZapretCheck }
+export type UpdateCheck = 'daily' | 'weekly' | 'manual'
+export interface ScheduleConfig { lists?: ListsUpdate; zapret_check?: ZapretCheck; update_check?: UpdateCheck }
 
 export interface DnsConfig {
   /** Публичный IPv4 DNS-сервера для доменов, идущих через TrustTunnel; запросы к нему идут через туннель. По умолчанию 1.1.1.1. */

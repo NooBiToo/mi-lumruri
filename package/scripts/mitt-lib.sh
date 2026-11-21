@@ -276,6 +276,16 @@ EOF
   mlog "панель: https порт $PANEL_PORT (nginx), CGI на 127.0.0.1:$CGI_PORT (uhttpd)"
 }
 
+# проверка новой версии: период из расписания (update_check, сутки по умолчанию; 0 — вручную); первая — через
+# MITT_UPDATE_FIRST (10 мин) после запуска службы, чтобы не мешать загрузке
+update_check_due() {
+  local p last now; p="${MITT_UPDATE_PERIOD:-$(sched update_check)}"; case "$p" in ''|*[!0-9]*) p=86400;; esac
+  [ "$p" -gt 0 ] || return 1
+  now=$(date +%s); last="$(cat "$ETC/update-check.last" 2>/dev/null)"
+  [ -n "$last" ] || { last=$((now - p + ${MITT_UPDATE_FIRST:-600})); echo "$last" >"$ETC/update-check.last" 2>/dev/null; }
+  [ $((now - last)) -ge "$p" ] || [ "$now" -lt "$last" ]
+}
+
 # --- уведомления в Telegram (mitt-notify.sh) ---
 # notify <событие> <ключ сообщения> [параметр]: в очередь; mitt-notify.sh отправит, если событие выбрано в панели
 notify() {

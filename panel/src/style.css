@@ -181,6 +181,10 @@ a:hover { color: var(--accent-hover); }
 .nav:hover .nav__icon { color: inherit; }
 .nav:focus-visible { outline-color: var(--side-mark); outline-offset: -2px; }
 .nav__label { white-space: nowrap; }
+/* отметка «есть новая версия» у пункта «Дополнительно» */
+.nav, .tabbar__item { position: relative; }
+.nav__dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--vpn, #2f7d5b); margin-left: auto; flex: none; }
+.nav__dot--bar { position: absolute; top: 0.35rem; right: calc(50% - 1rem); margin: 0; }
 
 .main { min-width: 0; display: flex; flex-direction: column; min-height: 100vh; }
 .top {

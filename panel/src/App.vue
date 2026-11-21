@@ -13,7 +13,7 @@ import { lang, t } from './i18n'
 import { api, onAuthLost, setCsrf, type SessionResponse } from './api'
 import type { LoginStage } from './auth'
 import LoginView from './LoginView.vue'
-import { broken, config, configIssues, issuesText, loadAll, loadError, loadStatus, notify, reset, serverReady, service, simple, tunnel } from './store'
+import { broken, config, configIssues, issuesText, loadAll, loadError, loadStatus, notify, reset, serverReady, service, simple, tunnel, updateAvailable } from './store'
 import { flushPending, resetSaveStatus, saveLabel, saveStatus } from './autosave'
 import { toggleVpn, vpnAvailable, vpnBusy } from './vpn'
 import StatusView from './views/StatusView.vue'
@@ -177,6 +177,7 @@ onBeforeUnmount(() => { removeEventListener('hashchange', onHash); clearInterval
           :aria-current="tab === t.value ? 'page' : undefined" @click.prevent="go(t.value)">
           <component :is="t.icon" class="nav__icon" :size="18" :stroke-width="1.5" aria-hidden="true" />
           <span class="nav__label">{{ t.label }}</span>
+          <span v-if="t.value === 'more' && updateAvailable" class="nav__dot" aria-hidden="true" />
         </a>
       </nav>
     </aside>
@@ -237,6 +238,7 @@ onBeforeUnmount(() => { removeEventListener('hashchange', onHash); clearInterval
         :aria-current="tab === t.value ? 'page' : undefined" :aria-label="t.label" @click.prevent="go(t.value)">
         <component :is="t.icon" :size="20" :stroke-width="1.5" aria-hidden="true" />
         <span>{{ t.short }}</span>
+        <span v-if="t.value === 'more' && updateAvailable" class="nav__dot nav__dot--bar" aria-hidden="true" />
       </a>
     </nav>
   </div>
