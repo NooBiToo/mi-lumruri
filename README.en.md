@@ -8,7 +8,7 @@ Selective VPN and DPI bypass for the Xiaomi BE7000 on stock firmware. Paste a li
 
 **Router:** Xiaomi BE7000 (RC06), firmware 1.1.38. No reflashing: the package is installed over SSH into internal storage (about 4.5 MB) and runs on the stock iptables, ipset and dnsmasq.
 
-The panel is in Russian; the guide names each Russian label. **[Install and set up](docs/guide.en.md)** · [Update or roll back](docs/guide.en.md#updating-and-rollback) · [Limitations](docs/guide.en.md#limitations) · [Uninstall](docs/guide.en.md#uninstalling) · [Build the package](docs/build.md) (in Russian)
+**[Install and set up](docs/guide.en.md)** · [Update or roll back](docs/guide.en.md#updating-and-rollback) · [Limitations](docs/guide.en.md#limitations) · [Uninstall](docs/guide.en.md#uninstalling) · [Build the package](docs/build.md) (in Russian)
 
 ## Install
 
@@ -26,13 +26,14 @@ The router's internal storage is small: about 20 MB, of which the firmware uses 
 
 | | |
 | --- | --- |
-| **Server** | Paste a `tt://` link or a `client.toml` file and the fields fill in. The server address can be an IP or a domain. Uses the official `trusttunnel_client` v1.3.0: HTTP/2 or HTTP/3, anti-DPI, custom certificate, TLS profile, client_random prefix or key. If the server is down, listed sites either wait or open directly — your choice. |
-| **Sites** | Each service is set to **VPN**, **Zapret** or **Off**. Ready-made lists from [itdoginfo/allow-domains](https://github.com/itdoginfo/allow-domains), including service subnets, ship with the package and update automatically: from every 6 hours to weekly, or manually only. Your own VPN sites, your own DPI-bypass sites and exceptions are separate lists, one site per line. There is also an "Everything via VPN except exceptions" mode. |
+| **Server** | Paste a `tt://` link or a `client.toml` file and the fields fill in. The server address can be an IP or a domain. Uses the official `trusttunnel_client` v1.3.0: HTTP/2 or HTTP/3, anti-DPI, custom certificate, TLS profile, client_random prefix or key. TrustTunnel 1.3 subscription link: the router fetches new server parameters on its own. Backup server: if the main server does not connect for 2 minutes, the router switches to the backup and returns when the main one responds again. If the server is down, listed sites either wait or open directly — your choice. |
+| **Sites** | Each service is set to **VPN**, **Zapret** or **Off**. Ready-made lists from [itdoginfo/allow-domains](https://github.com/itdoginfo/allow-domains), including service subnets, ship with the package and update automatically: from every 6 hours to weekly, or manually only. Your own VPN sites, your own DPI-bypass sites and exceptions are separate lists, one site per line. There is also an "Everything via VPN except exceptions" mode. Optionally, IPv6 also goes through the VPN for devices whose whole internet goes through the VPN. |
 | **Zapret** | nfqws2 from zapret2 with built-in strategies works out of the box. "Find a method" tests strategies on the router and applies the best one only if sites open better with it than without Zapret. You can also pick a method manually, with a separate one for YouTube. Scheduled re-check of the method. |
-| **Devices** | All home devices, or only the ones you select from the list of connected devices. |
+| **Devices** | All home devices, or only the ones you select from the list of connected devices. A single device can have "Whole internet" through the VPN while the others send only the selected sites through the VPN. |
 | **DNS** | Secure DNS (DoH or DoT) for all other sites: Cloudflare, Google, AdGuard, NextDNS, Quad9 (DoT) or your own server. If the server is unreachable, queries temporarily go through your ISP. VPN sites use their own DNS server; queries to it go through the tunnel and can be additionally encrypted (DoH or DoT). A separate page for your own DNS records: a domain and all its subdomains point to an address on your home network, for example a server running Traefik. Ad blocking via the router's DNS: HaGeZi Light, Normal or your own list, updated automatically. |
-| **Diagnostics** | One-click check of the service, server connection, internet access through the tunnel, routes, DNS, Zapret and programs stuck in a restart loop. Check a single site: which way it goes and whether it opens. Logs and a report in one click, service restart. |
+| **Diagnostics** | One-click check of the service, server connection and client version, internet access through the tunnel, the tunnel watchdog, routes, DNS, Zapret and programs stuck in a restart loop. Check a single site: which way it goes and whether it opens. Logs and a report in one click, service restart. |
 | **Sign-in** | HTTPS and a password, with an optional second step: an authenticator app code (TOTP). |
+| **Panel** | In Russian, English and Simplified Chinese. The language follows the browser, and you can change it in Advanced and on the sign-in screen. Updates from the panel: the router downloads the new release from GitHub, checks the SHA-256 and the signature and installs it, keeping your settings. |
 
 Changes are saved automatically. The panel also works well on a phone.
 
@@ -64,9 +65,9 @@ Details are in the [architecture document](ARCHITECTURE.md) (in Russian).
 
 The package runs on the BE7000 with firmware 1.1.38: tunnel, selective routing, Zapret, secure DNS and the panel. On-device testing continues. Please report problems in [Issues](https://github.com/NooBiToo/mi-lumruri/issues).
 
-- Only IPv4 is routed: devices with VPN or Zapret rules have no outbound IPv6. Preset DNS servers have IPv6 addresses, but they are used only as a fallback.
+- Listed sites are matched by IPv4 only: devices with VPN or Zapret rules have no outbound IPv6. The exception is devices whose whole internet goes through the VPN, with "IPv6 via VPN" turned on: their IPv6 goes through the tunnel, and the VPN server needs IPv6. Preset DNS servers have IPv6 addresses, but they are used only as a fallback.
 - Sites are matched by DNS: a device must use the router as its DNS server. "Secure DNS" (DoH) in a browser bypasses the lists.
-- One TrustTunnel server is supported.
+- Traffic goes through one TrustTunnel server. The backup server replaces the main one, and switching takes up to 2 minutes.
 - DoT does not work everywhere: many ISPs block port 853.
 
 The full list is in the [guide](docs/guide.en.md#limitations).
@@ -75,7 +76,7 @@ The full list is in the [guide](docs/guide.en.md#limitations).
 
 The project used to be called mi-trusttunnel. That name remains in package files, programs and folders on the router (`/data/mi-trusttunnel`), so existing installs update without reinstalling.
 
-- The controller, the admin utility and the `mi-tt-dns` DNS proxy are written in Rust.
+- The controller, the admin utility and the DNS proxy are written in Rust and built into a single program, `mi-tt`.
 - The panel uses Vue 3, TypeScript and PrimeVue.
 - On the router it uses the stock nginx, uhttpd, dnsmasq, iptables and ipset. Node.js is only needed on the build machine.
 - Changes are tested in a network lab built from stock firmware components.
