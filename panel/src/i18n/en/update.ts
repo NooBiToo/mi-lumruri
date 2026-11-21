@@ -6,6 +6,8 @@ export default {
   'Перезапускаю службу — панель вернётся через полминуты…': 'Restarting the service — the panel will be back in about 30 seconds…',
   'Проверьте, есть ли новая версия': 'Check whether a new version is available',
   'Обновлено до {v}': 'Updated to {v}',
+  'Проверяю, что новая версия работает…': 'Checking that the new version works…',
+  'Версия {v} не заработала ({e}) — возвращена {p}': 'Version {v} did not start working ({e}), so {p} was restored',
   'Пакеты релизов GitHub подписаны другим ключом, чем установленная сборка. Можно перейти на релизы GitHub — настройки сохранятся': 'GitHub release packages are signed with a different key than the installed build. You can switch to GitHub releases — your settings are kept',
   'Не получилось: {e}': 'Failed: {e}',
   'неизвестная ошибка': 'unknown error',

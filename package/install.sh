@@ -42,7 +42,6 @@ RESERVE_DATA=$((2 * 1024 * 1024))   # оставить штатной проши
 RESERVE_TIGHT=$((512 * 1024))       # впритык: прежний релиз удаляется после установки, отката не будет
 TIGHT=""
 RESERVE_TMP=$((16 * 1024 * 1024))   # RAM для работы движков сверх распакованных файлов
-UCI="uci ${MITT_UCI_CONF:+-c $MITT_UCI_CONF}"
 say() { echo "mi-lumruri: $*"; }
 fail() {
   say "ОТКАЗ: $*"
@@ -181,9 +180,7 @@ STUB
 }
 autostart_on() {
   write_stub
-  $UCI -q delete firewall.mitt
-  $UCI set firewall.mitt=include && $UCI set firewall.mitt.type=script && $UCI set firewall.mitt.path="$DATA/mitt-boot.sh" \
-    && $UCI set firewall.mitt.reload=1 && $UCI set firewall.mitt.enabled=1 && $UCI commit firewall || fail "не удалось зарегистрировать автозапуск"
+  autostart_set || fail "не удалось зарегистрировать автозапуск"
 }
 autostart_off() { $UCI -q delete firewall.mitt; $UCI commit firewall; }
 setver() { # setver <current|previous> <версия>: атомарная замена файла-указателя

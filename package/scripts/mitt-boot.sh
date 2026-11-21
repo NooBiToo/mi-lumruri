@@ -6,6 +6,7 @@
 #   mitt-boot.sh stop — остановить всё и снять свои правила.
 #   mitt-boot.sh auth <init|confirm|reset-password|…> — mi-tt-admin auth с каталогами пакета (вход в панель);
 #   mitt-boot.sh status — состояние службы (JSON).
+#   mitt-boot.sh repair — заново зарегистрировать автозапуск в firewall (после обновления прошивки) и запустить службу.
 D="$(cd "$(dirname "$0")" && pwd)"
 . "$D/mitt-lib.sh"
 case "${1:-}" in
@@ -13,6 +14,10 @@ case "${1:-}" in
     shift; [ -x "$BIN/mi-tt-admin" ] || { echo "mi-lumruri: служба не запущена (нет $BIN/mi-tt-admin): sh install.sh install" >&2; exit 1; }
     MI_TT_AUTH_DIR="$ETC/auth" MI_TT_SESSION_DIR="$RUN/sessions" exec "$BIN/mi-tt-admin" auth "$@";;
   status) cat "$STATE/status.json" 2>/dev/null || echo '{"protection":"none"}'; exit 0;;
+  repair)
+    mkdir -p "$STATE" "$LOG"
+    autostart_set || die "не удалось записать автозапуск в настройки firewall"
+    mlog "автозапуск восстановлен вручную (repair)"; echo "mi-lumruri: автозапуск восстановлен"; set --;;
 esac
 mkdir -p "$STATE" "$LOG"
 lock_take boot 30 || die "загрузчик уже выполняется"
@@ -42,6 +47,7 @@ if pid_alive service; then
 fi
 
 unpack_runtime
+rom_track
 render_now || mlog "render не прошёл: защита по предыдущей сохранённой конфигурации невозможна, движки не запускаются"
 # защита до запуска движков и до появления клиентов: guard-only не требует WAN и движков
 if admin_apply boot-guard --guard-only; then echo guard >"$STATE/protection"; else echo none >"$STATE/protection"; fi

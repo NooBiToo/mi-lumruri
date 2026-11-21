@@ -69,7 +69,7 @@ exec env LD_LIBRARY_PATH="$DMQ/usr/lib/x86_64-linux-gnu" python3 -I "$ROOT/tools
   --pid-file="$W/dnsmasq.pid" --log-queries --log-facility="$OUT/dnsmasq.log"
 EOF
 chmod +x "$W/dnsmasq-restart"
-ENVR=(PATH="$SB:$NFBIN" MITT_ROOT="$RR" MITT_LAB_BIN="$LB" MITT_UCI_CONF="$RR/etc/config" MITT_INTERVAL=2 MITT_LEASES="$RR/tmp/dhcp.leases"
+ENVR=(PATH="$SB:$NFBIN" MITT_ROOT="$RR" MITT_LAB_BIN="$LB" MITT_UCI_CONF="$RR/etc/config" MITT_INTERVAL=2 MITT_AUTOSTART_CHECK=4 MITT_LEASES="$RR/tmp/dhcp.leases"
   MITT_DNSMASQ_RESTART="$W/dnsmasq-restart" MITT_LISTS_URL="http://10.99.0.20:8080" MITT_ZAPRET_TARGETS="$W/zapret-targets.txt" MI_TT_IPTABLES="$NFBIN/iptables" MI_TT_IP6TABLES="$NFBIN/ip6tables" MI_TT_IPTABLES_SAVE="$NFBIN/iptables-save" MI_TT_IPSET="$NFBIN/ipset")
 
 # --- топология ---
@@ -258,6 +258,17 @@ boot >"$OUT/boot-reload.out" 2>&1
 phase fw_restored
 snapz restored; cp_status fw
 probe F-tv tv
+
+# 3а) запись автозапуска пропала из настроек firewall (сброс, обновление прошивки): служба восстанавливает её сама;
+# mitt-boot.sh repair — то же вручную, сразу
+U=("$SB/uci" -c "$RR/etc/config")
+"${U[@]}" -q get firewall.mitt.path >"$OUT/autostart-before.txt" 2>&1
+"${U[@]}" delete firewall.mitt && "${U[@]}" commit firewall
+i=0; while [ $i -lt 40 ] && ! "${U[@]}" -q get firewall.mitt.path >/dev/null 2>&1; do sleep 1; i=$((i + 1)); done
+"${U[@]}" -q get firewall.mitt.path >"$OUT/autostart-healed.txt" 2>&1; echo "$i" >"$OUT/autostart-heal-seconds.txt"
+"${U[@]}" delete firewall.mitt && "${U[@]}" commit firewall
+boot repair >"$OUT/autostart-repair.out" 2>&1; echo "exit $?" >>"$OUT/autostart-repair.out"
+"${U[@]}" -q get firewall.mitt.path >"$OUT/autostart-repaired.txt" 2>&1
 
 # 4) ТВ сменил адрес (новая аренда): правило устройства по MAC действует сразу, без применения политики
 phase new_address

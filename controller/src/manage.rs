@@ -21,7 +21,7 @@ pub const MAX_LIST_BODY: usize = 8 * 1024 * 1024;
 
 pub const PATHS: &[&str] = &["/rules/delete", "/rules/move", "/profiles", "/profiles/delete", "/groups", "/groups/delete", "/categories",
     "/categories/delete", "/networks", "/networks/delete", "/devices", "/devices/delete", "/leases", "/dns", "/zapret", "/adblock/list",
-    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update", "/router", "/diag", "/service/restart", "/update", "/subscription", "/subscription/update"];
+    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update", "/router", "/diag", "/service/restart", "/update", "/subscription", "/subscription/update", "/backup/export", "/backup/restore"];
 
 pub fn is_manage_path(path: &str) -> bool {
     PATHS.contains(&path.trim_end_matches('/'))
@@ -31,7 +31,7 @@ pub fn is_list_upload(path: &str) -> bool {
     matches!(path.trim_end_matches('/'), "/adblock/list" | "/categories/list")
 }
 
-fn saved(r: Result<store::Saved, SaveError>, what: &str) -> Response {
+pub(crate) fn saved(r: Result<store::Saved, SaveError>, what: &str) -> Response {
     match r {
         Ok(s) => Response { status: 200, body: json!({ "ok": true, "mode": s.mode, "what": what, "previous_revision": s.previous_revision, "revision": s.revision, "config": s.config, "issues": [] }) },
         Err(SaveError::Conflict { current }) => Response {
@@ -45,7 +45,7 @@ fn saved(r: Result<store::Saved, SaveError>, what: &str) -> Response {
     }
 }
 
-fn bad(i: Vec<Issue>) -> Response {
+pub(crate) fn bad(i: Vec<Issue>) -> Response {
     Response { status: 400, body: json!({ "ok": false, "error": { "code": "bad_request", "message": "тело запроса не соответствует схеме" }, "issues": i }) }
 }
 
@@ -161,7 +161,7 @@ fn remove<T>(v: &mut Vec<T>, key: &str, id: impl Fn(&T) -> &str) -> Result<&'sta
     }
 }
 
-fn config_dir(config_path: &str) -> PathBuf {
+pub(crate) fn config_dir(config_path: &str) -> PathBuf {
     Path::new(config_path).parent().map(Path::to_path_buf).unwrap_or_default()
 }
 
@@ -270,7 +270,7 @@ fn site_route(sets: &[&str], run: &Path) -> Option<String> {
     Some("direct".into())
 }
 
-fn read_config(config_path: &str) -> Result<Config, Response> {
+pub(crate) fn read_config(config_path: &str) -> Result<Config, Response> {
     let b = read_limited(config_path, MAX_CONFIG_BYTES).map_err(|m| Response::error(500, "unreadable", m))?;
     parse_json(&b, "config").map_err(|i| Response { status: 409, body: json!({ "ok": false, "error": { "code": "config_invalid", "message": "настройки не разобраны" }, "issues": i }) })
 }
@@ -330,7 +330,7 @@ pub fn category_list(config_path: &str, id: &str, text: &str) -> Response {
 }
 
 /// Заявка на применение: CGI без привилегий только пишет запрос; применяет служба mi-tt-admin (root) по текущей ревизии настроек.
-fn queue_apply(config_path: &str) -> Result<Option<String>, String> {
+pub(crate) fn queue_apply(config_path: &str) -> Result<Option<String>, String> {
     let rev = read_limited(config_path, MAX_CONFIG_BYTES).ok().map(|b| store::revision(&b));
     let d = run_dir();
     let req = json!({ "requested_unix": crate::auth::now(), "config_revision": rev });
@@ -673,6 +673,8 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
             }
             Err(i) => bad(i),
         },
+        ("POST", "/backup/export") => crate::backup::export(b, config_path),
+        ("POST", "/backup/restore") => crate::backup::restore(b, config_path),
         ("POST", "/apply-request") => match queue_apply(config_path) {
             Ok(rev) => Response { status: 202, body: json!({ "ok": true, "queued": true, "config_revision": rev, "issues": [] }) },
             Err(m) => Response::error(500, "write_failed", m),

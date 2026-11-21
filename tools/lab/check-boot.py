@@ -104,6 +104,11 @@ check("клиент TrustTunnel не трогает основную табли�
 check("перезагрузка firewall (цепочки сняты): вызов include восстановил цепочки и переходы; ТВ снова через туннель",
       "MITT_" not in text("zone.flushed.txt") and "-j MITT_C" in text("zone.restored.txt")
       and seen("F-tv") == (0, VPN) and js("last-apply.fw.json").get("tag") == "fw-reload", [js("last-apply.fw.json"), seen("F-tv")])
+ab, ah, ar = text("autostart-before.txt").strip(), text("autostart-healed.txt").strip(), text("autostart-repaired.txt").strip()
+check("запись автозапуска удалена из настроек firewall (сброс, прошивка): служба восстановила её сама за несколько секунд",
+      ab.endswith("/data/mi-lumruri/mitt-boot.sh") and ah == ab, [ab, ah, text("autostart-heal-seconds.txt").strip()])
+check("mitt-boot.sh repair: запись автозапуска восстановлена сразу, код 0",
+      ar == ab and "exit 0" in text("autostart-repair.out"), [ar, text("autostart-repair.out")[-200:]])
 check("ТВ сменил адрес: правило устройства по MAC действует сразу, без применения политики",
       seen("N-tv-new-ip") == (0, VPN), seen("N-tv-new-ip"))
 check("падение клиента TrustTunnel: в это время у ТВ нет связи (unreachable, не напрямую); служба перезапустила клиент и применила политику",

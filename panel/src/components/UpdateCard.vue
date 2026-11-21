@@ -10,7 +10,7 @@ import { dateTag, t } from '../i18n'
 
 const resp = ref<UpdateResponse | null>(null)
 const u = computed<UpdateState | null>(() => resp.value?.update ?? null)
-const BUSY = ['checking', 'downloading', 'installing', 'restarting']
+const BUSY = ['checking', 'downloading', 'installing', 'restarting', 'verifying']
 const busy = computed(() => !!resp.value?.running || (!!u.value && BUSY.includes(u.value.state)))
 const release = computed(() => (service.value?.service as { release?: string } | undefined)?.release ?? '')
 const installed = computed(() => u.value?.installed || release.value || '—')
@@ -21,6 +21,7 @@ const officialSwitch = computed(() => !!u.value?.package_key && u.value.package_
 const step = (s: string) => ({
   checking: t('Проверяю релизы на GitHub…'), downloading: t('Скачиваю пакет…'), installing: t('Устанавливаю…'),
   restarting: t('Перезапускаю службу — панель вернётся через полминуты…'),
+  verifying: t('Проверяю, что новая версия работает…'),
 })[s] ?? ''
 const text = computed(() => {
   const s = u.value
@@ -29,6 +30,7 @@ const text = computed(() => {
   if (s.state === 'done') return t('Обновлено до {v}', { v: s.installed })
   if (s.state === 'error') {
     if (officialSwitch.value) return t('Пакеты релизов GitHub подписаны другим ключом, чем установленная сборка. Можно перейти на релизы GitHub — настройки сохранятся')
+    if (s.rolled_back) return t('Версия {v} не заработала ({e}) — возвращена {p}', { v: s.failed ?? '', e: s.error ?? '', p: s.installed })
     return t('Не получилось: {e}', { e: s.error ?? t('неизвестная ошибка') })
   }
   if (s.newer) return published.value ? t('Доступна версия {v} от {d}', { v: s.latest, d: published.value }) : t('Доступна версия {v}', { v: s.latest })

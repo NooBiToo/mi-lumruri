@@ -275,6 +275,36 @@ EOF
   mlog "панель: https порт $PANEL_PORT (nginx), CGI на 127.0.0.1:$CGI_PORT (uhttpd)"
 }
 
+# --- автозапуск и прошивка ---
+# Запись `config include 'mitt'` в firewall может пропасть: обновление прошивки, сброс или правка настроек firewall
+# штатным интерфейсом. Служба раз в 10 минут проверяет её и восстанавливает; `mitt-boot.sh repair` — то же вручную.
+UCI="uci ${MITT_UCI_CONF:+-c $MITT_UCI_CONF}"
+autostart_ok() {
+  [ "$($UCI -q get firewall.mitt)" = include ] && [ "$($UCI -q get firewall.mitt.path)" = "$DATA/mitt-boot.sh" ] \
+    && [ "$($UCI -q get firewall.mitt.enabled)" != 0 ]
+}
+autostart_set() {
+  $UCI -q delete firewall.mitt
+  $UCI set firewall.mitt=include && $UCI set firewall.mitt.type=script && $UCI set firewall.mitt.path="$DATA/mitt-boot.sh" \
+    && $UCI set firewall.mitt.reload=1 && $UCI set firewall.mitt.enabled=1 && $UCI commit firewall
+}
+# точки входа нет (пакет удалён) — восстанавливать нечего
+autostart_heal() {
+  [ -f "$DATA/mitt-boot.sh" ] || return 0
+  autostart_ok && return 0
+  if autostart_set; then mlog "автозапуск: запись в настройках firewall пропала — восстановлена"; date +%s >"$STATE/autostart-healed"
+  else mlog "автозапуск: запись в настройках firewall пропала, восстановить не удалось"; return 1; fi
+}
+rom_now() { sed -n "s/.*option ROM '\(.*\)'.*/\1/p" "$R/usr/share/xiaoqiang/xiaoqiang_version" 2>/dev/null; }
+ROM_TESTED=1.1.38
+# смена прошивки с прошлого запуска: «<было> <стало> <unix>» в $ETC/rom.changed (для диагностики)
+rom_track() {
+  local rom seen; rom="$(rom_now)"; seen="$(cat "$ETC/rom.seen" 2>/dev/null)"
+  [ -n "$rom" ] && [ "$rom" != "$seen" ] || return 0
+  if [ -n "$seen" ]; then mlog "прошивка изменилась: $seen → $rom"; echo "$seen $rom $(date +%s)" >"$ETC/rom.changed"; fi
+  echo "$rom" >"$ETC/rom.seen"
+}
+
 status_write() {
   local e="" n
   for n in trusttunnel nfqws2 nginx uhttpd service; do

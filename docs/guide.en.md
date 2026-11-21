@@ -2,7 +2,7 @@
 
 [Русский](guide.md) · **English** · [简体中文](guide.zh-CN.md)
 
-This guide covers Mi Lumruri version 0.5.0. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
+This guide covers Mi Lumruri version 0.6.0. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
 
 You need a BE7000 (RC06) with firmware 1.1.38, working root access over SSH from the home network, the installation TAR, and the parameters of your TrustTunnel server. The stock release firmware usually ships with SSH turned off.
 
@@ -237,6 +237,7 @@ A separate menu page (on a phone, under More). Enter a domain and an IP address 
 
 A separate menu page (on a phone, under More). The **Check** button runs a check on the router itself. It takes up to 20 seconds and changes nothing. It checks:
 
+- autostart: whether the service is registered in the firewall settings, that is, whether it starts after a router reboot, and the router firmware (a warning if it is not 1.1.38 or was recently updated);
 - the router service and the TrustTunnel client: whether it is connected to the server, with what latency, how long it has been connected and which client version runs;
 - the tunnel watchdog: when the last check through the tunnel ran, whether it passed, and whether the watchdog restarted the client in the last hour;
 - internet access through the tunnel: the router asks Cloudflare (1.1.1.1) for its external address through the tunnel and directly, and the addresses must differ;
@@ -262,6 +263,7 @@ Usually you do not need to change anything here. Changes save automatically. On 
 - **Secure DNS for other sites**: off, DoH or DoT. See [Secure DNS (DoH/DoT)](#secure-dns-dohdot).
 - **Interface language**: Русский, English or 简体中文. The choice is remembered in this browser.
 - **Update**: the installed version, and checking for and installing a new version from GitHub. See [Updating and rollback](#updating-and-rollback).
+- **Settings backup**: see [Settings backup](#settings-backup).
 - **Panel sign-in**: whether the second factor is on. It is turned on over SSH. See [Second factor (TOTP)](#second-factor-totp).
 
 ### Zapret
@@ -360,7 +362,7 @@ Under the simple screens runs the controller's rule model: source (device, netwo
 
 ## Updating and rollback
 
-**From the panel** (since version 0.4.0). Advanced has an Update block. The router does not look for new versions on its own: the Check button finds the latest release on GitHub. The router needs access to `api.github.com` and `github.com`. If a newer one exists, the Update to … button appears. The router downloads the package itself, compares its SHA-256 with the release's `SHA256SUMS` file, verifies the signature with the pinned key and restarts the service. The panel disappears for about half a minute, and settings are kept. If the router runs your own build signed with your key, the panel offers Switch to GitHub releases and update. The router then accepts the package with the GitHub release key (`e4a271890e5643ab`) and pins it. The panel does not accept other keys.
+**From the panel** (since version 0.4.0). Advanced has an Update block. The router does not look for new versions on its own: the Check button finds the latest release on GitHub. The router needs access to `api.github.com` and `github.com`. If a newer one exists, the Update to … button appears. The router downloads the package itself, compares its SHA-256 with the release's `SHA256SUMS` file, verifies the signature with the pinned key and restarts the service. The panel disappears for about half a minute, and settings are kept. After the restart the router checks for up to 5 minutes that the new version works: the service and the panel are running and, if settings applied without errors before the update, they apply now too. If not, it restores the previous version on its own, and the panel shows "Version … did not start working, so … was restored" with the reason. Automatic rollback works for updates from the panel starting with version 0.6.0 (the check is run by the version already installed). If the router runs your own build signed with your key, the panel offers Switch to GitHub releases and update. The router then accepts the package with the GitHub release key (`e4a271890e5643ab`) and pins it. The panel does not accept other keys.
 
 **From a computer.** To update, repeat the quick install, or copy the new TAR and repeat step 2 up to the login setup. Existing settings and the second factor are kept. Releases are stored in `/data/mi-lumruri/releases` (or in the `--store` directory): the current and the previous one. Older ones are deleted. A new release needs about 4.5 MB plus a 2 MiB reserve. If that much is not available, the installer deletes old releases, and with very little room it installs the update without keeping the previous release. Rollback is then unavailable. See [If there is not enough space in `/data`](#if-there-is-not-enough-space-in-data).
 
@@ -394,6 +396,12 @@ sh install.sh rollback
 
 Rollback is available after you install a second version, if the installer kept the previous release. Without it, the command answers "no previous release to roll back to" («нет предыдущего релиза для отката»). To see the current and previous release, run `sh install.sh status`.
 
+## Settings backup
+
+In Advanced → **Settings backup**, the **Download backup** button saves the file `mi-lumruri-backup-<date>.json` to your computer: settings, rules, devices, custom DNS records and your own lists. Server passwords, subscription links and the panel login (password and second factor) go into the backup only if you turn on **Include server passwords and panel login** and set a backup password (at least 8 characters). The router encrypts that part with the backup password using Argon2id and ChaCha20-Poly1305. Without the password it cannot be read or restored. The panel TLS key and the release signing key are not included: they belong to a specific router.
+
+**Restore from file…** replaces the current settings with those from the backup and applies them right away. The router first checks the whole backup and writes nothing if it is damaged, was made by a newer version, or its settings fail validation. If the backup contains passwords, the panel asks for the backup password; the Without passwords button restores settings only. A backup also works for another BE7000: install the package on it, sign in to the panel and restore.
+
 ## Uninstalling
 
 From the unpacked package directory that contains `install.sh`:
@@ -415,6 +423,16 @@ rm -rf /tmp/mi-lumruri /data/mi-lumruri
 The first command stops the services, removes the routing rules and removes the mi-lumruri file from the dnsmasq settings. If releases were stored on a USB drive, `install.sh uninstall` deletes them on its own. For a manual uninstall, also delete the directory you passed in `--store`.
 
 Without `--purge`, `/data/mi-lumruri` keeps the settings and the pinned signing key. A package with a different key then installs with the `--trust-key` flag.
+
+## After a Xiaomi firmware update
+
+A firmware update or a firewall settings reset can remove the autostart entry (`config include 'mitt'`). While the service runs, it checks this entry every 10 minutes and restores it on its own; Diagnostics shows this in the Autostart line. If the router rebooted after a firmware update and the service did not start, turn SSH on again (a firmware update usually turns it off) and run:
+
+```sh
+sh /data/mi-lumruri/mitt-boot.sh repair
+```
+
+The command registers autostart again and starts the service. A firmware update does not touch the settings in `/data/mi-lumruri`. The package is tested on firmware 1.1.38; on another one Diagnostics shows a warning in the Router firmware line.
 
 ## If you cannot log in
 

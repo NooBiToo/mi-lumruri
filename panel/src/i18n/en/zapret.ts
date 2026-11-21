@@ -80,6 +80,8 @@ export default {
   'Шифрованный DNS через VPN': 'Encrypted DNS via VPN',
   'Обход блокировок (Zapret)': 'DPI bypass (Zapret)',
   'Стабильность программ': 'Program stability',
+  'Автозапуск': 'Autostart',
+  'Прошивка роутера': 'Router firmware',
   'Сторож туннеля': 'Tunnel watchdog',
   'Одна проверка не прошла': 'One check failed',
   'Не прошли проверки: {n}': 'Checks failed: {n}',

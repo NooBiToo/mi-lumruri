@@ -237,7 +237,7 @@ export interface ZapretTestResponse { ok: boolean; test?: ZapretTestState; reque
 
 /** Обновление из релизов GitHub (mitt-update.sh); время — unix-секунды, ключи — отпечатки (16 знаков). */
 export interface UpdateState {
-  state: 'checking' | 'ready' | 'downloading' | 'installing' | 'restarting' | 'done' | 'error'
+  state: 'checking' | 'ready' | 'downloading' | 'installing' | 'restarting' | 'verifying' | 'done' | 'error'
   at: number
   installed: string
   latest: string
@@ -246,10 +246,20 @@ export interface UpdateState {
   page: string
   published: string
   error: string | null
+  /** Новая версия не заработала после перезапуска и возвращена прежняя (failed — версия, которая не заработала). */
+  rolled_back?: boolean
+  failed?: string
   /** Ключ пакета, если установщик отказал из-за другого ключа подписи. */
   package_key: string | null
   /** Отпечаток ключа релизов GitHub: только на него панель предлагает перейти. */
   official_key: string
+}
+/** Резервная копия настроек (controller/src/backup.rs): secrets — зашифрованная паролем копии часть. */
+export interface BackupFile { format: 'mi-lumruri-backup'; version: number; created: number; config: unknown; lists?: Record<string, string>; secrets?: unknown }
+export interface BackupExportResponse { ok: boolean; backup?: BackupFile; issues: Issue[]; error?: ApiError }
+export interface BackupRestoreResponse {
+  ok: boolean; revision?: string; restored?: { config: boolean; lists: number; secrets: boolean; auth: boolean }
+  secrets_skipped?: boolean; warnings?: string[]; issues: Issue[]; error?: ApiError
 }
 export interface UpdateResponse { ok: boolean; running?: boolean; update?: UpdateState | null; queued?: boolean; issues: Issue[]; error?: ApiError }
 
@@ -266,6 +276,9 @@ export const manage = {
   // секрет только записывается: панель не получает его обратно
   setSecret: (profile_id: string, secret: ProfileSecret) => call<ManageResponse>('/secrets', json({ profile_id, secret })),
   applyRequest: () => call<ManageResponse>('/apply-request', json({})),
+  exportBackup: (secrets: boolean, passphrase?: string) => call<BackupExportResponse>('/backup/export', json({ secrets, passphrase })),
+  restoreBackup: (base_revision: string, backup: BackupFile, passphrase?: string, skip_secrets = false) =>
+    call<BackupRestoreResponse>('/backup/restore', json({ base_revision, backup, passphrase, skip_secrets })),
   status: () => call<ManageResponse>('/status'),
 }
 

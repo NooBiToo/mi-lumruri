@@ -7,6 +7,8 @@ import { lang, t } from './i18n'
 /** Проверки службы (mitt-diag.sh) по порядку и их названия в панели (на текущем языке — функцией). */
 export const checkTitles = (): Record<string, string> => ({
   service: t('Служба роутера'),
+  autostart: t('Автозапуск'),
+  firmware: t('Прошивка роутера'),
   client: t('Клиент TrustTunnel'),
   exit: t('Выход в интернет через туннель'),
   route: t('Маршрут в туннель'),

@@ -3,6 +3,7 @@
 
 pub mod api;
 pub mod auth;
+pub mod backup;
 pub mod caps;
 pub mod dns;
 pub mod gate;

@@ -70,6 +70,7 @@ full_cycle() { # full_cycle <причина>
 # подбор Zapret, оборванный остановкой или перезагрузкой: прежние стратегии — до первого рендера (попытка при запуске
 # всегда; в цикле — не больше трёх)
 rm -f "$ZT_RETRY"; zt_recover
+autostart_heal; AS_LAST=$(date +%s)
 full_cycle start
 while [ -f "$STATE/service.wanted" ]; do
   sleep "$INTERVAL"
@@ -138,6 +139,9 @@ while [ -f "$STATE/service.wanted" ]; do
       admin_apply tun-ready && echo full >"$STATE/protection"
     fi
   fi
+  # автозапуск: запись в firewall могли снять (сброс, прошивка, штатный интерфейс) — раз в 10 минут
+  now=$(date +%s)
+  if [ $((now - ${AS_LAST:-0})) -ge "${MITT_AUTOSTART_CHECK:-600}" ] || [ "$now" -lt "${AS_LAST:-0}" ]; then AS_LAST=$now; autostart_heal; fi
   status_write
 done
 mlog "служба остановлена"

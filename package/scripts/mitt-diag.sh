@@ -19,6 +19,19 @@ trace() { curl -s --max-time 8 "$@" https://1.1.1.1/cdn-cgi/trace 2>/dev/null | 
 
 pid_alive service && ch service ok "работает" || ch service bad "не запущена: перезапустите службу"
 
+# автозапуск при загрузке роутера (firewall include) и прошивка
+if autostart_ok; then
+  h="$(cat "$STATE/autostart-healed" 2>/dev/null)"
+  if [ -n "$h" ] && [ $(( $(date +%s) - h )) -lt 86400 ]; then ch autostart warn "запись пропадала из настроек firewall и восстановлена $(( ($(date +%s) - h) / 60 )) мин назад"
+  else ch autostart ok "служба запустится после перезагрузки роутера"; fi
+else
+  ch autostart bad "записи автозапуска нет в настройках firewall: после перезагрузки служба не запустится. Служба восстановит её в течение 10 минут; вручную — sh /data/mi-lumruri/mitt-boot.sh repair"
+fi
+rom="$(rom_now)"; rc="$(cat "$ETC/rom.changed" 2>/dev/null)"
+if [ -n "$rc" ] && [ $(( $(date +%s) - ${rc##* } )) -lt 604800 ]; then rcs="${rc% *}"; ch firmware warn "прошивка обновлена: ${rcs% *} → ${rcs#* }. Пакет проверен на $ROM_TESTED"
+elif [ -n "$rom" ] && [ "$rom" != "$ROM_TESTED" ]; then ch firmware warn "прошивка $rom, пакет проверен на $ROM_TESTED"
+else ch firmware ok "${rom:-?}"; fi
+
 if [ -f "$RENDER/client.toml" ]; then
   if pid_alive trusttunnel; then
     st="$(grep -o 'VPN_SS_[A-Z_]*' "$LOG/trusttunnel.log" 2>/dev/null | tail -n 1)"

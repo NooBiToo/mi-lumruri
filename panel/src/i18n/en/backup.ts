@@ -1,0 +1,21 @@
+// Резервная копия настроек (components/BackupCard.vue)
+export default {
+  'Копия скачана': "Backup downloaded",
+  'Пароли в ней зашифрованы паролем копии': "Passwords in it are encrypted with the backup password",
+  'Это не копия настроек Mi Lumruri': "This is not a Mi Lumruri settings backup",
+  'Не восстановлено': "Not restored",
+  'Настройки восстановлены и применяются': "Settings restored and being applied",
+  'Резервная копия настроек': "Settings backup",
+  'Настройки, правила и свои списки — в один файл. Пригодится после сброса роутера или при переезде на другой BE7000': "Settings, rules and your own lists in one file. Useful after a router reset or when moving to another BE7000",
+  'С паролями серверов и входом в панель': "Include server passwords and panel login",
+  'Пароль копии': "Backup password",
+  'Не короче {n} символов. Без него пароли из копии не восстановить': "At least {n} characters. Without it the passwords in the backup cannot be restored",
+  'Скачать копию': "Download backup",
+  'Восстановить из файла…': "Restore from file…",
+  'Восстановить из «{f}» ({d})? Текущие настройки будут заменены': "Restore from \"{f}\" ({d})? Current settings will be replaced",
+  'В копии есть пароли серверов и вход в панель. Без пароля копии восстановятся только настройки': "The backup contains server passwords and the panel login. Without the backup password only settings are restored",
+  'Восстановить': "Restore",
+  'Без паролей': "Without passwords",
+  'Отмена': "Cancel",
+  'Не получилось': "Failed",
+}

@@ -39,6 +39,8 @@ sha2 = { version = "0.10", default-features = false }
 # Вход в панель: Argon2id (RustCrypto), TOTP RFC 6238 (totp-lite на RustCrypto hmac/sha1), случайность ОС
 argon2 = { version = "0.5", default-features = false, features = ["alloc", "password-hash"] }
 totp-lite = "2"
+# Резервная копия настроек: секреты шифруются паролем (ключ — Argon2id выше), AEAD ChaCha20-Poly1305 (RustCrypto)
+chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
 getrandom = "0.3"
 data-encoding = "2"
 subtle = { version = "2", default-features = false }

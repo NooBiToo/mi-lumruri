@@ -11,6 +11,7 @@ import { dnsIcon } from '../brand'
 import ServiceLogo from '../components/ServiceLogo.vue'
 import Segmented from '../components/Segmented.vue'
 import UpdateCard from '../components/UpdateCard.vue'
+import BackupCard from '../components/BackupCard.vue'
 import LangSwitch from '../components/LangSwitch.vue'
 import { dateTag, t } from '../i18n'
 
@@ -308,6 +309,8 @@ useAutosave({
       </div>
 
       <UpdateCard />
+
+      <BackupCard />
 
       <div class="setrow setrow--top">
         <span class="setrow__text">

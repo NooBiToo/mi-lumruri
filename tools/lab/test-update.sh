@@ -43,6 +43,7 @@ chmod +x "$ST/curl"
 mkpkg() { # mkpkg <каталог lt> <имя файла пакета>
   local d="$W/pkg.$$" n="${2%%-ci-*}"; rm -rf "$d"; mkdir -p "$d/$n"
   cat >"$d/$n/install.sh" <<'EOF'
+if [ "$1" = rollback ]; then cat "$LT/oldver" >"$MITT_ROOT/data/mi-lumruri/current.ver"; echo rollback >>"$LT/boot.log"; exit 0; fi
 echo "$*" >"$LT/install.args"; basename "$(dirname "$0")" >"$LT/install.dir"
 case "$(cat "$LT/install")" in
   foreign)
@@ -64,13 +65,26 @@ root() { # root <имя> <установленная версия>
   echo "$2" >"$d/data/mi-lumruri/current.ver"
   cp "$ROOT"/package/scripts/*.sh "$d/tmp/mi-lumruri/scripts/"
   printf '#!/bin/sh\nexec %s %s "$@"\n' "$Q" "$ADM" >"$d/tmp/mi-lumruri/bin/mi-tt-admin"; chmod +x "$d/tmp/mi-lumruri/bin/mi-tt-admin"
-  printf '#!/bin/sh\necho "$1" >>"%s/boot.log"\n' "$lt" >"$d/data/mi-lumruri/mitt-boot.sh"
+  # загрузчик-заглушка: пишет stop/start в boot.log; start — status.json по $lt/health (ok | nginx | apply)
+  cat >"$d/data/mi-lumruri/mitt-boot.sh" <<EOF
+#!/bin/sh
+echo "\$1" >>"$lt/boot.log"
+[ "\$1" = start ] || exit 0
+v="\$(cat "\$MITT_ROOT/data/mi-lumruri/current.ver")"; now="\$(date +%s)"
+eng='"service":true,"nginx":true,"uhttpd":true'; ap="{\"tag\":\"start\",\"exit\":0,\"at\":\$now,\"error\":null}"
+case "\$(cat "$lt/health" 2>/dev/null)" in
+  nginx) eng='"service":true,"nginx":false,"uhttpd":true';;
+  apply) ap="{\"tag\":\"start\",\"exit\":1,\"at\":\$now,\"error\":\"нет маршрута в туннель\"}";;
+esac
+printf '{"at":%s,"release":"%s","protection":"full","endpoint":"primary","engines":{%s},"last_apply":null,"render":null,"apply":%s}\n' "\$now" "\$v" "\$eng" "\$ap" >"\$MITT_ROOT/tmp/mi-lumruri/run/status.json"
+EOF
+  echo "$2" >"$lt/oldver"
   echo online >"$lt/scenario"; echo ok >"$lt/install"
 }
 upd() { # upd <имя> <json заявки>
   local d="$W/$1/root"
   printf '%s' "$2" >"$d/tmp/mi-lumruri/run/update.request.run"
-  timeout 300 env -i PATH="$SB" MITT_ROOT="$d" MITT_QUIET=1 MITT_CURL="$ST/curl" MITT_UPDATE_API=https://api.github.test/latest LT="$W/$1/lt" NEWVER="${NEWVER:-ci-0123456789ab}" \
+  timeout 300 env -i PATH="$SB" MITT_ROOT="$d" MITT_QUIET=1 MITT_CURL="$ST/curl" MITT_UPDATE_API=https://api.github.test/latest MITT_UPDATE_HEALTH_WAIT="${HW:-20}" LT="$W/$1/lt" NEWVER="${NEWVER:-ci-0123456789ab}" \
     "$Q" -L "$F" "$F/bin/busybox" ash "$d/tmp/mi-lumruri/scripts/mitt-update.sh" >>"$W/$1/out" 2>&1
   echo "[$1] $2: код $?"
 }
@@ -141,5 +155,34 @@ upd p '{"action":"install"}'
 waitdone p
 check p "done, установлена ci-0123456789ab" 's["state"]=="done" and s["installed"]=="ci-0123456789ab"'
 [ "$(cat "$W/p/lt/install.dir")" = mi-trusttunnel ] && ok "p: запущен mi-trusttunnel/install.sh" || bad "p: каталог пакета: $(cat "$W/p/lt/install.dir" 2>/dev/null)"
+
+# до обновления настройки применялись: status.json с apply.exit 0
+baseline() { printf '{"at":1,"release":"%s","protection":"full","engines":{"service":true},"apply":{"tag":"start","exit":0,"at":1,"error":null}}\n' "$2" >"$W/$1/root/tmp/mi-lumruri/run/status.json"; }
+inst_case() { # inst_case <имя> <health> [baseline]
+  root "$1" 0.5.0; latest "$W/$1/lt" v0.6.0 mi-lumruri-ci-0123456789ab.tar; mkpkg "$W/$1/lt" mi-lumruri-ci-0123456789ab.tar
+  echo "$2" >"$W/$1/lt/health"; [ -n "${3:-}" ] && baseline "$1" 0.5.0
+  upd "$1" '{"action":"install"}'; waitdone "$1"; local i=0
+  while [ $i -lt 60 ] && case "$(j "$1" 's["state"]')" in done|error) false;; *) true;; esac; do sleep 1; i=$((i + 1)); done
+}
+
+echo "(к) проверка после обновления: новая версия работает и применила настройки — done"
+inst_case q ok base
+check q "done, установлена ci-0123456789ab, без отката" 's["state"]=="done" and s["installed"]=="ci-0123456789ab" and s["rolled_back"] is False'
+[ "$(tr '\n' ' ' <"$W/q/lt/boot.log")" = "stop start " ] && ok "q: только stop, start" || bad "q: boot.log: $(cat "$W/q/lt/boot.log")"
+
+echo "(л) не работает панель (nginx) — откат на прежнюю версию"
+inst_case r nginx
+check r "error, rolled_back, failed = новая, installed = 0.5.0, причина nginx" 's["state"]=="error" and s["rolled_back"] is True and s["failed"]=="ci-0123456789ab" and s["installed"]=="0.5.0" and "nginx" in s["error"]'
+[ "$(cat "$W/r/root/data/mi-lumruri/current.ver")" = 0.5.0 ] && ok "r: current = 0.5.0" || bad "r: current $(cat "$W/r/root/data/mi-lumruri/current.ver")"
+grep -q rollback "$W/r/lt/boot.log" && ok "r: install.sh rollback выполнен" || bad "r: отката не было: $(cat "$W/r/lt/boot.log")"
+[ -z "$(ls -d "$W/r/root/tmp/mitt-update."* 2>/dev/null)" ] && ok "r: временный каталог удалён" || bad "r: остался временный каталог"
+
+echo "(м) до обновления настройки применялись, после — нет: откат с причиной"
+inst_case s apply base
+check s "error, rolled_back, причина из apply" 's["state"]=="error" and s["rolled_back"] is True and "настройки не применились" in s["error"] and "нет маршрута" in s["error"]'
+
+echo "(н) до обновления настройки не применялись — их сбой после обновления не повод для отката"
+inst_case u apply
+check u "done без отката" 's["state"]=="done" and s["rolled_back"] is False'
 
 [ $FAIL -eq 0 ] && echo "ИТОГ: ПРОЙДЕНО" || { echo "ИТОГ: ЕСТЬ ОШИБКИ"; exit 1; }

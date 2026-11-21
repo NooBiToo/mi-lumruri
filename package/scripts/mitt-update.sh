@@ -4,7 +4,9 @@
 #   {"action":"install","trust_official":true|false} — скачать пакет, сверить SHA-256 по SHA256SUMS релиза и поставить
 #   штатным install.sh (подпись проверяется закреплённым ключом). trust_official — разрешить смену ключа только на
 #   ключ релизов GitHub (отпечаток ниже), например после локальных сборок.
-# Итог — $STATE/update.json. После установки служба перезапускается отдельным процессом (stop останавливает и этот сценарий).
+# Итог — $STATE/update.json. После установки служба перезапускается отдельным процессом (stop останавливает и этот сценарий),
+# затем до MITT_UPDATE_HEALTH_WAIT секунд (5 минут) проверяется, что новая версия работает: служба, панель и — если до
+# обновления настройки применялись — применение без ошибок. Не заработала — откат на прежний релиз (install.sh rollback).
 D="$(cd "$(dirname "$0")" && pwd)"
 . "$D/mitt-lib.sh"
 API="${MITT_UPDATE_API:-https://api.github.com/repos/NooBiToo/mi-lumruri/releases/latest}"
@@ -17,17 +19,38 @@ action="$(echo "$req" | sed -n 's/.*"action": *"\([a-z]*\)".*/\1/p')"
 trust=""; echo "$req" | grep -q '"trust_official": *true' && trust=1
 W="$R/tmp/mitt-update.$$"
 installed="$(cat "$DATA/current.ver" 2>/dev/null)"
-tag=""; asset=""; sums=""; page=""; published=""; newer=false; avail=""
+tag=""; asset=""; sums=""; page=""; published=""; newer=false; avail=""; rolled=false; failed_ver=""
+HEALTH_WAIT="${MITT_UPDATE_HEALTH_WAIT:-300}"
 
 js() { printf '%s' "$1" | tr -d '"\\' | tr '\n\r\t' '   '; }
 put() { # put <состояние> [ошибка] [ключ_пакета]: итог для панели
-  printf '{"state":"%s","at":%s,"installed":"%s","latest":"%s","available":"%s","newer":%s,"page":"%s","published":"%s","error":%s,"package_key":%s,"official_key":"%s"}\n' \
+  printf '{"state":"%s","at":%s,"installed":"%s","latest":"%s","available":"%s","newer":%s,"page":"%s","published":"%s","error":%s,"package_key":%s,"official_key":"%s","rolled_back":%s,"failed":"%s"}\n' \
     "$1" "$(date +%s)" "$(js "$installed")" "$(js "$tag")" "$(js "$avail")" "$newer" "$(js "$page")" "$(js "$published")" \
-    "$([ -n "${2:-}" ] && printf '"%s"' "$(js "$2")" || echo null)" "$([ -n "${3:-}" ] && printf '"%s"' "$(js "$3")" || echo null)" "$OFFICIAL_FP" \
+    "$([ -n "${2:-}" ] && printf '"%s"' "$(js "$2")" || echo null)" "$([ -n "${3:-}" ] && printf '"%s"' "$(js "$3")" || echo null)" "$OFFICIAL_FP" "$rolled" "$(js "$failed_ver")" \
     >"$OUT.t" && mv -f "$OUT.t" "$OUT"
 }
 done_() { rm -rf "$W" "$STATE/update.request.run"; exit "${1:-0}"; }
 fail() { mlog "обновление: $1"; put error "$1" "${2:-}"; done_ 1; }
+
+# состояние службы из status.json (одна строка): поле apply — последнее полное применение
+st_apply() { sed -n 's/.*"apply":{"tag":"[^"]*","exit":\([0-9]*\),"at":\([0-9]*\).*/\1 \2/p' "$STATE/status.json" 2>/dev/null; }
+st_field() { sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p" "$STATE/status.json" 2>/dev/null; }
+st_at() { sed -n 's/^{"at":\([0-9]*\),.*/\1/p' "$STATE/status.json" 2>/dev/null; }
+# health <t0> <нужно применение>: новая версия работает? Причина отказа — в WHY
+health() {
+  local a ex at e
+  WHY="служба не запустилась"
+  at="$(st_at)"; [ -n "$at" ] && [ "$at" -ge "$1" ] || return 1
+  WHY="запущена не новая версия"; [ "$(st_field release)" = "$installed" ] || return 1
+  for e in service nginx uhttpd; do
+    grep -q "\"$e\":true" "$STATE/status.json" 2>/dev/null || { WHY="не работает $e"; return 1; }
+  done
+  [ "$2" = 1 ] || return 0
+  a="$(st_apply)"; ex="${a% *}"; at="${a#* }"
+  WHY="настройки ещё не применены"; [ -n "$a" ] && [ "$at" -ge "$1" ] || return 1
+  [ "$ex" = 0 ] || { WHY="настройки не применились: $(sed -n 's/.*"apply":{[^}]*"error":"\([^"]*\)".*/\1/p' "$STATE/status.json")"; return 1; }
+  return 0
+}
 
 # версия: 0.4.1 → 000000000004000001 (для сравнения строкой); «ci-…» и прочее — пусто
 vkey() { echo "$1" | sed -n 's/^v\{0,1\}\([0-9][0-9]*\)\.\([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2 \3/p' | awk '{printf "%06d%06d%06d", $1, $2, $3}'; }
@@ -79,13 +102,29 @@ case "$action" in
       [ -n "$pk" ] && fail "пакет подписан другим ключом, чем установленный" "$pk"
       fail "установщик отказал: $(grep 'ОТКАЗ' "$LOG/update-install.log" | tail -n 1 | sed 's/^mi-[a-z]*: ОТКАЗ: //')"
     fi
-    installed="$(cat "$DATA/current.ver" 2>/dev/null)"
+    prev="$installed"; installed="$(cat "$DATA/current.ver" 2>/dev/null)"
+    # до перезапуска: применялись ли настройки без ошибок (тогда и новая версия обязана их применить)
+    need=0; [ "$(st_apply | cut -d' ' -f1)" = 0 ] && need=1
     put restarting
     mlog "обновление: установлен $installed, перезапуск службы"
-    rm -rf "$W" "$STATE/update.request.run"
-    # отдельный процесс: stop останавливает службу и этот сценарий; после start панель увидит новую версию
-    ( sleep 2; sh "$DATA/mitt-boot.sh" stop; sh "$DATA/mitt-boot.sh" start; installed="$(cat "$DATA/current.ver" 2>/dev/null)"; put done ) \
-      </dev/null >>"$LOG/update-install.log" 2>&1 &
+    rm -f "$STATE/update.request.run"
+    # отдельный процесс: stop останавливает службу и этот сценарий; после start панель увидит новую версию.
+    # Распакованный пакет ($pd) нужен до конца проверки: его install.sh выполняет откат.
+    ( sleep 2; t0="$(date +%s)"; sh "$DATA/mitt-boot.sh" stop; sh "$DATA/mitt-boot.sh" start
+      installed="$(cat "$DATA/current.ver" 2>/dev/null)"; put verifying
+      n=0; ok=""
+      while [ "$n" -lt "$HEALTH_WAIT" ]; do health "$t0" "$need" && { ok=1; break; }; sleep 5; n=$((n + 5)); done
+      if [ -n "$ok" ]; then put done; mlog "обновление: $installed работает"
+      else
+        failed_ver="$installed"; why="$WHY"
+        mlog "обновление: $installed не заработал за $HEALTH_WAIT с ($why) — откат на $prev"
+        if [ -n "$prev" ] && sh "$pd/install.sh" rollback >>"$LOG/update-install.log" 2>&1; then
+          rolled=true; installed="$(cat "$DATA/current.ver" 2>/dev/null)"; put error "$why"
+        else
+          put error "$why; откат не удался — подробности в журнале обновления"
+        fi
+      fi
+      rm -rf "$W" ) </dev/null >>"$LOG/update-install.log" 2>&1 &
     exit 0;;
   *) fail "неизвестное действие «$action»";;
 esac
