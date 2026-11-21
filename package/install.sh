@@ -90,7 +90,11 @@ verify_and_try() { # подпись и хэши; пробный запуск в�
   local st="$R/tmp/mi-trusttunnel.check.$$" f pinned=""
   rm -rf "$st"; mkdir -p "$st"
   mkdir -p "$st/pre"
-  unxz -c "$PKG/payload/bin/mi-tt-admin.xz" >"$st/pre/mi-tt-admin" && chmod 700 "$st/pre/mi-tt-admin" || fail "распаковка mi-tt-admin"
+  if [ -f "$PKG/payload/bin/mi-tt.xz" ]; then
+    unxz -c "$PKG/payload/bin/mi-tt.xz" >"$st/pre/mi-tt" && chmod 700 "$st/pre/mi-tt" && ln -s mi-tt "$st/pre/mi-tt-admin" || fail "распаковка mi-tt"
+  else
+    unxz -c "$PKG/payload/bin/mi-tt-admin.xz" >"$st/pre/mi-tt-admin" && chmod 700 "$st/pre/mi-tt-admin" || fail "распаковка mi-tt-admin"
+  fi
   lab_override "$st/pre"
   cp "$st/pre/mi-tt-admin" "$st/mi-tt-admin.run"; [ -f "$st/pre/mi-tt-admin.arm64" ] && cp "$st/pre/mi-tt-admin.arm64" "$st/mi-tt-admin.run.arm64"
   [ -f "$DATA/keys/release.pub" ] && pinned="--pinned $DATA/keys/release.pub"

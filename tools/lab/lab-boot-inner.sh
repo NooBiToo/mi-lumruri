@@ -155,7 +155,7 @@ for c in tv:10.10.1.2 phone:10.10.1.3; do nsx "${c%%:*}" ping -c1 -W1 10.10.1.1 
 ip -n router -4 neigh show | awk '{for(i=2;i<NF;i++) if($i=="lladdr") print 1999999999, $(i+1), $1, "lab", "*"}' >"$RR/tmp/dhcp.leases"
 # вход в панель: пароль и TOTP (секреты — только в этом прогоне)
 PW="$("${PY[@]}" -c 'import secrets;print(secrets.token_urlsafe(18))')"
-ADM="$W/admin.arm64"; "$Q" -L "$F" "$F/bin/busybox" unxz -c "$PKG/payload/bin/mi-tt-admin.xz" >"$ADM"; chmod +x "$ADM"
+ADM="$W/admin.arm64"; "$Q" -L "$F" "$F/bin/busybox" unxz -c "$PKG/payload/bin/mi-tt.xz" >"$ADM"; chmod +x "$ADM"
 printf '%s\n%s\n' "$PW" "$PW" | env -i MI_TT_AUTH_DIR="$E/auth" MI_TT_SESSION_DIR="$RR/tmp/mi-trusttunnel/sessions" "$Q" "$ADM" auth init --stdin --with-totp >"$W/auth.json" || die "auth init"
 export TOTP_SECRET; TOTP_SECRET="$("${PY[@]}" -c 'import json,sys;print(json.load(open(sys.argv[1]))["totp_secret_base32"])' "$W/auth.json")"
 totp() { "${PY[@]}" -c 'import base64,hashlib,hmac,os,struct,sys,time
@@ -289,6 +289,8 @@ post lists/update '{}' >"$OUT/panel-lists-update.out"
 for i in $(seq 300); do c="$(sed -n 's/.*"checked":\([0-9]*\).*/\1/p' "$RN/lists.json" 2>/dev/null)"; [ "${c:-0}" -ge "$LT" ] && break; sleep 1; done
 cp "$RN/lists.json" "$OUT/lists.update.json" 2>/dev/null
 for i in $(seq 60); do [ "$(at_of)" -gt "${A0:-0}" ] 2>/dev/null && grep -q '"panel-request' "$RN/last-apply.json" && break; sleep 1; done
+# файл dnsmasq служба обновляет сразу после применения (dns_sync идёт после apply) — дождаться его
+for i in $(seq 30); do grep -q 'lab-new.lab.test' "$RR/tmp/dnsmasq.d/mitt.conf" 2>/dev/null && break; sleep 1; done
 cp "$RN/last-apply.json" "$OUT/last-apply.lists.json"; cp "$RR/tmp/dnsmasq.d/mitt.conf" "$OUT/dnsmasq-mitt.lists.conf" 2>/dev/null
 cp "$E/categories/svc-cloudflare.list" "$OUT/svc-cloudflare.after.list" 2>/dev/null
 # после применения служба перезапускает dnsmasq (новый файл): вопрос — когда он снова отвечает

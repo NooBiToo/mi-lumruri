@@ -34,7 +34,7 @@ tools/cargo.sh build --release --locked --target aarch64-unknown-linux-musl
 node tools/package.mjs
 ```
 
-`cargo build` собирает три программы: `mi-tt-ctl`, `mi-tt-admin` и `mi-tt-dns`. Клиент TrustTunnel для ARM64 (v1.3.0, архив закреплён по SHA-256) `tools/package.mjs` скачивает сам в `.tools/lab/dl`. По умолчанию пакет получает версию 0.3.3, другую задаёт `--version`, другой ключ — `--key`. В `out/package/` появляются `mi-trusttunnel-<версия>.tar`, `SHA256SUMS` и отчёт `report-<версия>.json` с размерами файлов и SHA-256. Сборка воспроизводима: XZ и tar без времени и владельцев, подпись Ed25519 детерминирована. На роутер переносится **TAR**. [Инструкция для роутера](guide.md)
+`cargo build` собирает программы `mi-tt-ctl`, `mi-tt-admin` и `mi-tt-dns` для разработки и тестов, а для пакета — `mi-tt`: те же три программы в одной, выбор по имени ссылки. Клиент TrustTunnel для ARM64 (v1.3.0, архив закреплён по SHA-256) `tools/package.mjs` скачивает сам в `.tools/lab/dl`. По умолчанию пакет получает версию 0.3.3, другую задаёт `--version`, другой ключ — `--key`. В `out/package/` появляются `mi-trusttunnel-<версия>.tar`, `SHA256SUMS` и отчёт `report-<версия>.json` с размерами файлов и SHA-256. Сборка воспроизводима: XZ и tar без времени и владельцев, подпись Ed25519 детерминирована. На роутер переносится **TAR**. [Инструкция для роутера](guide.md)
 
 ## Тесты
 

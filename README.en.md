@@ -6,7 +6,7 @@ Selective VPN and DPI bypass for the Xiaomi BE7000 on stock firmware. Paste a li
 
 ![Panel overview: VPN is up; route map from devices through the router — services via VPN, services with DPI bypass, all other sites](docs/img/overview.png)
 
-**Router:** Xiaomi BE7000 (RC06), firmware 1.1.38. No reflashing: the package is installed over SSH into internal storage (about 5 MB) and runs on the stock iptables, ipset and dnsmasq.
+**Router:** Xiaomi BE7000 (RC06), firmware 1.1.38. No reflashing: the package is installed over SSH into internal storage (about 4.5 MB) and runs on the stock iptables, ipset and dnsmasq.
 
 The panel is in Russian; the guide names each Russian label. **[Install and set up](docs/guide.en.md)** · [Update or roll back](docs/guide.en.md#updating-and-rollback) · [Limitations](docs/guide.en.md#limitations) · [Uninstall](docs/guide.en.md#uninstalling) · [Build the package](docs/build.md) (in Russian)
 

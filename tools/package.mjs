@@ -51,9 +51,8 @@ function plain(src, rel) {
   files.push({ path: rel, sha256: sha(b), size: b.length, unpacked: null, unpacked_sha256: null, unpacked_size: null })
 }
 const T = join(ROOT, 'controller', 'target', 'aarch64-unknown-linux-musl', 'release')
-xz(join(T, 'mi-tt-ctl'), 'payload/bin/mi-tt-ctl.xz', 'mi-tt-ctl')
-xz(join(T, 'mi-tt-admin'), 'payload/bin/mi-tt-admin.xz', 'mi-tt-admin')
-xz(join(T, 'mi-tt-dns'), 'payload/bin/mi-tt-dns.xz', 'mi-tt-dns')
+// одна программа mi-tt вместо mi-tt-ctl, mi-tt-admin и mi-tt-dns (ссылки создаёт распаковка на роутере, mitt-lib.sh)
+xz(join(T, 'mi-tt'), 'payload/bin/mi-tt.xz', 'mi-tt')
 xz(TT_BIN, 'payload/engines/trusttunnel_client.xz', 'trusttunnel_client')
 xz(join(ZAP, 'binaries', 'linux-arm64', 'nfqws2'), 'payload/engines/nfqws2.xz', 'nfqws2')
 for (const l of ['zapret-lib.lua.gz', 'zapret-antidpi.lua.gz', 'zapret-auto.lua.gz']) plain(join(ZAP, 'lua', l), `payload/engines/${l}`)

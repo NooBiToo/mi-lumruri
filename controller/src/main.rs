@@ -28,7 +28,7 @@ const USAGE: &str = "mi-tt-ctl — чтение, проверка и предп�
 
 Код выхода: 0 — проверка пройдена, 1 — найдены ошибки, 2 — ошибка запуска или чтения.";
 
-fn main() -> ExitCode {
+pub fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let a: Vec<&str> = args.iter().map(String::as_str).collect();
     match a.as_slice() {

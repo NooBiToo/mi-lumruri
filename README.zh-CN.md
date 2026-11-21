@@ -6,7 +6,7 @@
 
 ![面板概览：VPN 已连接；从设备经路由器出去的路由图——走 VPN 的服务、绕过封锁的服务、其他网站](docs/img/overview.png)
 
-**路由器：** 小米 BE7000（RC06），固件 1.1.38。无需刷机：软件包通过 SSH 安装到内部存储（约 5 MB），使用原厂的 iptables、ipset 和 dnsmasq 运行。
+**路由器：** 小米 BE7000（RC06），固件 1.1.38。无需刷机：软件包通过 SSH 安装到内部存储（约 4.5 MB），使用原厂的 iptables、ipset 和 dnsmasq 运行。
 
 面板为俄语界面，指南中给出了每个俄语标签。**[安装与设置](docs/guide.zh-CN.md)** · [更新或回滚](docs/guide.zh-CN.md#更新与回滚) · [限制](docs/guide.zh-CN.md#限制) · [卸载](docs/guide.zh-CN.md#卸载) · [构建软件包](docs/build.md)（俄语）
 

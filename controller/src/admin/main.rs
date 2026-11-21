@@ -663,7 +663,7 @@ fn release_cmd(args: &[String]) -> ExitCode {
         "unpacked_bytes": unpacked_bytes }))
 }
 
-fn main() -> ExitCode {
+pub fn main() -> ExitCode {
     for v in ["GATEWAY_INTERFACE", "REQUEST_METHOD", "SERVER_SOFTWARE", "HTTP_HOST"] {
         if std::env::var_os(v).is_some() {
             return fail(77, "cgi_forbidden", "mi-tt-admin не запускается из CGI");
