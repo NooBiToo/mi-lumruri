@@ -41,6 +41,26 @@ jobs:
           npm test
           npm run build
 
+      # сквозные тесты панели: собранная панель на стенде (HTTPS → CGI → контроллер из cargo test), вход паролем и
+      # одноразовым кодом, настройки, языки, резервная копия; Chromium Playwright
+      - name: Panel end-to-end
+        working-directory: panel
+        env:
+          MITT_BIN_DIR: ${{ github.workspace }}/controller/target/debug
+        run: |
+          npx playwright install --with-deps chromium
+          npx playwright test
+
+      - name: Panel end-to-end report
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-report
+          path: |
+            out/e2e-report
+            out/e2e-results
+          if-no-files-found: ignore
+
       # trusttunnel_client (aarch64, закреплён по SHA-256) скачивает сам tools/package.mjs
       - name: Fetch Zapret
         run: tools/lab/fetch-zapret.sh
