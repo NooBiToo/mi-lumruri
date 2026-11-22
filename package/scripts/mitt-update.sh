@@ -117,19 +117,19 @@ case "$action" in
     mlog "обновление: установлен $installed, перезапуск службы"
     rm -f "$STATE/update.request.run"
     # отдельный процесс: stop останавливает службу и этот сценарий; после start панель увидит новую версию.
-    # Распакованный пакет ($pd) нужен до конца проверки: его install.sh выполняет откат.
+    # Распакованный пакет ($pd) нужен до конца проверки: его install.sh выполняет откат; удаляется до записи итога.
     ( sleep 2; t0="$(date +%s)"; sh "$DATA/mitt-boot.sh" stop; sh "$DATA/mitt-boot.sh" start
       installed="$(cat "$DATA/current.ver" 2>/dev/null)"; put verifying
       n=0; ok=""
       while [ "$n" -lt "$HEALTH_WAIT" ]; do health "$t0" "$need" && { ok=1; break; }; sleep 5; n=$((n + 5)); done
-      if [ -n "$ok" ]; then put done; mlog "обновление: $installed работает"; notify update update_done "$installed"
+      if [ -n "$ok" ]; then rm -rf "$W"; put done; mlog "обновление: $installed работает"; notify update update_done "$installed"
       else
         failed_ver="$installed"; why="$WHY"
         mlog "обновление: $installed не заработал за $HEALTH_WAIT с ($why) — откат на $prev"
         if [ -n "$prev" ] && sh "$pd/install.sh" rollback >>"$LOG/update-install.log" 2>&1; then
-          rolled=true; installed="$(cat "$DATA/current.ver" 2>/dev/null)"; put error "$why"; notify update update_rolled "$failed_ver → $installed ($why)"
+          rolled=true; installed="$(cat "$DATA/current.ver" 2>/dev/null)"; rm -rf "$W"; put error "$why"; notify update update_rolled "$failed_ver → $installed ($why)"
         else
-          put error "$why; откат не удался — подробности в журнале обновления"
+          rm -rf "$W"; put error "$why; откат не удался — подробности в журнале обновления"
         fi
       fi
       rm -rf "$W" ) </dev/null >>"$LOG/update-install.log" 2>&1 &
