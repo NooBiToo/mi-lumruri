@@ -51,6 +51,21 @@ fail() {
 }
 fault() { lab && [ "${MITT_LAB_FAIL_AT:-}" = "$1" ] && { say "лаборатория: прерывание на шаге $1"; kill -9 $$; }; return 0; }
 
+# copy_tree <из> <в> <соседний релиз|"">: копия каталога; файл, совпадающий байт в байт с тем же файлом соседнего релиза
+# (обычно клиент TrustTunnel и nfqws2 между версиями не меняются), — жёсткая ссылка на него: место в хранилище
+# занимает один раз. Ссылка не создаётся (FAT на USB и т. п.) — обычная копия. Удаление релиза снимает только его ссылку.
+LINKED=0
+copy_tree() {
+  local s="$1" d="$2" n="$3" e b
+  mkdir -p "$d" || return 1
+  for e in "$s"/* "$s"/.[!.]*; do
+    [ -e "$e" ] || continue
+    b="${e##*/}"
+    if [ -d "$e" ]; then copy_tree "$e" "$d/$b" "${n:+$n/$b}" || return 1
+    elif [ -n "$n" ] && [ -f "$n/$b" ] && cmp -s "$e" "$n/$b" && ln "$n/$b" "$d/$b" 2>/dev/null; then LINKED=$((LINKED + $(wc -c <"$e")))
+    else cp "$e" "$d/$b" || return 1; fi
+  done
+}
 jget() { sed -n "s/.*\"$1\": *\"\{0,1\}\([^\",}]*\)\"\{0,1\}.*/\1/p" "$PKG/manifest.json" | head -1; }
 avail_kb() { df -k "$1" 2>/dev/null | awk 'NR>1 {v=$4} END {print v+0}'; }
 fsdev() { df -k "$1" 2>/dev/null | awk 'NR>1 {v=$1} END {print v}'; }
@@ -214,7 +229,11 @@ install_release() {
     say "релиз $ver уже установлен"
   else
     rm -rf "$dst.tmp"; mkdir -p "$dst.tmp"
-    cp -r "$PKG/manifest.json" "$PKG/manifest.sig" "$PKG/payload" "$dst.tmp/" || fail "копирование в $STORE"
+    # соседний релиз для общих файлов — текущий в том же хранилище (при переносе хранилища — нет)
+    local near="" cur; cur="$(cat "$DATA/current.ver" 2>/dev/null)"
+    [ -n "$cur" ] && [ -z "$oldstore" ] && [ -d "$STORE/releases/$cur/payload" ] && near="$STORE/releases/$cur/payload"
+    cp "$PKG/manifest.json" "$PKG/manifest.sig" "$dst.tmp/" && copy_tree "$PKG/payload" "$dst.tmp/payload" "$near" || fail "копирование в $STORE"
+    [ "$LINKED" -gt 0 ] && say "общие с релизом $cur файлы не копируются повторно: $((LINKED / 1024)) КиБ"
     fault copy
     sync
     rm -rf "$dst"; mv "$dst.tmp" "$dst" || fail "переименование релиза"

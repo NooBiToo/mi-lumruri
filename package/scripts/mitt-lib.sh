@@ -209,8 +209,9 @@ tunnel_tick() {
     case "$a" in
       restart) pid_stop trusttunnel;;
       log) mlog "$rest";;
-      # shellcheck disable=SC2086
-      notify) notify $rest;;
+      notify)
+        # shellcheck disable=SC2086
+        notify $rest;;
     esac
   done <"$STATE/tunnel.actions"
   rm -f "$STATE/tunnel.actions"

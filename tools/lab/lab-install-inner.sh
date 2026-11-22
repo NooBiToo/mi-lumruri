@@ -44,6 +44,10 @@ RR="$W/root"; newroot "$RR"
 inst I1-fresh "$PKGS/v1" install --no-start
 EXTRA="" inst I2-repeat "$PKGS/v1" install --no-start
 inst I3-update "$PKGS/v2" install --no-start
+# общие файлы релизов — жёсткие ссылки: число ссылок у клиента TrustTunnel в v1 и v2
+"$PY" -c 'import os,sys,json;r=sys.argv[1]+"/data/mi-lumruri/releases";f="payload/engines/trusttunnel_client.xz"
+a,b=os.stat(r+"/"+sys.argv[2]+"/"+f),os.stat(r+"/"+sys.argv[3]+"/"+f)
+print(json.dumps({"same_inode":a.st_ino==b.st_ino,"nlink":a.st_nlink}))' "$RR" 0.1.0-stage12 0.1.1-stage12 >"$OUT/dedupe.json" 2>&1
 inst I4-tampered "$PKGS/v3-tampered" install --no-start
 inst I5-foreign-key "$PKGS/v4-foreign" install --no-start
 EXTRA="MITT_LAB_FAIL_AT=copy" inst I6-interrupted "$PKGS/v5" install --no-start

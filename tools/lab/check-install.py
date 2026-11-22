@@ -28,6 +28,9 @@ check("пробный запуск ARM64-программ пакета (mi-tt-ct
 check("повторная установка того же релиза: код 0, «уже установлен», current без изменений",
       st("I2-repeat")[:2] == (0, V1) and "уже установлен" in S.get("I2-repeat", {}).get("out", ""), st("I2-repeat"))
 check("обновление: current = v2, previous = v1", st("I3-update")[:3] == (0, V2, V1), st("I3-update"))
+DD = json.loads((OUT / "dedupe.json").read_text(encoding="utf-8")) if (OUT / "dedupe.json").exists() else {}
+check("общие файлы релизов не копируются дважды: клиент TrustTunnel в v1 и v2 — одна жёсткая ссылка (2 ссылки), установщик сообщил об этом",
+      DD.get("same_inode") and DD.get("nlink") == 2 and "не копируются повторно" in S.get("I3-update", {}).get("out", ""), [DD, S.get("I3-update", {}).get("out", "")[-200:]])
 check("подменённый файл (подпись манифеста верна, хэш файла нет): отказ, current = v2, релиз не скопирован",
       st("I4-tampered")[0] == 3 and st("I4-tampered")[1] == V2 and not any("0.1.4" in r for r in st("I4-tampered")[3]), S.get("I4-tampered", {}).get("out", "")[-200:])
 check("пакет, подписанный чужим ключом: отказ по закреплённому ключу, current = v2",
