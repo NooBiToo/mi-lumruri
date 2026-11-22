@@ -2,7 +2,7 @@
 
 [Русский](guide.md) · **English** · [简体中文](guide.zh-CN.md)
 
-This guide covers Mi Lumruri version 0.6.0. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
+This guide covers Mi Lumruri version 0.7.0. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
 
 You need a BE7000 (RC06) with firmware 1.1.38, working root access over SSH from the home network, the installation TAR, and the parameters of your TrustTunnel server. The stock release firmware usually ships with SSH turned off.
 
@@ -181,6 +181,12 @@ The **Backup server** card appears on the Server screen after you save the main 
 
 If the main server does not connect for 2 minutes, the router switches to the backup. While the backup is in use, the router checks every 5 minutes whether the main server responds. After two successful checks in a row, it returns to the main server. If the backup does not connect either, the router tries the main server again after 2 minutes, and so on in turn. On each switch the client restarts, and the connection drops for a few seconds. While the backup is in use, the card says "the backup is connected now". The Remove backup server button removes it together with its password.
 
+The **Connect to the server with lower latency** switch in the same card changes how the router returns. Every half hour it measures latency to both servers (the TCP connect time from the router) and moves to a noticeably faster one: 30% faster and at least 20 ms, two measurements in a row. The measurement then decides when to return to the primary, while a server failure still switches immediately.
+
+#### Speed and latency
+
+The **Speed and latency** card on the Server screen: the Measure button shows latency to the primary and backup servers and the download speed from the router itself, directly and through the VPN. A measurement downloads up to 50 MB (a file from speed.cloudflare.com) and takes about half a minute.
+
 #### If the connection to the server drops
 
 - **DNS does not respond at startup.** If the server is set by domain, the router remembers its IP address after a successful connection. On the next start, the client gets the domain and this address as a fallback. If DNS does not respond at that moment, the client connects by IP and does not exit with an error.
@@ -229,6 +235,8 @@ If the router could not apply the latest settings, the top shows "Settings not a
 
 At the bottom: when the site lists were updated and the **Configure** link to the Sites screen, where you manage them. See [Site lists](#site-lists).
 
+Below is the **Traffic** card for a day or a week: how much went through the router WAN port (all internet, including encrypted VPN traffic), how much of it was inside the tunnel, an hourly chart and the devices that use the most. Per-device accounting comes from the firmware's own trafficd service. The router takes readings every 5 minutes and keeps the last 7 days; the copy in `/data` is refreshed every hour, so a reboot loses at most an hour.
+
 ### Custom DNS records
 
 A separate menu page (on a phone, under More). Enter a domain and an IP address on the home network and click Add. The domain and all its subdomains will resolve to that address, for example for a server with Traefik. Records save automatically. For details, see [DNS](#dns).
@@ -264,6 +272,7 @@ Usually you do not need to change anything here. Changes save automatically. On 
 - **Interface language**: Русский, English or 简体中文. The choice is remembered in this browser.
 - **Update**: the installed version, and checking for and installing a new version from GitHub. See [Updating and rollback](#updating-and-rollback).
 - **Settings backup**: see [Settings backup](#settings-backup).
+- **Telegram notifications**: see [Telegram notifications](#telegram-notifications).
 - **Panel sign-in**: whether the second factor is on. It is turned on over SSH. See [Second factor (TOTP)](#second-factor-totp).
 
 ### Zapret
@@ -362,7 +371,7 @@ Under the simple screens runs the controller's rule model: source (device, netwo
 
 ## Updating and rollback
 
-**From the panel** (since version 0.4.0). Advanced has an Update block. The router does not look for new versions on its own: the Check button finds the latest release on GitHub. The router needs access to `api.github.com` and `github.com`. If a newer one exists, the Update to … button appears. The router downloads the package itself, compares its SHA-256 with the release's `SHA256SUMS` file, verifies the signature with the pinned key and restarts the service. The panel disappears for about half a minute, and settings are kept. After the restart the router checks for up to 5 minutes that the new version works: the service and the panel are running and, if settings applied without errors before the update, they apply now too. If not, it restores the previous version on its own, and the panel shows "Version … did not start working, so … was restored" with the reason. Automatic rollback works for updates from the panel starting with version 0.6.0 (the check is run by the version already installed). If the router runs your own build signed with your key, the panel offers Switch to GitHub releases and update. The router then accepts the package with the GitHub release key (`e4a271890e5643ab`) and pins it. The panel does not accept other keys.
+**From the panel** (since version 0.4.0). Advanced has an Update block. The router does not look for new versions on its own: the Check button finds the latest release on GitHub. The router needs access to `api.github.com` and `github.com`. If a newer one exists, the Update to … button appears. The router downloads the package itself, compares its SHA-256 with the release's `SHA256SUMS` file, verifies the signature with the pinned key and restarts the service. The panel disappears for about half a minute, and settings are kept. After the restart the router checks for up to 5 minutes that the new version works: the service and the panel are running and, if settings applied without errors before the update, they apply now too. If not, it restores the previous version on its own, and the panel shows "Version … did not start working, so … was restored" with the reason. Automatic rollback works for updates from the panel starting with version 0.6.0 (the check is run by the version already installed). Starting with 0.7.0 the router checks for a new version on its own once a day (or once a week, or only manually; the choice is in the same block). It only checks: if there is a newer version, a mark appears next to Advanced, and with notifications on you get a Telegram message. You install it with the button. If the router runs your own build signed with your key, the panel offers Switch to GitHub releases and update. The router then accepts the package with the GitHub release key (`e4a271890e5643ab`) and pins it. The panel does not accept other keys.
 
 **From a computer.** To update, repeat the quick install, or copy the new TAR and repeat step 2 up to the login setup. Existing settings and the second factor are kept. Releases are stored in `/data/mi-lumruri/releases` (or in the `--store` directory): the current and the previous one. Older ones are deleted. A new release needs about 4.5 MB plus a 2 MiB reserve. If that much is not available, the installer deletes old releases, and with very little room it installs the update without keeping the previous release. Rollback is then unavailable. See [If there is not enough space in `/data`](#if-there-is-not-enough-space-in-data).
 
@@ -395,6 +404,20 @@ sh install.sh rollback
 ```
 
 Rollback is available after you install a second version, if the installer kept the previous release. Without it, the command answers "no previous release to roll back to" («нет предыдущего релиза для отката»). To see the current and previous release, run `sh install.sh status`.
+
+## Telegram notifications
+
+In Advanced → **Telegram notifications**, the router messages you in Telegram when:
+
+- the tunnel went down (the client has not been connected for more than 3 minutes) and when it is back up, and when the watchdog restarted the client;
+- the router switched to the backup server or returned to the primary;
+- a new package version came out, an update was installed or rolled back;
+- the TrustTunnel subscription failed to update or changed the server settings;
+- the router started (off by default).
+
+Setup: in Telegram, open @BotFather, send `/newbot` and copy the bot token. Send your bot any message, otherwise it cannot write to you. Get your numeric id from @userinfobot (for a group, add the bot to it; a group id starts with a minus). Paste the token and id into the panel, choose the events and press Send a test.
+
+Messages go through the VPN while the tunnel works, otherwise directly. If Telegram is unreachable, a message waits in a queue and is sent later (for up to a day), so "tunnel is down" arrives as soon as there is a connection. The token is stored only on the router (`secrets.json`), and the panel does not show it. Messages are written in the panel language at the time you save.
 
 ## Settings backup
 
