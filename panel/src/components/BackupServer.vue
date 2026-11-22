@@ -86,6 +86,20 @@ async function remove() {
   open.value = false
   await loadSecrets()
 }
+
+const fastBusy = ref(false)
+async function setFastest(on: boolean) {
+  const c = config.value
+  const p = profile.value
+  if (!c || !p) return
+  fastBusy.value = true
+  try {
+    const next = { ...p, prefer_fastest: on || undefined }
+    await save({ ...c, profiles: [next, ...c.profiles.slice(1)] }, on ? t('Роутер будет выбирать сервер с меньшей задержкой') : t('Роутер будет возвращаться на основной сервер'))
+  } finally {
+    fastBusy.value = false
+  }
+}
 </script>
 
 <template>
@@ -102,6 +116,11 @@ async function remove() {
       <template v-if="active"> · <strong>{{ t('сейчас подключён запасной') }}</strong></template>
       <template v-else-if="!hasBackupPassword"> · {{ t('нет пароля — переключение не работает') }}</template>
     </p>
+    <label v-if="backup && !open" class="backup__fastest">
+      <ToggleSwitch :model-value="!!profile?.prefer_fastest" input-id="prefer-fastest" :disabled="fastBusy" @update:model-value="setFastest" />
+      <span>{{ t('Подключаться к серверу с меньшей задержкой') }}</span>
+    </label>
+    <p v-if="backup && !open && profile?.prefer_fastest" class="hint">{{ t('Роутер раз в полчаса замеряет задержку до обоих серверов и переходит на заметно более быстрый (на 30 % и не меньше чем на 20 мс, два замера подряд). Отказ сервера по-прежнему переключает сразу') }}</p>
     <form v-if="open" class="backup" @submit.prevent="submit">
       <div class="field">
         <label for="bk-paste" class="field__label">{{ t('Ссылка или конфигурация запасного сервера') }}</label>
@@ -156,6 +175,7 @@ async function remove() {
 
 <style scoped>
 .backup { display: flex; flex-direction: column; gap: 0.75rem; }
+.backup__fastest { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; }
 .backup__foot { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .backup__spacer { flex: 1; }
 </style>

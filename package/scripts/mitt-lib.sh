@@ -184,6 +184,40 @@ tunnel_watch() {
   printf '{"ok":false,"checked":%s,"fails":%s,"restarted":%s}\n' "$now" "$fails" "$now" >"$STATE/watch.json"
   pid_stop trusttunnel
 }
+# ping_ms <хост> <порт>: мс до установки TCP-соединения (с роутера, мимо туннеля) или пусто
+ping_ms() {
+  local h="$1" p="$2" u t
+  case "$h" in *:*) u="https://[$h]:$p/";; *) u="https://$h:$p/";; esac
+  t="$("${PING_CURL:-$WATCH_CURL}" -sk -o /dev/null --connect-timeout 5 --max-time 8 -w '%{time_connect}' "$u" 2>/dev/null)"
+  awk -v t="$t" 'BEGIN { if (t + 0 > 0) printf "%d", t * 1000 + 0.5 }'
+}
+# Выбор по задержке (рендер: файл fastest): раз в MITT_FASTEST_EVERY (30 мин) задержка до обоих серверов; другой
+# быстрее на 30 % и не меньше чем на 20 мс два замера подряд — переключение. Итог замера — $STATE/fastest.json.
+fastest_check() {
+  [ -f "$RENDER/fastest" ] && [ -f "$RENDER/servers.addr" ] || { rm -f "$STATE/fastest-ok" "$STATE/fastest.json"; return 0; }
+  local now next cur other pc po hp hb pp pb
+  now=$(date +%s); next="$(cat "$STATE/fastest-next" 2>/dev/null || echo 0)"; [ "$now" -ge "$next" ] || return 0
+  echo $((now + ${MITT_FASTEST_EVERY:-1800})) >"$STATE/fastest-next"
+  hp="$(sed -n 's/^primary //p' "$RENDER/servers.addr")"; hb="$(sed -n 's/^backup //p' "$RENDER/servers.addr")"
+  [ -n "$hp" ] && [ -n "$hb" ] || return 0
+  # shellcheck disable=SC2086
+  pp="$(ping_ms $hp)"; pb="$(ping_ms $hb)"
+  printf '{"at":%s,"primary":%s,"backup":%s}\n' "$now" "${pp:-null}" "${pb:-null}" >"$STATE/fastest.json"
+  cur="$(cat "$STATE/endpoint" 2>/dev/null)"; [ -n "$cur" ] || cur=primary
+  if [ "$cur" = primary ]; then other=backup; pc="$pp"; po="$pb"; else other=primary; pc="$pb"; po="$pp"; fi
+  [ -n "$po" ] || { echo 0 >"$STATE/fastest-ok"; return 0; }
+  # текущий не ответил на замер — тоже повод (переключение при отказе — failover_check)
+  if [ -z "$pc" ] || { [ $((po * 10)) -le $((pc * 7)) ] && [ $((pc - po)) -ge "${MITT_FASTEST_MARGIN:-20}" ]; }; then
+    local ok; ok=$(( $(cat "$STATE/fastest-ok" 2>/dev/null || echo 0) + 1 )); echo "$ok" >"$STATE/fastest-ok"
+    if [ "$ok" -ge 2 ]; then
+      echo "$other" >"$STATE/endpoint"; rm -f "$STATE/fastest-ok" "$STATE/tt-down-since" "$STATE/failback-ok"
+      mlog "сервер: $( [ "$other" = backup ] && echo запасной || echo основной) быстрее (${po} мс против ${pc:-нет ответа} мс) — переключение"
+      notify failover "failover_$other"; pid_stop trusttunnel
+    fi
+  else
+    echo 0 >"$STATE/fastest-ok"
+  fi
+}
 # Запасной сервер (client-backup.toml от рендера): какой файл отдать клиенту — $STATE/endpoint (primary|backup).
 tt_config() { [ "$(cat "$STATE/endpoint" 2>/dev/null)" = backup ] && [ -f "$RENDER/client-backup.toml" ] && echo "$RENDER/client-backup.toml" || echo "$RENDER/client.toml"; }
 # Основной сервер отвечает на TCP (проверка возврата с запасного): любой ответ или ошибка TLS — порт открыт;
@@ -215,6 +249,8 @@ failover_check() {
       pid_stop trusttunnel; return 0
     fi
   fi
+  # выбор по задержке: возврат на основной решает fastest_check
+  [ -f "$RENDER/fastest" ] && return 0
   [ "$cur" = backup ] && [ "$st" = VPN_SS_CONNECTED ] || return 0
   next="$(cat "$STATE/failback-next" 2>/dev/null || echo 0)"; [ "$now" -ge "$next" ] || return 0
   echo $((now + ${MITT_FAILBACK_EVERY:-300})) >"$STATE/failback-next"

@@ -44,7 +44,7 @@ chmod +x "$SB"/*
 
 case_() { # case_ <имя> <direct> <tunnel> <туннель up|down> <servers.addr>
   local d="$W/$1/root" lt="$W/$1/lt"; local L="$d/tmp/mi-lumruri"
-  mkdir -p "$d/data/mi-lumruri/etc" "$L/scripts" "$L/render" "$L/log" "$lt"
+  mkdir -p "$d/data/mi-lumruri/etc" "$L/scripts" "$L/render" "$L/run" "$L/log" "$lt"
   cp "$ROOT"/package/scripts/*.sh "$L/scripts/"
   echo "$2" >"$lt/direct"; echo "$3" >"$lt/tunnel"; echo "$4" >"$lt/tun"; printf '%b' "$5" >"$L/render/servers.addr"
   echo 0.0421 >"$lt/ping.vpn.example.com"; echo 0.120 >"$lt/ping.203.0.113.9"
@@ -70,5 +70,39 @@ chk b "ping primary null, backup null; tunnel — «туннель не подн
 echo "(в) сбой сети и ответ 503"
 case_ c fail http up ''
 chk c "direct: curl код 7; tunnel: HTTP 503" 's["direct"]=={"error":"curl код 7"} and s["tunnel"]=={"error":"HTTP 503"}'
+
+# выбор сервера по задержке (fastest_check в mitt-lib.sh)
+fast() { # fast <имя> <ping основного, с> <ping запасного, с> <сколько раз вызвать>
+  local d="$W/$1/root" lt="$W/$1/lt"; local L="$d/tmp/mi-lumruri"
+  mkdir -p "$d/data/mi-lumruri/etc" "$L/scripts" "$L/render" "$L/run" "$L/log" "$lt"
+  cp "$ROOT"/package/scripts/*.sh "$L/scripts/"
+  printf 'primary vpn.example.com 443\nbackup 203.0.113.9 8443\n' >"$L/render/servers.addr"; echo 1 >"$L/render/fastest"
+  echo "$2" >"$lt/ping.vpn.example.com"; echo "$3" >"$lt/ping.203.0.113.9"
+  local i=0 cmd=""; while [ $i -lt "$4" ]; do cmd="$cmd fastest_check;"; i=$((i + 1)); done
+  timeout 120 env -i PATH="$SB" MITT_ROOT="$d" MITT_QUIET=1 LT="$lt" MITT_FASTEST_EVERY=0 "$Q" -L "$F" "$F/bin/busybox" ash -c \
+    ". \"$L/scripts/mitt-lib.sh\"; $cmd" >>"$W/$1/out" 2>&1
+}
+ep() { cat "$W/$1/root/tmp/mi-lumruri/run/endpoint" 2>/dev/null || echo primary; }
+
+echo "(г) запасной заметно быстрее: после одного замера — ещё нет, после двух подряд — переключение и уведомление"
+fast g 0.120 0.040 1
+[ "$(ep g)" = primary ] && ok "g: один замер — без переключения" || bad "g: endpoint $(ep g)"
+fast g 0.120 0.040 1
+[ "$(ep g)" = backup ] && ok "g: два замера подряд — запасной" || bad "g: endpoint $(ep g)"
+grep -q 'failover_backup' "$W/g/root/tmp/mi-lumruri/run/notify.queue" && ok "g: уведомление о переключении" || bad "g: очереди нет"
+python3 -I -c 'import json,sys; s=json.load(open(sys.argv[1])); sys.exit(0 if s["primary"]==120 and s["backup"]==40 else 1)' "$W/g/root/tmp/mi-lumruri/run/fastest.json" \
+  && ok "g: итог замера в fastest.json" || bad "g: $(cat "$W/g/root/tmp/mi-lumruri/run/fastest.json")"
+
+echo "(д) разница меньше порога (50 против 40 мс) — остаётся на основном"
+fast h 0.050 0.040 3
+[ "$(ep h)" = primary ] && ok "h: без переключения" || bad "h: endpoint $(ep h)"
+
+echo "(е) на запасном, основной снова быстрее — возврат; без признака fastest — ничего не делает"
+fast k 0.030 0.200 0; echo backup >"$W/k/root/tmp/mi-lumruri/run/endpoint"; fast k 0.030 0.200 2
+[ "$(ep k)" = primary ] && ok "k: возврат на более быстрый основной" || bad "k: endpoint $(ep k)"
+fast m 0.200 0.030 0; rm -f "$W/m/root/tmp/mi-lumruri/render/fastest"
+timeout 60 env -i PATH="$SB" MITT_ROOT="$W/m/root" MITT_QUIET=1 LT="$W/m/lt" MITT_FASTEST_EVERY=0 "$Q" -L "$F" "$F/bin/busybox" ash -c \
+  ". \"$W/m/root/tmp/mi-lumruri/scripts/mitt-lib.sh\"; fastest_check; fastest_check" >>"$W/m/out" 2>&1
+[ "$(ep m)" = primary ] && [ ! -e "$W/m/root/tmp/mi-lumruri/run/fastest.json" ] && ok "m: выключено — замеров и переключений нет" || bad "m: endpoint $(ep m)"
 
 [ $FAIL -eq 0 ] && echo "ИТОГ: ПРОЙДЕНО" || { echo "ИТОГ: ЕСТЬ ОШИБКИ"; exit 1; }

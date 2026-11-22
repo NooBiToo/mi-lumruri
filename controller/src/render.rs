@@ -124,6 +124,9 @@ pub struct Rendered {
     /// Адреса серверов для замера задержки: строки «primary хост порт» и «backup хост порт» (служба, mitt-speed.sh).
     #[serde(skip)]
     pub servers_addr: Option<String>,
+    /// Выбор сервера по задержке (файл-признак `fastest` для службы); только если запасной задан.
+    #[serde(skip)]
+    pub fastest: bool,
     #[serde(skip)]
     pub dns: DnsPlan,
     pub warnings: Vec<String>,
@@ -510,6 +513,7 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
         Some(with_ipv6(client_toml(b, pw), ipv6))
     });
     let primary_addr = client_backup.as_ref().and(tunnel_profile).and_then(|p| p.endpoint.as_ref()).map(|e| format!("{} {}\n", e.server, e.port));
+    let fastest = client_backup.is_some() && tunnel_profile.is_some_and(|p| p.prefer_fastest);
     let servers_addr = tunnel_profile.map(|p| {
         let mut s = p.endpoint.as_ref().map(|e| format!("primary {} {}\n", e.server, e.port)).unwrap_or_default();
         if let Some(b) = &p.backup {
@@ -555,6 +559,7 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
         client_backup_toml: client_backup,
         primary_addr,
         servers_addr,
+        fastest,
         dns,
         warnings,
     })

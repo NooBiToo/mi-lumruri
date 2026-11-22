@@ -5,6 +5,7 @@
 D="$(cd "$(dirname "$0")" && pwd)"
 . "$D/mitt-lib.sh"
 CURL="${MITT_SPEED_CURL:-curl}"
+PING_CURL="$CURL"
 BYTES="${MITT_SPEED_BYTES:-25000000}"
 URL="${MITT_SPEED_URL:-https://speed.cloudflare.com/__down?bytes=$BYTES}"
 TIME="${MITT_SPEED_TIME:-12}"
@@ -16,13 +17,6 @@ num_or_null() { case "$1" in ''|*[!0-9.]*) echo null;; *) echo "$1";; esac; }
 put() { # put <state> <ping_primary> <ping_backup> <direct> <tunnel>
   printf '{"state":"%s","started":%s,"at":%s,"ping":{"primary":%s,"backup":%s},"direct":%s,"tunnel":%s}\n' \
     "$1" "$started" "$(date +%s)" "$2" "$3" "$4" "$5" >"$OUT.t" && mv -f "$OUT.t" "$OUT"
-}
-# ping <host> <port>: мс до установки TCP-соединения или пусто
-ping_ms() {
-  local h="$1" p="$2" u t
-  case "$h" in *:*) u="https://[$h]:$p/";; *) u="https://$h:$p/";; esac
-  t="$("$CURL" -sk -o /dev/null --connect-timeout 5 --max-time 8 -w '%{time_connect}' "$u" 2>/dev/null)"
-  awk -v t="$t" 'BEGIN { if (t + 0 > 0) printf "%d", t * 1000 + 0.5 }'
 }
 # speed <tunnel|direct>: {"mbps":…,"bytes":…} или {"error":"…"}
 speed() {

@@ -338,6 +338,10 @@ pub struct Profile {
     /// снова отвечает. Пароль — `backup_password` в secrets.json.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backup: Option<Endpoint>,
+    /// Выбирать из основного и запасного сервер с меньшей задержкой (служба замеряет раз в полчаса), а не
+    /// возвращаться на основной.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub prefer_fastest: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

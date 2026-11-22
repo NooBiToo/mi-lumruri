@@ -198,4 +198,8 @@ export default {
   'нет пароля — переключение не работает': 'no password — switching does not work',
   'Ссылка или конфигурация запасного сервера': 'Link or configuration of the backup server',
   'Удалить запасной сервер': 'Remove backup server',
+  "Подключаться к серверу с меньшей задержкой": "Connect to the server with lower latency",
+  "Роутер раз в полчаса замеряет задержку до обоих серверов и переходит на заметно более быстрый (на 30 % и не меньше чем на 20 мс, два замера подряд). Отказ сервера по-прежнему переключает сразу": "Every half hour the router measures latency to both servers and moves to a noticeably faster one (30% faster and at least 20 ms, two measurements in a row). A server failure still switches immediately",
+  "Роутер будет выбирать сервер с меньшей задержкой": "The router will pick the server with lower latency",
+  "Роутер будет возвращаться на основной сервер": "The router will return to the primary server",
 }

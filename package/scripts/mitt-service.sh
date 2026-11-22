@@ -139,6 +139,8 @@ while [ -f "$STATE/service.wanted" ]; do
   [ -f "$STATE/trusttunnel.wanted" ] && pid_alive trusttunnel && tunnel_watch
   # запасной сервер: переключение при долгом отсутствии связи и возврат, когда основной снова отвечает
   [ -f "$STATE/trusttunnel.wanted" ] && pid_alive trusttunnel && failover_check
+  # выбор сервера по задержке (если включён в панели)
+  [ -f "$STATE/trusttunnel.wanted" ] && pid_alive trusttunnel && fastest_check
   # полное применение не прошло (туннель не успел подняться) и действует только защита: повтор, когда mitt0 готов,
   # не чаще раза в минуту
   if [ "$(cat "$STATE/protection" 2>/dev/null)" = guard ] && [ -f "$STATE/trusttunnel.wanted" ] && tun_ready; then
