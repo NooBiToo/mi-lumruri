@@ -91,6 +91,17 @@ pub fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(m) => { eprintln!("{m}"); ExitCode::from(2) }
         },
+        // решения о клиенте TrustTunnel (сторож, запасной сервер, выбор по задержке) — см. tunnel.rs
+        ["tunnel", cmd @ ("due" | "step"), "--dir", dir, rest @ ..] => match mi_tt::tunnel::cli(cmd, dir, rest, auth::now()) {
+            Ok(t) => { print!("{t}"); ExitCode::SUCCESS }
+            Err(m) => { eprintln!("{m}"); ExitCode::from(2) }
+        },
+        // ожидание условия с шагом 200 мс (BusyBox стока не умеет дробный sleep): код 0 — дождались, 1 — нет
+        ["wait", ms, cond @ ..] => match ms.parse::<u64>().map_err(|e| e.to_string()).and_then(|ms| mi_tt::tunnel::wait(ms, cond)) {
+            Ok(true) => ExitCode::SUCCESS,
+            Ok(false) => ExitCode::from(1),
+            Err(m) => { eprintln!("{m}"); ExitCode::from(2) }
+        },
         ["notify-conf", secrets] => match read_limited(secrets, 256 * 1024).ok().and_then(|b| serde_json::from_slice::<render::Secrets>(&b).ok()).and_then(|s| mi_tt::notify::conf_lines(&s)) {
             Some(l) => { print!("{l}"); ExitCode::SUCCESS }
             None => ExitCode::from(1),

@@ -61,7 +61,7 @@ if [ -f "$RENDER/client.toml" ]; then
   r=$(ip rule 2>/dev/null | grep -c 'lookup 3100'); t=$(ip route show table 3100 2>/dev/null | grep -c 'dev mitt0')
   if [ "$r" -gt 0 ] && [ "$t" -gt 0 ]; then ch route ok "трафик сайтов из списка уходит в туннель"
   else ch route bad "нет правила или маршрута в туннель (правил: $r, маршрутов: $t)"; fi
-  # сторож туннеля (tunnel_watch): последняя проверка и перезапуски клиента за последний час
+  # сторож туннеля (tunnel_tick): последняя проверка и перезапуски клиента за последний час
   w="$(cat "$STATE/watch.json" 2>/dev/null)"
   if [ -n "$w" ]; then
     wc_="$(echo "$w" | sed -n 's/.*"checked":\([0-9]*\).*/\1/p')"; wr="$(echo "$w" | sed -n 's/.*"restarted":\([0-9]*\).*/\1/p')"

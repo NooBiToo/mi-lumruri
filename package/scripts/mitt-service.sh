@@ -10,7 +10,7 @@ INTERVAL="${MITT_INTERVAL:-5}"
 engines_stop() {
   for n in trusttunnel nfqws2 dnsproxy dnstunnel; do rm -f "$STATE/$n.wanted"; pid_stop "$n"; done
   # прежний TUN удаляется ядром не сразу: новый клиент и ожидание ниже не должны застать старый mitt0
-  local i=0; while [ $i -lt 50 ] && ip link show mitt0 >/dev/null 2>&1; do nap; i=$((i + 1)); done
+  ctl wait 10000 tun-gone mitt0
 }
 engines_start() {
   # защищённый DNS — первым: dnsmasq стока (а через него и клиент TrustTunnel, разрешающий имя сервера) уже
@@ -20,7 +20,7 @@ engines_start() {
     # аргументы по одному в строке, без пробелов (формирует рендер)
     # shellcheck disable=SC2046
     pid_alive dnsproxy || start_bg dnsproxy "$BIN/mi-tt-dns" $(cat "$RENDER/dns-proxy.args") --fallback "$(resolv_file)" --status "$STATE/dns-proxy.json"
-    local j=0; while [ $j -lt 10 ] && ! "$BIN/mi-tt-dns" --probe 127.0.0.1:5453 example.com >/dev/null 2>&1; do nap; j=$((j + 1)); done
+    ctl wait 2000 ok -- "$BIN/mi-tt-dns" --probe 127.0.0.1:5453 example.com
   fi
   # DoH/DoT для доменов туннеля: сокеты привязаны к mitt0 (до появления TUN вопросы не уходят); запасного пути нет
   if [ -f "$RENDER/dns-tunnel.args" ]; then
@@ -32,7 +32,7 @@ engines_start() {
     touch "$STATE/trusttunnel.wanted"
     pid_alive trusttunnel || start_bg trusttunnel ${MITT_TT_WRAP:-} "$BIN/trusttunnel_client" -c "$(tt_config)"
     # TUN должен быть поднят и с адресом до apply: маршрут таблицы 3100 ссылается на него
-    local i=0; while [ $i -lt 75 ] && ! tun_ready; do nap; i=$((i + 1)); done
+    ctl wait 15000 tun-up mitt0
   fi
   if [ -f "$RENDER/nfqws2.args" ]; then
     touch "$STATE/nfqws2.wanted"
@@ -135,12 +135,8 @@ while [ -f "$STATE/service.wanted" ]; do
   done
   # запасной IP сервера-домена для следующего запуска клиента (см. server_addr_learn)
   pid_alive trusttunnel && server_addr_learn
-  # сторож: «подключён», но трафик не идёт — перезапуск клиента (движок перезапустит цикл ниже на следующем проходе)
-  [ -f "$STATE/trusttunnel.wanted" ] && pid_alive trusttunnel && tunnel_watch
-  # запасной сервер: переключение при долгом отсутствии связи и возврат, когда основной снова отвечает
-  [ -f "$STATE/trusttunnel.wanted" ] && pid_alive trusttunnel && failover_check
-  # выбор сервера по задержке (если включён в панели)
-  [ -f "$STATE/trusttunnel.wanted" ] && pid_alive trusttunnel && fastest_check
+  # сторож, запасной сервер и выбор по задержке (решения — mi-tt-ctl tunnel; клиент перезапустит цикл выше)
+  [ -f "$STATE/trusttunnel.wanted" ] && pid_alive trusttunnel && tunnel_tick
   # полное применение не прошло (туннель не успел подняться) и действует только защита: повтор, когда mitt0 готов,
   # не чаще раза в минуту
   if [ "$(cat "$STATE/protection" 2>/dev/null)" = guard ] && [ -f "$STATE/trusttunnel.wanted" ] && tun_ready; then

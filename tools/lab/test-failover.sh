@@ -7,6 +7,8 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 "$ROOT/tools/fw/prepare.sh" >/dev/null
 F=/tmp/mitt-fw/rootfs; Q="$ROOT/.tools/qemu/root/usr/bin/qemu-aarch64"
+CTL="$ROOT/controller/target/aarch64-unknown-linux-musl/release/mi-tt-ctl"
+[ -f "$CTL" ] || { echo "нет $CTL: bash tools/cargo.sh build --locked --release --target aarch64-unknown-linux-musl"; exit 2; }
 W="$(mktemp -d /tmp/mitt-fo.XXXXXX)"; CLIENT=""
 [ -n "${KEEP:-}" ] && echo "каталог: $W" || trap 'rm -rf "$W"; [ -n "$CLIENT" ] && kill "$CLIENT" 2>/dev/null' EXIT
 FAIL=0
@@ -23,13 +25,14 @@ printf '#!/bin/sh\necho "$*" >>"$LT/curl.log"\nexit "$(cat "$LT/rc")"\n' >"$SB/c
 chmod +x "$SB"/*
 
 R="$W/root"; LT="$W/lt"; S="$R/tmp/mi-lumruri/run"; L="$R/tmp/mi-lumruri/log"; RD="$R/tmp/mi-lumruri/render"
-mkdir -p "$S" "$L" "$RD" "$R/data/mi-lumruri" "$LT"
+mkdir -p "$S" "$L" "$RD" "$R/data/mi-lumruri" "$R/tmp/mi-lumruri/bin" "$LT"
+printf '#!/bin/sh\nexec %s %s "$@"\n' "$Q" "$CTL" >"$R/tmp/mi-lumruri/bin/mi-tt-ctl"; chmod +x "$R/tmp/mi-lumruri/bin/mi-tt-ctl"
 : >"$RD/client.toml"; : >"$RD/client-backup.toml"; echo "203.0.113.10 443" >"$RD/primary.addr"; echo 7 >"$LT/rc"
 newclient() { [ -n "$CLIENT" ] && kill "$CLIENT" 2>/dev/null; sleep 1000 & CLIENT=$!; echo "$CLIENT" >"$S/trusttunnel.pid"; }
 state() { echo "x VPNCORE raise_state: [0] $1" >>"$L/trusttunnel.log"; }
 fo() {
   timeout 120 env -i PATH="$SB" MITT_ROOT="$R" MITT_QUIET=1 LT="$LT" LIB="$ROOT/package/scripts/mitt-lib.sh" \
-    MITT_FAILOVER_AFTER="${AFTER:-0}" MITT_FAILBACK_EVERY=0 "$Q" -L "$F" "$F/bin/busybox" ash -c ". \"\$LIB\"; ${1:-failover_check}" 2>>"$W/err"
+    MITT_FAILOVER_AFTER="${AFTER:-0}" MITT_FAILBACK_EVERY=0 "$Q" -L "$F" "$F/bin/busybox" ash -c ". \"\$LIB\"; ${1:-tunnel_tick}" 2>>"$W/err"
 }
 alive() { kill -0 "$CLIENT" 2>/dev/null; }
 ep() { cat "$S/endpoint" 2>/dev/null || echo "-"; }

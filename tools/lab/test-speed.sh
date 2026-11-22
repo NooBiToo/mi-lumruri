@@ -6,6 +6,8 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 "$ROOT/tools/fw/prepare.sh" >/dev/null
 F=/tmp/mitt-fw/rootfs; Q="$ROOT/.tools/qemu/root/usr/bin/qemu-aarch64"
+CTL="$ROOT/controller/target/aarch64-unknown-linux-musl/release/mi-tt-ctl"
+[ -f "$CTL" ] || { echo "нет $CTL: bash tools/cargo.sh build --locked --release --target aarch64-unknown-linux-musl"; exit 2; }
 W="$(mktemp -d /tmp/mitt-speed.XXXXXX)"; [ -n "${KEEP:-}" ] && echo "каталог: $W" || trap 'rm -rf "$W"' EXIT
 FAIL=0
 ok() { echo "  ok   $*"; }
@@ -71,14 +73,15 @@ echo "(в) сбой сети и ответ 503"
 case_ c fail http up ''
 chk c "direct: curl код 7; tunnel: HTTP 503" 's["direct"]=={"error":"curl код 7"} and s["tunnel"]=={"error":"HTTP 503"}'
 
-# выбор сервера по задержке (fastest_check в mitt-lib.sh)
+# выбор сервера по задержке (tunnel_tick в mitt-lib.sh, решения — mi-tt-ctl tunnel)
 fast() { # fast <имя> <ping основного, с> <ping запасного, с> <сколько раз вызвать>
   local d="$W/$1/root" lt="$W/$1/lt"; local L="$d/tmp/mi-lumruri"
-  mkdir -p "$d/data/mi-lumruri/etc" "$L/scripts" "$L/render" "$L/run" "$L/log" "$lt"
+  mkdir -p "$d/data/mi-lumruri/etc" "$L/scripts" "$L/render" "$L/run" "$L/log" "$L/bin" "$lt"
   cp "$ROOT"/package/scripts/*.sh "$L/scripts/"
-  printf 'primary vpn.example.com 443\nbackup 203.0.113.9 8443\n' >"$L/render/servers.addr"; echo 1 >"$L/render/fastest"
+  printf '#!/bin/sh\nexec %s %s "$@"\n' "$Q" "$CTL" >"$L/bin/mi-tt-ctl"; chmod +x "$L/bin/mi-tt-ctl"
+  printf 'primary vpn.example.com 443\nbackup 203.0.113.9 8443\n' >"$L/render/servers.addr"; echo 1 >"$L/render/fastest"; : >"$L/render/client-backup.toml"
   echo "$2" >"$lt/ping.vpn.example.com"; echo "$3" >"$lt/ping.203.0.113.9"
-  local i=0 cmd=""; while [ $i -lt "$4" ]; do cmd="$cmd fastest_check;"; i=$((i + 1)); done
+  local i=0 cmd=""; while [ $i -lt "$4" ]; do cmd="$cmd tunnel_tick;"; i=$((i + 1)); done
   timeout 120 env -i PATH="$SB" MITT_ROOT="$d" MITT_QUIET=1 LT="$lt" MITT_FASTEST_EVERY=0 "$Q" -L "$F" "$F/bin/busybox" ash -c \
     ". \"$L/scripts/mitt-lib.sh\"; $cmd" >>"$W/$1/out" 2>&1
 }
@@ -102,7 +105,7 @@ fast k 0.030 0.200 0; echo backup >"$W/k/root/tmp/mi-lumruri/run/endpoint"; fast
 [ "$(ep k)" = primary ] && ok "k: возврат на более быстрый основной" || bad "k: endpoint $(ep k)"
 fast m 0.200 0.030 0; rm -f "$W/m/root/tmp/mi-lumruri/render/fastest"
 timeout 60 env -i PATH="$SB" MITT_ROOT="$W/m/root" MITT_QUIET=1 LT="$W/m/lt" MITT_FASTEST_EVERY=0 "$Q" -L "$F" "$F/bin/busybox" ash -c \
-  ". \"$W/m/root/tmp/mi-lumruri/scripts/mitt-lib.sh\"; fastest_check; fastest_check" >>"$W/m/out" 2>&1
+  ". \"$W/m/root/tmp/mi-lumruri/scripts/mitt-lib.sh\"; tunnel_tick; tunnel_tick" >>"$W/m/out" 2>&1
 [ "$(ep m)" = primary ] && [ ! -e "$W/m/root/tmp/mi-lumruri/run/fastest.json" ] && ok "m: выключено — замеров и переключений нет" || bad "m: endpoint $(ep m)"
 
 [ $FAIL -eq 0 ] && echo "ИТОГ: ПРОЙДЕНО" || { echo "ИТОГ: ЕСТЬ ОШИБКИ"; exit 1; }

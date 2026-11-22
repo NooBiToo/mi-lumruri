@@ -6,6 +6,8 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 "$ROOT/tools/fw/prepare.sh" >/dev/null
 F=/tmp/mitt-fw/rootfs; Q="$ROOT/.tools/qemu/root/usr/bin/qemu-aarch64"
+CTL="$ROOT/controller/target/aarch64-unknown-linux-musl/release/mi-tt-ctl"
+[ -f "$CTL" ] || { echo "нет $CTL: bash tools/cargo.sh build --locked --release --target aarch64-unknown-linux-musl"; exit 2; }
 W="$(mktemp -d /tmp/mitt-watch.XXXXXX)"; [ -n "${KEEP:-}" ] && echo "каталог: $W" || trap 'rm -rf "$W"; kill "$CLIENT" 2>/dev/null' EXIT
 FAIL=0
 ok() { echo "  ok   $*"; }
@@ -32,7 +34,8 @@ echo "$*" >>"$LT/curl.log"
 EOF
 chmod +x "$SB"/*
 
-R="$W/root"; LT="$W/lt"; mkdir -p "$R/tmp/mi-lumruri/run" "$R/tmp/mi-lumruri/log" "$R/data/mi-lumruri" "$LT"
+R="$W/root"; LT="$W/lt"; mkdir -p "$R/tmp/mi-lumruri/run" "$R/tmp/mi-lumruri/log" "$R/tmp/mi-lumruri/bin" "$R/data/mi-lumruri" "$LT"
+printf '#!/bin/sh\nexec %s %s "$@"\n' "$Q" "$CTL" >"$R/tmp/mi-lumruri/bin/mi-tt-ctl"; chmod +x "$R/tmp/mi-lumruri/bin/mi-tt-ctl"
 S="$R/tmp/mi-lumruri/run"; L="$R/tmp/mi-lumruri/log"
 sleep 1000 & CLIENT=$!
 echo "$CLIENT" >"$S/trusttunnel.pid"
@@ -40,7 +43,7 @@ echo "x VPNCORE raise_state: [0] VPN_SS_CONNECTED" >"$L/trusttunnel.log"
 # mitt-lib.sh — из репозитория (путь внутри qemu совпадает с путём хоста)
 watch() {
   timeout 120 env -i PATH="$SB" MITT_ROOT="$R" MITT_QUIET=1 LT="$LT" MITT_WATCH_INTERVAL=0 MITT_WATCH_GAP="${GAP:-300}" LIB="$ROOT/package/scripts/mitt-lib.sh" \
-    "$Q" -L "$F" "$F/bin/busybox" ash -c '. "$LIB"; tunnel_watch' >>"$W/out" 2>&1
+    "$Q" -L "$F" "$F/bin/busybox" ash -c '. "$LIB"; tunnel_tick' >>"$W/out" 2>&1
 }
 alive() { kill -0 "$CLIENT" 2>/dev/null; }
 js() { cat "$S/watch.json" 2>/dev/null; }
@@ -63,14 +66,14 @@ watch; watch; watch; sleep 1
 alive && ok "c: новый клиент не перезапускается чаще раза в 5 минут" || bad "c: перезапущен: $(js)"
 
 echo "(г) клиент сам переподключается (не CONNECTED) — сторож не вмешивается"
-echo "y VPNCORE raise_state: [0] VPN_SS_RECOVERING" >>"$L/trusttunnel.log"; rm -f "$S/watch-restart"
+echo "y VPNCORE raise_state: [0] VPN_SS_RECOVERING" >>"$L/trusttunnel.log"; rm -f "$S/tunnel.json"
 watch; watch; watch; sleep 1
-alive && [ "$(cat "$S/watch-fails")" = 0 ] && ok "d: при восстановлении проверок нет" || bad "d: fails=$(cat "$S/watch-fails")"
+alive && grep -q '"watch_fails":0' "$S/tunnel.json" && ok "d: при восстановлении проверок нет" || bad "d: $(cat "$S/tunnel.json")"
 
 echo "(д) интервал: между проверками не меньше MITT_WATCH_INTERVAL"
-echo "z VPNCORE raise_state: [0] VPN_SS_CONNECTED" >>"$L/trusttunnel.log"; : >"$LT/curl.log"; echo ok >"$LT/net"; rm -f "$S/watch-next"
+echo "z VPNCORE raise_state: [0] VPN_SS_CONNECTED" >>"$L/trusttunnel.log"; : >"$LT/curl.log"; echo ok >"$LT/net"; rm -f "$S/tunnel.json"
 timeout 60 env -i PATH="$SB" MITT_ROOT="$R" MITT_QUIET=1 LT="$LT" LIB="$ROOT/package/scripts/mitt-lib.sh" \
-  "$Q" -L "$F" "$F/bin/busybox" ash -c '. "$LIB"; tunnel_watch; tunnel_watch; tunnel_watch' >>"$W/out" 2>&1
+  "$Q" -L "$F" "$F/bin/busybox" ash -c '. "$LIB"; tunnel_tick; tunnel_tick; tunnel_tick' >>"$W/out" 2>&1
 [ "$(grep -c 'https://' "$LT/curl.log")" = 1 ] && ok "e: три вызова подряд — одна проверка" || bad "e: проверок $(grep -c 'https://' "$LT/curl.log")"
 
 [ $FAIL -eq 0 ] && echo "ИТОГ: ПРОЙДЕНО" || { echo "ИТОГ: ЕСТЬ ОШИБКИ"; exit 1; }

@@ -17,5 +17,6 @@ pub mod render;
 pub mod stats;
 pub mod store;
 pub mod subscription;
+pub mod tunnel;
 pub mod validate;
 pub mod zapret;
