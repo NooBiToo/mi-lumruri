@@ -21,7 +21,7 @@ pub const MAX_LIST_BODY: usize = 8 * 1024 * 1024;
 
 pub const PATHS: &[&str] = &["/rules/delete", "/rules/move", "/profiles", "/profiles/delete", "/groups", "/groups/delete", "/categories",
     "/categories/delete", "/networks", "/networks/delete", "/devices", "/devices/delete", "/leases", "/dns", "/zapret", "/adblock/list",
-    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update", "/router", "/diag", "/service/restart", "/update", "/subscription", "/subscription/update", "/backup/export", "/backup/restore", "/notify", "/notify/test", "/stats", "/speed", "/device-name", "/discover"];
+    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update", "/router", "/diag", "/service/restart", "/update", "/subscription", "/subscription/update", "/backup/export", "/backup/restore", "/notify", "/notify/test", "/stats", "/speed", "/device-name", "/discover", "/panel-origins"];
 
 pub fn is_manage_path(path: &str) -> bool {
     PATHS.contains(&path.trim_end_matches('/'))
@@ -70,6 +70,13 @@ struct With<T> {
     base_revision: String,
     #[serde(alias = "profile", alias = "group", alias = "category", alias = "network", alias = "device", alias = "dns", alias = "zapret")]
     item: Option<T>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PanelOrigins {
+    base_revision: String,
+    origins: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -478,11 +485,12 @@ fn uci_value(rest: &str) -> String {
 /// панель, открытая по нему (`https://домен:порт` и через обратный прокси `https://домен`), может записывать настройки.
 /// Порт берётся из первого источника MI_TT_ALLOWED_ORIGINS (`https://<IP LAN>:<порт>`). Чужие адреса не допускаются.
 pub fn host_origins(allowed: &str, config_path: &str) -> Vec<String> {
-    let Some(lan) = std::fs::read_to_string(uci_network_path()).ok().as_deref().and_then(parse_uci_lan).and_then(|o| o.get("ipaddr").cloned()) else { return vec![] };
+    let Ok(cfg) = read_config(config_path) else { return vec![] };
+    // адреса из настройки «Адреса панели» (обратный прокси и т. п.)
+    let mut out: Vec<String> = cfg.panel_origins.clone();
+    let Some(lan) = std::fs::read_to_string(uci_network_path()).ok().as_deref().and_then(parse_uci_lan).and_then(|o| o.get("ipaddr").cloned()) else { return out };
     let lan = lan.split('/').next().unwrap_or_default().to_string();
     let port = allowed.split(',').map(str::trim).find_map(|o| o.strip_prefix(&format!("https://{lan}:")).map(str::to_string));
-    let Ok(cfg) = read_config(config_path) else { return vec![] };
-    let mut out = Vec::new();
     for h in cfg.dns.iter().flat_map(|d| d.hosts.iter()).filter(|h| h.address == lan) {
         for d in [h.domain.clone(), format!("*.{}", h.domain)] {
             if let Some(p) = &port {
@@ -651,6 +659,15 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
                     }),
                     "device_name",
                 )
+            }
+            Err(i) => bad(i),
+        },
+        ("POST", "/panel-origins") => match parse_json::<PanelOrigins>(b, "") {
+            // адреса панели — сразу для всех запросов (CGI читает их из настроек); заявку на применение не ставит
+            Ok(q) => {
+                let mut list: Vec<String> = q.origins.iter().map(|o| o.trim().trim_end_matches('/').to_ascii_lowercase()).filter(|o| !o.is_empty()).collect();
+                list.dedup();
+                saved(update_config(p, &q.base_revision, MAX_CONFIG_BYTES, |c| { c.panel_origins = list; Ok("set") }), "panel_origins")
             }
             Err(i) => bad(i),
         },

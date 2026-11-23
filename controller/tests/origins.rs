@@ -37,3 +37,32 @@ fn custom_dns_domain_pointing_to_router_is_allowed() {
         assert_eq!(post(bad).code(), "origin_forbidden", "{bad}");
     }
 }
+
+#[test]
+fn panel_origins_setting_allows_reverse_proxy() {
+    let mut a = Auth::new("origins-proxy");
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("op-{}", rand_hex(6)));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::copy(fixture("lab/config.json"), dir.join("config.json")).unwrap();
+    a.config = dir.join("config.json").to_string_lossy().into_owned();
+    let t = T0 + 60;
+    let s = a.login(t);
+    let post = |origin: &str, path: &str, body: &str| {
+        a.cgi("POST", path, Some(body.as_bytes()), t + 1, &[("HTTP_COOKIE", &s.cookie), ("HTTP_ORIGIN", origin), ("HTTP_SEC_FETCH_SITE", "same-origin"), ("HTTP_X_MITT_CSRF", &s.csrf)])
+    };
+    let rev = || a.api(&s, "GET", "/config", None, t + 1).body["revision"].as_str().unwrap().to_string();
+    // до настройки прокси не допущен
+    assert_eq!(post("https://router.home.test", "/apply-request", "{}").code(), "origin_forbidden");
+    // неверные адреса не сохраняются
+    for bad in ["http://router.home.test", "https://router.home.test/panel", "https://*.home.test", "https://Router.home.test:0"] {
+        let o = post(ORIGIN, "/panel-origins", &serde_json::json!({ "base_revision": rev(), "origins": [bad] }).to_string());
+        assert_eq!(o.status, 422, "{bad}: {}", o.body);
+    }
+    // с адреса панели: прокси добавлен (регистр и «/» в конце нормализуются), заявки на применение нет
+    let o = post(ORIGIN, "/panel-origins", &serde_json::json!({ "base_revision": rev(), "origins": ["HTTPS://Router.Home.Test/"] }).to_string());
+    assert_eq!(o.status, 200, "{}", o.body);
+    let cfg: Value = serde_json::from_slice(&std::fs::read(dir.join("config.json")).unwrap()).unwrap();
+    assert_eq!(cfg["panel_origins"], serde_json::json!(["https://router.home.test"]));
+    assert_eq!(post("https://router.home.test", "/apply-request", "{}").status, 202);
+    assert_eq!(post("https://other.home.test", "/apply-request", "{}").code(), "origin_forbidden");
+}

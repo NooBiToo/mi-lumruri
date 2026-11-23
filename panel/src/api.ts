@@ -92,6 +92,8 @@ export interface Config {
   ipv6_via_vpn?: boolean
   /** Имена устройств от пользователя (MAC → имя): только для экрана «Устройства». */
   device_names?: Record<string, string>
+  /** Дополнительные адреса панели (https://хост[:порт]), например обратный прокси. */
+  panel_origins?: string[]
 }
 
 export interface Issue { path: string; code: string; message: string }
@@ -310,6 +312,8 @@ export const manage = {
   setDeviceName: (base_revision: string, mac: string, name: string) => call<SaveResponse>('/device-name', json({ base_revision, mac, name })),
   /** Поиск имён, которые устройства объявляют в сети (служба, несколько секунд). */
   discover: () => call<ManageResponse>('/discover', json({})),
+  /** Адреса панели целиком (заменяет список); заявку на применение не ставит. */
+  setPanelOrigins: (base_revision: string, origins: string[]) => call<SaveResponse>('/panel-origins', json({ base_revision, origins })),
   notifyState: () => call<NotifyResponse>('/notify'),
   stats: () => call<StatsResponse>('/stats'),
   speed: () => call<SpeedResponse>('/speed'),

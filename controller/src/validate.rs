@@ -67,6 +67,18 @@ pub fn check_ifname(n: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub const MAX_PANEL_ORIGINS: usize = 16;
+
+/// Адрес панели — как его присылает браузер в Origin: `https://хост` или `https://хост:порт`, без пути и `*`.
+/// Только HTTPS: вход в панель (cookie __Host-) по HTTP не работает.
+pub fn check_panel_origin(o: &str) -> Result<(), String> {
+    let rest = o.strip_prefix("https://").ok_or("адрес панели — https://хост или https://хост:порт")?;
+    let (host, port) = rest.split_once(':').map_or((rest, None), |(h, p)| (h, Some(p)));
+    let host_ok = !host.is_empty() && host.len() <= 253 && host.split('.').all(|l| !l.is_empty() && l.len() <= 63 && !l.starts_with('-') && !l.ends_with('-') && l.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-'));
+    let port_ok = port.is_none_or(|p| !p.is_empty() && p.len() <= 5 && p.bytes().all(|c| c.is_ascii_digit()) && p.parse::<u32>().is_ok_and(|n| (1..=65535).contains(&n)));
+    if host_ok && port_ok { Ok(()) } else { Err("адрес панели — https://хост или https://хост:порт (строчными буквами, без пути)".into()) }
+}
+
 /// Имён устройств — не больше (у дома столько устройств не бывает; защита размера настроек).
 pub const MAX_DEVICE_NAMES: usize = 512;
 
@@ -253,6 +265,12 @@ pub fn validate_config(c: &Config) -> Vec<Issue> {
     limit(&mut issues, "networks", c.networks.len(), MAX_ITEMS);
     limit(&mut issues, "devices", c.devices.len(), MAX_ITEMS);
     limit(&mut issues, "device_names", c.device_names.len(), MAX_DEVICE_NAMES);
+    limit(&mut issues, "panel_origins", c.panel_origins.len(), MAX_PANEL_ORIGINS);
+    for (i, o) in c.panel_origins.iter().enumerate() {
+        if let Err(m) = check_panel_origin(o) {
+            issues.push(Issue::new(format!("panel_origins[{i}]"), "bad_origin", m));
+        }
+    }
     for (mac, name) in &c.device_names {
         if normalize_mac(mac).ok().as_deref() != Some(mac.as_str()) {
             issues.push(Issue::new(format!("device_names.{mac}"), "bad_mac", "MAC-адрес ожидается в виде aa:bb:cc:dd:ee:ff"));

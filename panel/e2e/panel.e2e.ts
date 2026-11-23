@@ -99,6 +99,18 @@ test('резервная копия скачивается без паролей
   expect(b.config.schema_version).toBe(config().schema_version)
 })
 
+test('адрес обратного прокси добавляется в «Адреса панели» и сохраняется на роутере', async ({ page }) => {
+  await login(page)
+  await nav(page, /Дополнительно/).click()
+  await page.locator('#origin-new').fill('https://Router.Home.Example/')
+  await page.getByRole('group', { name: 'Адреса панели' }).getByRole('button', { name: 'Добавить' }).click()
+  await expect.poll(() => config().panel_origins, { timeout: 10_000 }).toEqual(['https://router.home.example'])
+  await page.locator('#origin-new').fill('http://bad')
+  await expect(page.getByText('Адрес — https://хост или https://хост:порт, без пути')).toBeVisible()
+  await page.getByRole('button', { name: 'Убрать https://router.home.example' }).click()
+  await expect.poll(() => config().panel_origins ?? [], { timeout: 10_000 }).toEqual([])
+})
+
 test('экраны открываются без ошибок в консоли', async ({ page }) => {
   await login(page)
   for (const name of [/Сервер/, /Сайты/, /Устройства/, /Диагностика/, /Дополнительно/, /Обзор/]) {

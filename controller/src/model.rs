@@ -39,6 +39,10 @@ pub struct Config {
     /// влияют и устройство не отмечают.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub device_names: std::collections::BTreeMap<String, String>,
+    /// Дополнительные адреса панели (`https://хост[:порт]`), например обратный прокси на другом устройстве:
+    /// страницы с них могут записывать настройки. Адрес по IP роутера и свои DNS-записи на роутер — без этого списка.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub panel_origins: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]

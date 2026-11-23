@@ -13,6 +13,7 @@ import Segmented from '../components/Segmented.vue'
 import UpdateCard from '../components/UpdateCard.vue'
 import BackupCard from '../components/BackupCard.vue'
 import NotifyCard from '../components/NotifyCard.vue'
+import PanelOriginsCard from '../components/PanelOriginsCard.vue'
 import LangSwitch from '../components/LangSwitch.vue'
 import { dateTag, t } from '../i18n'
 
@@ -308,6 +309,8 @@ useAutosave({
           <span class="setrow__desc">{{ t('По умолчанию — язык браузера. Выбор запоминается в этом браузере') }}</span></span>
         <LangSwitch />
       </div>
+
+      <PanelOriginsCard />
 
       <UpdateCard />
 

@@ -2,7 +2,7 @@
 
 [Русский](guide.md) · **English** · [简体中文](guide.zh-CN.md)
 
-This guide covers Mi Lumruri version 0.9.0. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
+This guide covers Mi Lumruri version 0.9.1. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
 
 You need a BE7000 (RC06) with firmware 1.1.38, working root access over SSH from the home network, the installation TAR, and the parameters of your TrustTunnel server. The stock release firmware usually ships with SSH turned off.
 
@@ -250,7 +250,7 @@ Below is the **Traffic** card for a day or a week: how much went through the rou
 
 A separate menu page (on a phone, under More). Enter a domain and an IP address on the home network and click Add. The domain and all its subdomains will resolve to that address, for example for a server with Traefik. Records save automatically. For details, see [DNS](#dns).
 
-**The panel by your own domain.** Add a record with the router IP (for example, `router.home.example.com` → `192.168.31.1`), and the panel opens at `https://router.home.example.com:8443/`: the router itself allows settings to be written from domains of its own DNS records that point to its address, together with subdomains. The panel certificate is issued for the IP, so the browser asks once to confirm it for the domain too. If the panel is opened through a reverse proxy on another device (for example, Traefik), add that address to `/data/mi-lumruri/etc/panel.origins` (one per line, for example `https://router.home.example.com`) and restart the service.
+**The panel by your own domain.** Add a record with the router IP (for example, `router.home.example.com` → `192.168.31.1`), and the panel opens at `https://router.home.example.com:8443/`: the router itself allows settings to be written from domains of its own DNS records that point to its address, together with subdomains. The panel certificate is issued for the IP, so the browser asks once to confirm it for the domain too. If the panel is opened through a reverse proxy on another device (for example, Traefik), add its address in Advanced → **Panel addresses** (for example, `https://router.home.example.com`); it takes effect immediately. Add it while the panel is open by the router IP.
 
 ### Diagnostics
 
@@ -280,6 +280,7 @@ Usually you do not need to change anything here. Changes save automatically. On 
 - **DNS for sites through the VPN**: server and encryption. See [DNS](#dns) and [Secure DNS (DoH/DoT)](#secure-dns-dohdot).
 - **IPv6 via VPN**: IPv6 through the tunnel for devices whose whole internet goes through the VPN. See [IPv6 via VPN](#ipv6-via-vpn).
 - **Secure DNS for other sites**: off, DoH or DoT. See [Secure DNS (DoH/DoT)](#secure-dns-dohdot).
+- **Panel addresses**: extra addresses the panel opens at, for example a reverse proxy. See [Custom DNS records](#custom-dns-records).
 - **Interface language**: Русский, English or 简体中文. The choice is remembered in this browser.
 - **Update**: the installed version, and checking for and installing a new version from GitHub. See [Updating and rollback](#updating-and-rollback).
 - **Settings backup**: see [Settings backup](#settings-backup).

@@ -2,7 +2,7 @@
 
 [Русский](guide.md) · [English](guide.en.md) · **简体中文**
 
-本说明适用于 Mi Lumruri 0.9.0 版本。安装包文件名为 `mi-lumruri-*.tar`，在路由器上安装包位于 `/data/mi-lumruri` 和 `/tmp/mi-lumruri`。0.5.0 之前项目名为 mi-trusttunnel：在旧版本之上安装 0.5.0 时，会自动把 `/data/mi-trusttunnel` 连同全部设置移动到 `/data/mi-lumruri`，并在原位置留下链接。发布版中除主安装包外还有一份名为 `mi-trusttunnel-*.tar` 的副本，供 0.4 版本面板中的更新功能查找。
+本说明适用于 Mi Lumruri 0.9.1 版本。安装包文件名为 `mi-lumruri-*.tar`，在路由器上安装包位于 `/data/mi-lumruri` 和 `/tmp/mi-lumruri`。0.5.0 之前项目名为 mi-trusttunnel：在旧版本之上安装 0.5.0 时，会自动把 `/data/mi-trusttunnel` 连同全部设置移动到 `/data/mi-lumruri`，并在原位置留下链接。发布版中除主安装包外还有一份名为 `mi-trusttunnel-*.tar` 的副本，供 0.4 版本面板中的更新功能查找。
 
 你需要：固件版本为 1.1.38 的 BE7000（RC06）、可从家庭网络通过 SSH 获得的 root 权限、安装用 TAR 包，以及你的 TrustTunnel 服务器参数。官方发布的原厂固件通常默认关闭 SSH。
 
@@ -250,7 +250,7 @@ trusttunnel_endpoint vpn.toml hosts.toml -c <用户名> -a <IP:端口>
 
 这是菜单中的独立页面（手机上位于「更多」中）。输入域名和家庭网络中的 IP 地址，点击「添加」：该域名及其所有子域名都将解析为此地址，例如用于运行 Traefik 的服务器。记录会自动保存。详见[「DNS」](#dns)。
 
-**通过自己的域名访问面板。** 添加一条指向路由器 IP 的记录（例如 `router.home.example.com` → `192.168.31.1`），即可通过 `https://router.home.example.com:8443/` 打开面板：对于指向路由器地址的自定义 DNS 记录的域名（含子域名），路由器会自动允许其写入设置。面板证书签发给 IP，因此浏览器会针对该域名再确认一次。如果面板通过其他设备上的反向代理（例如 Traefik）打开，请将其地址写入 `/data/mi-lumruri/etc/panel.origins`（每行一个，例如 `https://router.home.example.com`）并重启服务。
+**通过自己的域名访问面板。** 添加一条指向路由器 IP 的记录（例如 `router.home.example.com` → `192.168.31.1`），即可通过 `https://router.home.example.com:8443/` 打开面板：对于指向路由器地址的自定义 DNS 记录的域名（含子域名），路由器会自动允许其写入设置。面板证书签发给 IP，因此浏览器会针对该域名再确认一次。如果面板通过其他设备上的反向代理（例如 Traefik）打开，请在「高级」→ **「面板地址」**中添加其地址（例如 `https://router.home.example.com`），立即生效。请在通过路由器 IP 打开面板时添加。
 
 ### 诊断
 
@@ -280,6 +280,7 @@ trusttunnel_endpoint vpn.toml hosts.toml -c <用户名> -a <IP:端口>
 - **「经 VPN 网站的 DNS」**：服务器和加密方式，详见[「DNS」](#dns)和[「安全 DNS（DoH/DoT）」](#安全-dnsdohdot)。
 - **「IPv6 走 VPN」**：为全部流量走 VPN 的设备经隧道提供 IPv6，详见[「IPv6 走 VPN」](#ipv6-走-vpn)。
 - **「其他网站的安全 DNS」**：关闭、DoH 或 DoT，详见[「安全 DNS（DoH/DoT）」](#安全-dnsdohdot)。
+- **「面板地址」**：可打开面板的其他地址，例如反向代理，详见[「自定义 DNS 记录」](#自定义-dns-记录)。
 - **「界面语言」**：Русский、English 或 简体中文。所选语言会保存在当前浏览器中。
 - **「更新」**：已安装的版本，以及从 GitHub 检查和安装新版本，详见[「更新与回滚」](#更新与回滚)。
 - **「设置备份」**：详见[「设置备份」](#设置备份)。
