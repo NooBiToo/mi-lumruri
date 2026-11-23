@@ -33,7 +33,7 @@ The router's internal storage is small: about 20 MB, of which the firmware uses 
 | **DNS** | Secure DNS (DoH or DoT) for all other sites: Cloudflare, Google, AdGuard, NextDNS, Quad9 (DoT) or your own server. If the server is unreachable, queries temporarily go through your ISP. VPN sites use their own DNS server; queries to it go through the tunnel and can be additionally encrypted (DoH or DoT). A separate page for your own DNS records: a domain and all its subdomains point to an address on your home network, for example a server running Traefik. Ad blocking via the router's DNS: HaGeZi Light, Normal or your own list, updated automatically. |
 | **Diagnostics** | One-click check of the service, server connection and client version, internet access through the tunnel, the tunnel watchdog, routes, DNS, Zapret and programs stuck in a restart loop. Check a single site: which way it goes and whether it opens. Logs and a report in one click, service restart. |
 | **Sign-in** | HTTPS and a password, with an optional second step: an authenticator app code (TOTP). |
-| **Panel** | In Russian, English and Simplified Chinese. The language follows the browser, and you can change it in Advanced and on the sign-in screen. Updates from the panel: the router downloads the new release from GitHub, checks the SHA-256 and the signature and installs it, keeping your settings. |
+| **Panel** | In Russian, English and Simplified Chinese. The language follows the browser, and you can change it in Settings and on the sign-in screen. Updates from the panel: the router downloads the new release from GitHub, checks the SHA-256 and the signature and installs it, keeping your settings. |
 
 Changes are saved automatically. The panel also works well on a phone.
 

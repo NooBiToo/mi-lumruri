@@ -62,12 +62,13 @@ test('вход: пароль и одноразовый код, обзор с т�
   await login(page)
   await expect(page.getByRole('heading', { name: 'Обзор', level: 1 })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Трафик' })).toBeVisible()
-  await expect(nav(page, /Дополнительно/)).toBeVisible()
+  await expect(nav(page, /Настройки/)).toBeVisible()
 })
 
 test('частота проверки новой версии сохраняется на роутере', async ({ page }) => {
   await login(page)
-  await nav(page, /Дополнительно/).click()
+  await nav(page, /Настройки/).click()
+  await page.getByRole('tab', { name: 'Обновление' }).click()
   const group = page.getByRole('radiogroup', { name: 'Как часто роутер сам проверяет новую версию' })
   await group.getByRole('radio', { name: 'Раз в неделю' }).check({ force: true })
   await expect.poll(() => config().schedule?.update_check, { timeout: 10_000 }).toBe('weekly')
@@ -77,20 +78,22 @@ test('частота проверки новой версии сохраняет
 
 test('язык интерфейса: English и 简体中文', async ({ page }) => {
   await login(page)
-  await nav(page, /Дополнительно/).click()
+  await nav(page, /Настройки/).click()
+  await page.getByRole('tab', { name: 'Панель' }).click()
   const pick = (name: string) => page.getByRole('radio', { name, exact: true }).check({ force: true })
   await pick('English')
-  await expect(nav(page, /Advanced/)).toBeVisible()
-  await expect(page.getByText('Settings backup')).toBeVisible()
+  await expect(nav(page, /Settings/)).toBeVisible()
+  await expect(page.getByRole('tab', { name: 'Network and DNS' })).toBeVisible()
   await pick('简体中文')
-  await expect(nav(page, /高级/)).toBeVisible()
+  await expect(nav(page, /设置/)).toBeVisible()
   await pick('Русский')
-  await expect(nav(page, /Дополнительно/)).toBeVisible()
+  await expect(nav(page, /Настройки/)).toBeVisible()
 })
 
 test('резервная копия скачивается без паролей', async ({ page }) => {
   await login(page)
-  await nav(page, /Дополнительно/).click()
+  await nav(page, /Настройки/).click()
+  await page.getByRole('tab', { name: 'Обновление' }).click()
   const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Скачать копию' }).click()])
   const file = await dl.path()
   const b = JSON.parse(readFileSync(file!, 'utf8'))
@@ -101,7 +104,8 @@ test('резервная копия скачивается без паролей
 
 test('адрес обратного прокси добавляется в «Адреса панели» и сохраняется на роутере', async ({ page }) => {
   await login(page)
-  await nav(page, /Дополнительно/).click()
+  await nav(page, /Настройки/).click()
+  await page.getByRole('tab', { name: 'Панель' }).click()
   await page.locator('#origin-new').fill('https://Router.Home.Example/')
   await page.getByRole('group', { name: 'Адреса панели' }).getByRole('button', { name: 'Добавить' }).click()
   await expect.poll(() => config().panel_origins, { timeout: 10_000 }).toEqual(['https://router.home.example'])
@@ -111,9 +115,24 @@ test('адрес обратного прокси добавляется в «А�
   await expect.poll(() => config().panel_origins ?? [], { timeout: 10_000 }).toEqual([])
 })
 
+test('вкладки «Настроек»: адрес вкладки в ссылке, прежний #hosts ведёт к своим DNS-записям', async ({ page }) => {
+  await login(page)
+  await nav(page, /Настройки/).click()
+  await expect(page.getByRole('tab', { name: 'Сеть и DNS', selected: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Свои DNS-записи' })).toBeVisible()
+  await page.getByRole('tab', { name: 'Уведомления' }).click()
+  await expect(page).toHaveURL(/#more\/notify$/)
+  await expect(page.getByText('Уведомления в Telegram')).toBeVisible()
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByRole('tab', { name: 'Обновление', selected: true })).toBeVisible()
+  await page.goto(origin + '/#hosts')
+  await expect(page.getByRole('heading', { name: 'Свои DNS-записи' })).toBeVisible()
+  await expect(page).toHaveURL(/#more\/dns$/)
+})
+
 test('экраны открываются без ошибок в консоли', async ({ page }) => {
   await login(page)
-  for (const name of [/Сервер/, /Сайты/, /Устройства/, /Диагностика/, /Дополнительно/, /Обзор/]) {
+  for (const name of [/Сервер/, /Сайты/, /Устройства/, /Диагностика/, /Настройки/, /Обзор/]) {
     const link = nav(page, name)
     if (await link.count()) {
       await link.click()

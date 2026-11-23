@@ -11,4 +11,10 @@ export default {
   "Новый адрес панели": "New panel address",
   "Добавить": "Add",
   "Не сохранено": "Not saved",
+  "Настройки": "Settings",
+  "Сеть и DNS": "Network and DNS",
+  "Уведомления": "Notifications",
+  "Панель": "Panel",
+  "Разделы настроек": "Settings sections",
+  "Домашние серверы по своим именам: домен со всеми поддоменами отвечает заданным адресом": "Home servers by your own names: a domain with all its subdomains resolves to the given address",
 }

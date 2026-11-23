@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import InputText from 'primevue/inputtext'
 import ToggleSwitch from 'primevue/toggleswitch'
 import { ChevronDown, ChevronRight } from 'lucide-vue-next'
@@ -15,10 +15,39 @@ import BackupCard from '../components/BackupCard.vue'
 import NotifyCard from '../components/NotifyCard.vue'
 import PanelOriginsCard from '../components/PanelOriginsCard.vue'
 import LangSwitch from '../components/LangSwitch.vue'
+import HostsView from './HostsView.vue'
 import { dateTag, t } from '../i18n'
 
 defineProps<{ totp: boolean }>()
-const emit = defineEmits<{ navigate: [tab: 'zapret' | 'hosts' | 'diag'] }>()
+const emit = defineEmits<{ navigate: [tab: 'zapret' | 'diag'] }>()
+
+// ---- вкладки: «Сеть и DNS», «Уведомления», «Обновление», «Панель»; выбранная — в адресе (#more/<вкладка>) ----
+type Sub = 'dns' | 'notify' | 'update' | 'panel'
+const SUBS = computed<{ id: Sub; label: string }[]>(() => [
+  { id: 'dns', label: t('Сеть и DNS') }, { id: 'notify', label: t('Уведомления') }, { id: 'update', label: t('Обновление') }, { id: 'panel', label: t('Панель') },
+])
+const fromHash = (): Sub => {
+  const h = typeof location !== 'undefined' ? location.hash.replace(/^#more\/?/, '') : ''
+  return (['dns', 'notify', 'update', 'panel'] as Sub[]).includes(h as Sub) ? (h as Sub) : 'dns'
+}
+const sub = ref<Sub>(fromHash())
+function pick(s: Sub) {
+  sub.value = s
+  if (location.hash !== `#more/${s}`) history.replaceState(null, '', `#more/${s}`)
+}
+/** Стрелки влево/вправо по вкладкам, как у tablist. */
+function arrow(e: KeyboardEvent) {
+  const ids = SUBS.value.map((x) => x.id)
+  const i = ids.indexOf(sub.value)
+  const n = e.key === 'ArrowRight' ? (i + 1) % ids.length : e.key === 'ArrowLeft' ? (i + ids.length - 1) % ids.length : -1
+  if (n < 0) return
+  e.preventDefault()
+  pick(ids[n]!)
+  document.getElementById(`subtab-${ids[n]}`)?.focus()
+}
+const onHash = () => { if (location.hash.startsWith('#more')) sub.value = fromHash() }
+onMounted(() => addEventListener('hashchange', onHash))
+onBeforeUnmount(() => removeEventListener('hashchange', onHash))
 
 interface Draft { dns: DnsForm }
 const toDraft = (): Draft => ({ dns: dnsToForm(config.value?.dns) })
@@ -160,7 +189,8 @@ useAutosave({
     if (!config.value) return t('Настройки ещё не загружены.')
     const sent = JSON.stringify(draft.value)
     const next = { ...config.value }
-    const dns = formToDns(draft.value.dns)
+    // свои DNS-записи правит HostsView на этой же вкладке: здесь — как они сохранены сейчас
+    const dns = formToDns({ ...draft.value.dns, hosts: dnsToForm(config.value?.dns).hosts })
     if (dns) next.dns = dns
     else delete next.dns
     const r = await save(next, '')
@@ -175,7 +205,7 @@ useAutosave({
 </script>
 
 <template>
-  <section class="sect" :aria-label="t('Дополнительно')">
+  <section class="sect" :aria-label="t('Настройки')">
     <p class="lead">{{ t('Обычно здесь ничего менять не нужно. Изменения сохраняются сами') }}</p>
 
     <!-- телефон: разделы, которых нет в нижней панели -->
@@ -184,16 +214,18 @@ useAutosave({
         <span class="setrow__text"><span class="setrow__title">Zapret</span><span class="setrow__desc">{{ t('Способ обхода блокировок, подбор, автопроверка') }}</span></span>
         <ChevronRight :size="18" class="more-link__icon" aria-hidden="true" />
       </button>
-      <button type="button" class="setrow more-link" @click="emit('navigate', 'hosts')">
-        <span class="setrow__text"><span class="setrow__title">{{ t('Свои DNS-записи') }}</span><span class="setrow__desc">{{ t('Домашние серверы по своим именам') }}</span></span>
-        <ChevronRight :size="18" class="more-link__icon" aria-hidden="true" />
-      </button>
       <button type="button" class="setrow more-link" @click="emit('navigate', 'diag')">
         <span class="setrow__text"><span class="setrow__title">{{ t('Диагностика') }}</span><span class="setrow__desc">{{ t('Проверка работы, журналы, перезапуск службы') }}</span></span>
         <ChevronRight :size="18" class="more-link__icon" aria-hidden="true" />
       </button>
     </nav>
 
+    <div class="subtabs" role="tablist" :aria-label="t('Разделы настроек')" @keydown="arrow">
+      <button v-for="x in SUBS" :id="`subtab-${x.id}`" :key="x.id" type="button" role="tab" :aria-selected="sub === x.id" :aria-controls="`subpanel-${x.id}`"
+        :tabindex="sub === x.id ? 0 : -1" :class="['subtabs__tab', { 'subtabs__tab--on': sub === x.id }]" @click="pick(x.id)">{{ x.label }}</button>
+    </div>
+
+    <div v-show="sub === 'dns'" id="subpanel-dns" role="tabpanel" aria-labelledby="subtab-dns" class="subpanel">
     <div class="card card--flush settings">
       <div class="setblock" role="group" aria-labelledby="adblock-title">
         <label class="setrow setrow--bare">
@@ -304,19 +336,31 @@ useAutosave({
       </div>
 
 
+    </div>
+    <HostsView class="hosts-embed" />
+    </div>
+
+    <div v-show="sub === 'notify'" id="subpanel-notify" role="tabpanel" aria-labelledby="subtab-notify" class="subpanel">
+      <div class="card card--flush settings">
+        <NotifyCard />
+      </div>
+    </div>
+
+    <div v-show="sub === 'update'" id="subpanel-update" role="tabpanel" aria-labelledby="subtab-update" class="subpanel">
+      <div class="card card--flush settings">
+        <UpdateCard />
+
+        <BackupCard />
+      </div>
+    </div>
+
+    <div v-show="sub === 'panel'" id="subpanel-panel" role="tabpanel" aria-labelledby="subtab-panel" class="subpanel">
+      <div class="card card--flush settings">
       <div class="setblock" role="group" aria-labelledby="lang-title">
         <span class="setrow__text"><span id="lang-title" class="setrow__title">{{ t('Язык интерфейса') }}</span>
           <span class="setrow__desc">{{ t('По умолчанию — язык браузера. Выбор запоминается в этом браузере') }}</span></span>
         <LangSwitch />
       </div>
-
-      <PanelOriginsCard />
-
-      <UpdateCard />
-
-      <NotifyCard />
-
-      <BackupCard />
 
       <div class="setrow setrow--top">
         <span class="setrow__text">
@@ -333,7 +377,24 @@ useAutosave({
         </span>
         <span :class="['badge', totp ? 'badge--ok' : 'badge--idle']">{{ totp ? t('Пароль и код') : t('Только пароль') }}</span>
       </div>
+
+        <PanelOriginsCard />
+      </div>
     </div>
 
   </section>
 </template>
+
+<style scoped>
+.subtabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.subtabs__tab { flex: none; background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 0.6rem 0.9rem; font: inherit; font-size: 0.9375rem; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.subtabs__tab:hover { color: var(--ink); }
+.subtabs__tab--on { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+.subtabs__tab:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.subpanel { display: flex; flex-direction: column; gap: 1rem; }
+.hosts-embed { padding: 0; }
+@media (max-width: 640px) {
+  .subtabs { gap: 0; }
+  .subtabs__tab { flex: 1 1 0; min-width: 0; padding: 0.55rem 0.2rem; font-size: 0.8125rem; text-align: center; }
+}
+</style>

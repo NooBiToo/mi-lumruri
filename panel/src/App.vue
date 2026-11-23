@@ -6,7 +6,7 @@ import Message from 'primevue/message'
 import Skeleton from 'primevue/skeleton'
 import ToggleSwitch from 'primevue/toggleswitch'
 import Toast from 'primevue/toast'
-import { Activity, BookOpenText, Check, ShieldCheck, CircleAlert, Globe, LayoutDashboard, LoaderCircle, LogOut, MonitorSmartphone, Server, SlidersHorizontal, Waypoints } from 'lucide-vue-next'
+import { Activity, Check, ShieldCheck, CircleAlert, Globe, LayoutDashboard, LoaderCircle, LogOut, MonitorSmartphone, Server, SlidersHorizontal, Waypoints } from 'lucide-vue-next'
 import { useToast } from 'primevue/usetoast'
 import { usePrimeVue } from 'primevue/config'
 import { lang, t } from './i18n'
@@ -22,7 +22,6 @@ import DevicesView from './views/DevicesView.vue'
 import ServerView from './views/ServerView.vue'
 import MoreView from './views/MoreView.vue'
 import DiagView from './views/DiagView.vue'
-import HostsView from './views/HostsView.vue'
 import ZapretView from './views/ZapretView.vue'
 import ManualBanner from './views/ManualBanner.vue'
 
@@ -48,7 +47,7 @@ const totpOn = ref(true)
 const lost = ref(false)
 const loading = ref(false)
 
-type Tab = 'status' | 'sites' | 'devices' | 'server' | 'zapret' | 'hosts' | 'diag' | 'more'
+type Tab = 'status' | 'sites' | 'devices' | 'server' | 'zapret' | 'diag' | 'more'
 /** inBar — пункт нижней панели телефона; остальные открываются со страницы «Ещё». */
 const TABS = computed<{ value: Tab; label: string; short: string; icon: Component; inBar?: false }[]>(() => [
   { value: 'status', label: t('Обзор'), short: t('Обзор'), icon: LayoutDashboard },
@@ -56,18 +55,22 @@ const TABS = computed<{ value: Tab; label: string; short: string; icon: Componen
   { value: 'devices', label: t('Устройства'), short: t('Устройства'), icon: MonitorSmartphone },
   { value: 'server', label: t('Сервер'), short: t('Сервер'), icon: Server },
   { value: 'zapret', label: 'Zapret', short: 'Zapret', icon: ShieldCheck, inBar: false },
-  { value: 'hosts', label: t('Свои DNS-записи'), short: 'DNS', icon: BookOpenText, inBar: false },
   { value: 'diag', label: t('Диагностика'), short: t('Проверка'), icon: Activity, inBar: false },
-  { value: 'more', label: t('Дополнительно'), short: t('Ещё'), icon: SlidersHorizontal },
+  { value: 'more', label: t('Настройки'), short: t('Ещё'), icon: SlidersHorizontal },
 ])
-const fromHash = (): Tab | null => TABS.value.find((x) => `#${x.value}` === location.hash)?.value ?? null
+/** #more/<вкладка> — «Настройки»; #hosts (прежний адрес «Своих DNS-записей») — их вкладка «Сеть и DNS». */
+const fromHash = (): Tab | null => {
+  if (location.hash === '#hosts') { history.replaceState(null, '', '#more/dns'); return 'more' }
+  if (location.hash.startsWith('#more/')) return 'more'
+  return TABS.value.find((x) => `#${x.value}` === location.hash)?.value ?? null
+}
 const tab = ref<Tab>(fromHash() ?? 'status')
 const title = computed(() => TABS.value.find((x) => x.value === tab.value)?.label ?? '')
 const saveText = computed(() => saveLabel(saveStatus, !!service.value?.apply_pending))
 
 function go(t: Tab) {
   tab.value = t
-  if (location.hash !== `#${t}`) history.replaceState(null, '', `#${t}`)
+  if (location.hash !== `#${t}` && !(t === 'more' && location.hash.startsWith('#more/'))) history.replaceState(null, '', `#${t}`)
   window.scrollTo({ top: 0 })
   if (t === 'status') void loadStatus()
 }
@@ -226,7 +229,6 @@ onBeforeUnmount(() => { removeEventListener('hashchange', onHash); clearInterval
         <DevicesView v-else-if="tab === 'devices'" @navigate="go" />
         <ServerView v-else-if="tab === 'server'" @navigate="go" />
         <ZapretView v-else-if="tab === 'zapret'" @navigate="go" />
-        <HostsView v-else-if="tab === 'hosts'" />
         <DiagView v-else-if="tab === 'diag'" />
         <MoreView v-else :totp="totpOn" @navigate="go" />
       </main>

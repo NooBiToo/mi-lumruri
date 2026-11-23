@@ -2,7 +2,7 @@
 
 [Русский](guide.md) · **English** · [简体中文](guide.zh-CN.md)
 
-This guide covers Mi Lumruri version 0.9.1. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
+This guide covers Mi Lumruri version 0.9.2. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
 
 You need a BE7000 (RC06) with firmware 1.1.38, working root access over SSH from the home network, the installation TAR, and the parameters of your TrustTunnel server. The stock release firmware usually ships with SSH turned off.
 
@@ -134,11 +134,11 @@ The first command shows a QR code (scan it with an authenticator app) and prints
 
 ## 3. Configure in the panel
 
-The panel menu has eight screens: **Overview**, **Sites**, **Devices**, **Server**, **Zapret**, **Custom DNS records**, **Diagnostics** and **Advanced**. On a phone, the bottom bar has only Overview, Sites, Devices, Server and More. Zapret, Custom DNS records and Diagnostics open from More.
+The panel menu has seven screens: **Overview**, **Sites**, **Devices**, **Server**, **Zapret**, **Diagnostics** and **Settings**. On a phone, the bottom bar has only Overview, Sites, Devices, Server and More. Zapret and Diagnostics open from More, and so do the settings.
 
 Changes on the screens save automatically. There is no separate Apply button. The **Save** button exists only on the Server screen. The top bar shows whether the VPN is connected and the save progress: "Saving…", "Applying on the router", "Saved". The router applies settings on its own within a few seconds. The top bar also has the **VPN** switch and the Sign out button.
 
-The panel is available in Russian, English and Simplified Chinese. At first it picks the language from your browser. You can change it in Advanced and on the sign-in screen, and the choice is remembered in that browser. Detailed diagnostics lines sent by the router stay in Russian.
+The panel is available in Russian, English and Simplified Chinese. At first it picks the language from your browser. You can change it in Settings and on the sign-in screen, and the choice is remembered in that browser. Detailed diagnostics lines sent by the router stay in Russian.
 
 Three steps are enough for the first setup:
 
@@ -198,7 +198,7 @@ The **Speed and latency** card on the Server screen: the Measure button shows la
 In the **What to open via VPN** card, choose a mode:
 
 - **Selected only** (recommended). Selected services and your own sites go through the VPN. Everything else works as usual.
-- **Everything via VPN**. All internet traffic goes through the VPN, except sites from Keep off VPN and sites with DPI bypass. IPv6 stays closed in this mode until [IPv6 via VPN](#ipv6-via-vpn) is turned on in Advanced.
+- **Everything via VPN**. All internet traffic goes through the VPN, except sites from Keep off VPN and sites with DPI bypass. IPv6 stays closed in this mode until [IPv6 via VPN](#ipv6-via-vpn) is turned on in Settings.
 
 If only one device needs all its internet through the VPN, keep Selected only and turn on Whole internet for that device on the [Devices](#devices) screen.
 
@@ -248,9 +248,9 @@ Below is the **Traffic** card for a day or a week: how much went through the rou
 
 ### Custom DNS records
 
-A separate menu page (on a phone, under More). Enter a domain and an IP address on the home network and click Add. The domain and all its subdomains will resolve to that address, for example for a server with Traefik. Records save automatically. For details, see [DNS](#dns).
+Settings → **Network and DNS** tab, at the bottom. Enter a domain and an IP address on the home network and click Add. The domain and all its subdomains will resolve to that address, for example for a server with Traefik. Records save automatically. For details, see [DNS](#dns).
 
-**The panel by your own domain.** Add a record with the router IP (for example, `router.home.example.com` → `192.168.31.1`), and the panel opens at `https://router.home.example.com:8443/`: the router itself allows settings to be written from domains of its own DNS records that point to its address, together with subdomains. The panel certificate is issued for the IP, so the browser asks once to confirm it for the domain too. If the panel is opened through a reverse proxy on another device (for example, Traefik), add its address in Advanced → **Panel addresses** (for example, `https://router.home.example.com`); it takes effect immediately. Add it while the panel is open by the router IP.
+**The panel by your own domain.** Add a record with the router IP (for example, `router.home.example.com` → `192.168.31.1`), and the panel opens at `https://router.home.example.com:8443/`: the router itself allows settings to be written from domains of its own DNS records that point to its address, together with subdomains. The panel certificate is issued for the IP, so the browser asks once to confirm it for the domain too. If the panel is opened through a reverse proxy on another device (for example, Traefik), add its address in Settings → **Panel addresses** (for example, `https://router.home.example.com`); it takes effect immediately. Add it while the panel is open by the router IP.
 
 ### Diagnostics
 
@@ -272,20 +272,27 @@ Checks that are not needed right now (for example, the VPN is off) are listed in
 
 **Logs** shows the latest entries from the service, the TrustTunnel client and Zapret at the time of the check. They contain no passwords. **Copy report** puts the results and logs on the clipboard, which is handy to attach to a problem report. **Restart the service** starts the VPN and DPI bypass again and applies the settings. The connection drops for a few seconds.
 
-### Advanced
+### Settings
 
-Usually you do not need to change anything here. Changes save automatically. On a phone, the top of this screen has links to Zapret, Custom DNS records and Diagnostics.
+Usually you do not need to change anything here. Changes save automatically. The screen is called **Settings** (formerly Advanced) and is split into tabs; the selected tab shows in the page address (`#more/dns`, `#more/notify`, `#more/update`, `#more/panel`), so you can bookmark it. On a phone, the top of the screen has links to Zapret and Diagnostics.
 
+**Network and DNS**
 - **Ad blocking**: for all devices at home, through the router's DNS. See [Ad blocking](#ad-blocking).
 - **DNS for sites through the VPN**: server and encryption. See [DNS](#dns) and [Secure DNS (DoH/DoT)](#secure-dns-dohdot).
 - **IPv6 via VPN**: IPv6 through the tunnel for devices whose whole internet goes through the VPN. See [IPv6 via VPN](#ipv6-via-vpn).
 - **Secure DNS for other sites**: off, DoH or DoT. See [Secure DNS (DoH/DoT)](#secure-dns-dohdot).
-- **Panel addresses**: extra addresses the panel opens at, for example a reverse proxy. See [Custom DNS records](#custom-dns-records).
-- **Interface language**: Русский, English or 简体中文. The choice is remembered in this browser.
+- **Custom DNS records**: home servers by your own names. See [Custom DNS records](#custom-dns-records).
+
+**Notifications**: Telegram messages. See [Telegram notifications](#telegram-notifications).
+
+**Update**
 - **Update**: the installed version, and checking for and installing a new version from GitHub. See [Updating and rollback](#updating-and-rollback).
 - **Settings backup**: see [Settings backup](#settings-backup).
-- **Telegram notifications**: see [Telegram notifications](#telegram-notifications).
+
+**Panel**
+- **Interface language**: Русский, English or 简体中文. The choice is remembered in this browser.
 - **Panel sign-in**: whether the second factor is on. It is turned on over SSH. See [Second factor (TOTP)](#second-factor-totp).
+- **Panel addresses**: extra addresses the panel opens at, for example a reverse proxy. See [Custom DNS records](#custom-dns-records).
 
 ### Zapret
 
@@ -321,7 +328,7 @@ The effect depends on the ISP: where there is no filtering, Zapret changes nothi
 
 ## Secure DNS (DoH/DoT)
 
-The router already resolves sites that go through the VPN inside the tunnel. For other sites (including those with DPI bypass), queries go to the ISP's DNS in plain text by default. The ISP can spoof the answer, and then even Zapret will not help. The **Secure DNS for other sites** switch in Advanced (Off, DoH, DoT) sends them over an encrypted channel:
+The router already resolves sites that go through the VPN inside the tunnel. For other sites (including those with DPI bypass), queries go to the ISP's DNS in plain text by default. The ISP can spoof the answer, and then even Zapret will not help. The **Secure DNS for other sites** switch in Settings (Off, DoH, DoT) sends them over an encrypted channel:
 
 - **DoH** (DNS-over-HTTPS, port 443) is recommended: it looks like regular HTTPS. Servers: Cloudflare, Google, AdGuard DNS, NextDNS (needs a profile ID, 6 characters from your account) or your own server.
 - **DoT** (DNS-over-TLS, port 853): ISPs in Russia often block this port entirely. Quad9 is also available here (its DoH works only over HTTP/2, which the package does not include).
@@ -330,7 +337,7 @@ For your own server, enter the DoH link (`https://dns.example.com/dns-query`) or
 
 This works through the `mi-tt-dns` program on the router: dnsmasq sends it the queries (`server=127.0.0.1#5453`, `no-resolv`), and it sends them to the chosen server over persistent TLS connections, connecting directly by IP. The built-in servers (except NextDNS) also have IPv6 addresses as a fallback: they are used only if none of the IPv4 addresses responds, so a network without IPv6 loses nothing. Domains of sites through the VPN and custom DNS records are handled as before. TLS is rustls with RustCrypto cryptography and Mozilla root certificates (webpki-roots).
 
-If the server is unavailable (blocked, no connection, or right after boot the router clock is not set yet and the certificate fails verification), the query temporarily goes to the ISP's DNS. Otherwise the whole internet would be gone. Advanced and Diagnostics show how many answers came through the secure server and how many through the ISP, and the last error.
+If the server is unavailable (blocked, no connection, or right after boot the router clock is not set yet and the certificate fails verification), the query temporarily goes to the ISP's DNS. Otherwise the whole internet would be gone. Settings and Diagnostics show how many answers came through the secure server and how many through the ISP, and the last error.
 
 **DNS encryption through the VPN.** Queries about sites through the VPN already go inside the tunnel, and the ISP cannot see them. Only the segment from the VPN server to the DNS server stays in plain text. The **Encryption** switch in the DNS for sites through the VPN block (Plain, DoH, DoT) encrypts that segment too: a second `mi-tt-dns` instance (port 5454) binds its connections to the tunnel interface `mitt0`, so they cannot leave outside the tunnel. It has no fallback: if the tunnel does not work, queries do not go to the ISP, and sites from the list wait until the VPN works again. Usually you do not need this encryption: the queries already go inside the tunnel. It is available for Cloudflare, Google and AdGuard. Quad9 supports only DoT. NextDNS and a custom address support only plain mode (the server name for the certificate is unknown). Below the switch you can see how many encrypted answers came through the tunnel, or why the server does not respond.
 
@@ -338,21 +345,21 @@ If the server is unavailable (blocked, no connection, or right after boot the ro
 
 It works through the router's DNS: for domains from the ad and tracker list, dnsmasq answers "no such domain" (NXDOMAIN), and the query does not go out. It applies to all devices that get DNS from the router. A browser with its own "Secure DNS" (DoH) bypasses it.
 
-You choose the list in Advanced: **HaGeZi Light** (default, about 90 thousand domains, ads and trackers, rarely affects sites), **HaGeZi Normal** (about 200 thousand, broader, may occasionally break individual sites) or a **Custom link**: an https link to a list of domains or hosts lines (`0.0.0.0 domain`; `#` is a comment), file size up to 12 MiB. The [HaGeZi](https://github.com/hagezi/dns-blocklists) lists (GPL-3.0) are taken in the "domain with subdomains" format.
+You choose the list in Settings: **HaGeZi Light** (default, about 90 thousand domains, ads and trackers, rarely affects sites), **HaGeZi Normal** (about 200 thousand, broader, may occasionally break individual sites) or a **Custom link**: an https link to a list of domains or hosts lines (`0.0.0.0 domain`; `#` is a comment), file size up to 12 MiB. The [HaGeZi](https://github.com/hagezi/dns-blocklists) lists (GPL-3.0) are taken in the "domain with subdomains" format.
 
-The router downloads the list on its own: right after you turn it on or change the list, and then at the same frequency as the site lists. The Update button in the Site lists card on Sites updates it too. If the site lists update only manually, the ad list also updates only with this button after the first download (or when you change the list). If the download fails, the next attempt is in an hour. The downloaded list is checked: an HTML page, an empty response, or a file where more than 5% of lines cannot be parsed is not applied, and the previous one stays. Single malformed lines are skipped. The working copy is kept in RAM, and a compressed copy (about 0.6–1.2 MB) is in `/data/mi-lumruri/adblock.list.gz`, so blocking works right after a reboot. Advanced shows how many domains are in the list and when it was updated, or why it was not updated.
+The router downloads the list on its own: right after you turn it on or change the list, and then at the same frequency as the site lists. The Update button in the Site lists card on Sites updates it too. If the site lists update only manually, the ad list also updates only with this button after the first download (or when you change the list). If the download fails, the next attempt is in an hour. The downloaded list is checked: an HTML page, an empty response, or a file where more than 5% of lines cannot be parsed is not applied, and the previous one stays. Single malformed lines are skipped. The working copy is kept in RAM, and a compressed copy (about 0.6–1.2 MB) is in `/data/mi-lumruri/adblock.list.gz`, so blocking works right after a reboot. Settings shows how many domains are in the list and when it was updated, or why it was not updated.
 
 ## DNS
 
 Devices keep getting DNS from the router: DHCP and local names work as before. For domains from the lists, dnsmasq puts the addresses from the answers into rule sets, and the router uses them to choose the route.
 
-The router resolves domains of sites through the VPN via a separate DNS server, and queries to it go through the tunnel. You choose the server on the **Advanced** screen in the DNS for sites through the VPN block: Cloudflare `1.1.1.1` (default), Quad9 `9.9.9.9`, Google `8.8.8.8`, AdGuard DNS `94.140.14.14`, NextDNS `45.90.28.0` or Custom address, any public IPv4 address. For NextDNS, link the IP of your VPN server in your NextDNS account (Linked IP), otherwise the filters do not apply. The router resolves other domains as usual or through [secure DNS](#secure-dns-dohdot).
+The router resolves domains of sites through the VPN via a separate DNS server, and queries to it go through the tunnel. You choose the server in **Settings** → Network and DNS in the DNS for sites through the VPN block: Cloudflare `1.1.1.1` (default), Quad9 `9.9.9.9`, Google `8.8.8.8`, AdGuard DNS `94.140.14.14`, NextDNS `45.90.28.0` or Custom address, any public IPv4 address. For NextDNS, link the IP of your VPN server in your NextDNS account (Linked IP), otherwise the filters do not apply. The router resolves other domains as usual or through [secure DNS](#secure-dns-dohdot).
 
 **Custom DNS records**: a domain and all its subdomains resolve to the given IPv4 or IPv6 address, and the query does not go out (dnsmasq `address=/domain/address`). Example: a home server with Traefik on `192.168.31.10` and the domain `home.example.com`. One record covers `traefik.home.example.com`, `pve.home.example.com` and the rest. It works for devices that get DNS from the router. The record applies while the Mi Lumruri service runs. Do not add such a domain to the lists of sites through the VPN or Zapret: the home server must open directly.
 
 ## IPv6 via VPN
 
-By default IPv6 does not go through the tunnel: devices with VPN, Zapret or blocking rules have outbound IPv6 closed, and they use IPv4. The **IPv6 via VPN** switch in Advanced opens IPv6 through the tunnel for devices whose whole internet goes through the VPN:
+By default IPv6 does not go through the tunnel: devices with VPN, Zapret or blocking rules have outbound IPv6 closed, and they use IPv4. The **IPv6 via VPN** switch in Settings opens IPv6 through the tunnel for devices whose whole internet goes through the VPN:
 
 - for the whole network or selected devices in Everything via VPN mode;
 - for devices that have Whole internet turned on on the Devices screen.
@@ -383,7 +390,7 @@ Under the simple screens runs the controller's rule model: source (device, netwo
 
 ## Updating and rollback
 
-**From the panel** (since version 0.4.0). Advanced has an Update block. The router does not look for new versions on its own: the Check button finds the latest release on GitHub. The router needs access to `api.github.com` and `github.com`. If a newer one exists, the Update to … button appears. The router downloads the package itself, compares its SHA-256 with the release's `SHA256SUMS` file, verifies the signature with the pinned key and restarts the service. The panel disappears for about half a minute, and settings are kept. After the restart the router checks for up to 5 minutes that the new version works: the service and the panel are running and, if settings applied without errors before the update, they apply now too. If not, it restores the previous version on its own, and the panel shows "Version … did not start working, so … was restored" with the reason. Automatic rollback works for updates from the panel starting with version 0.6.0 (the check is run by the version already installed). Starting with 0.7.0 the router checks for a new version on its own once a day (or once a week, or only manually; the choice is in the same block). It only checks: if there is a newer version, a mark appears next to Advanced, and with notifications on you get a Telegram message. You install it with the button. If the router runs your own build signed with your key, the panel offers Switch to GitHub releases and update. The router then accepts the package with the GitHub release key (`e4a271890e5643ab`) and pins it. The panel does not accept other keys.
+**From the panel** (since version 0.4.0). Settings → Update has an Update block. The router does not look for new versions on its own: the Check button finds the latest release on GitHub. The router needs access to `api.github.com` and `github.com`. If a newer one exists, the Update to … button appears. The router downloads the package itself, compares its SHA-256 with the release's `SHA256SUMS` file, verifies the signature with the pinned key and restarts the service. The panel disappears for about half a minute, and settings are kept. After the restart the router checks for up to 5 minutes that the new version works: the service and the panel are running and, if settings applied without errors before the update, they apply now too. If not, it restores the previous version on its own, and the panel shows "Version … did not start working, so … was restored" with the reason. Automatic rollback works for updates from the panel starting with version 0.6.0 (the check is run by the version already installed). Starting with 0.7.0 the router checks for a new version on its own once a day (or once a week, or only manually; the choice is in the same block). It only checks: if there is a newer version, a mark appears next to Settings, and with notifications on you get a Telegram message. You install it with the button. If the router runs your own build signed with your key, the panel offers Switch to GitHub releases and update. The router then accepts the package with the GitHub release key (`e4a271890e5643ab`) and pins it. The panel does not accept other keys.
 
 **From a computer.** To update, repeat the quick install, or copy the new TAR and repeat step 2 up to the login setup. Existing settings and the second factor are kept. Releases are stored in `/data/mi-lumruri/releases` (or in the `--store` directory): the current and the previous one. Older ones are deleted. A new release needs about 4.5 MB plus a 2 MiB reserve. If that much is not available, the installer deletes old releases, and with very little room it installs the update without keeping the previous release. Rollback is then unavailable. See [If there is not enough space in `/data`](#if-there-is-not-enough-space-in-data). Files that do not change between versions (usually the TrustTunnel client and nfqws2) are not copied again by a new release; it refers to them in the current one (a hard link), so two releases take noticeably less space in the store. FAT on a USB drive does not support links, so there files are copied as before.
 
@@ -419,7 +426,7 @@ Rollback is available after you install a second version, if the installer kept 
 
 ## Telegram notifications
 
-In Advanced → **Telegram notifications**, the router messages you in Telegram when:
+In Settings → **Telegram notifications**, the router messages you in Telegram when:
 
 - the tunnel went down (the client has not been connected for more than 3 minutes) and when it is back up, and when the watchdog restarted the client;
 - the router switched to the backup server or returned to the primary;
@@ -433,7 +440,7 @@ Messages go through the VPN while the tunnel works, otherwise directly. If Teleg
 
 ## Settings backup
 
-In Advanced → **Settings backup**, the **Download backup** button saves the file `mi-lumruri-backup-<date>.json` to your computer: settings, rules, devices, custom DNS records and your own lists. Server passwords, subscription links and the panel login (password and second factor) go into the backup only if you turn on **Include server passwords and panel login** and set a backup password (at least 8 characters). The router encrypts that part with the backup password using Argon2id and ChaCha20-Poly1305. Without the password it cannot be read or restored. The panel TLS key and the release signing key are not included: they belong to a specific router.
+In Settings → **Settings backup**, the **Download backup** button saves the file `mi-lumruri-backup-<date>.json` to your computer: settings, rules, devices, custom DNS records and your own lists. Server passwords, subscription links and the panel login (password and second factor) go into the backup only if you turn on **Include server passwords and panel login** and set a backup password (at least 8 characters). The router encrypts that part with the backup password using Argon2id and ChaCha20-Poly1305. Without the password it cannot be read or restored. The panel TLS key and the release signing key are not included: they belong to a specific router.
 
 **Restore from file…** replaces the current settings with those from the backup and applies them right away. The router first checks the whole backup and writes nothing if it is damaged, was made by a newer version, or its settings fail validation. If the backup contains passwords, the panel asks for the backup password; the Without passwords button restores settings only. A backup also works for another BE7000: install the package on it, sign in to the panel and restore.
 

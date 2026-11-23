@@ -33,7 +33,7 @@ function remove(d: string) {
   <div class="card dlist">
     <div class="dlist__head">
       <div class="dlist__titles">
-        <h2 id="hosts-title" class="card__title">{{ t('Записи') }}<span class="count" :aria-label="plural(model.length, 'запись', 'записи', 'записей')">{{ model.length }}</span></h2>
+        <h2 id="hosts-title" class="card__title">{{ t('Свои DNS-записи') }}<span class="count" :aria-label="plural(model.length, 'запись', 'записи', 'записей')">{{ model.length }}</span></h2>
         <p class="card__sub">{{ t('Домен и все его поддомены открываются по указанному адресу — например, домашний сервер с Traefik.') }}
           {{ t('Запись для') }} <span class="num">home.example.com</span> {{ t('подходит и для') }} <span class="num">pve.home.example.com</span>. {{ t('Изменения сохраняются сами.') }}</p>
       </div>
