@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Config, Lease, ListCatalog, ManageResponse } from './api'
 import { defaultSimple, toConfig } from './simple'
-import { applyFailure, deviceRows, failureText, zapretIdle, knownDevices, lines, plural, readSimple, sitesSummary, strategyLabel, testedAt, tunnelState, when, zapretProgress, zapretResult } from './status'
+import { applyFailure, deviceLabel, deviceRows, isRandomMac, shortVendor, failureText, zapretIdle, knownDevices, lines, plural, readSimple, sitesSummary, strategyLabel, testedAt, tunnelState, when, zapretProgress, zapretResult } from './status'
 
 const fresh: Config = { version: 1, profiles: [], networks: [], devices: [], groups: [], rules: [], default_action: { type: 'direct' } }
 const profile = { id: 'tt', name: 'Мой сервер', kind: 'trusttunnel' as const, on_failure: 'block' as const,
@@ -87,6 +87,29 @@ describe('status', () => {
     const cfg = { ...fresh, devices: [{ id: 'dev-z', name: 'Ноутбук', mac: 'aa:bb:cc:00:00:09', network: 'home' }] }
     const rows = deviceRows([lease('aa:bb:cc:00:00:02', 'iPhone'), lease('aa:bb:cc:00:00:03', '')], cfg, {}, ['aa:bb:cc:00:00:07'])
     expect(rows.map((r) => [r.mac.slice(-2), r.name, r.online])).toEqual([['02', 'iPhone', true], ['03', '', true], ['09', 'Ноутбук', false], ['07', '', false]])
+  })
+
+  it('имена устройств: объявленное в сети точнее DHCP, имя пользователя важнее всего; подпись без имени', () => {
+    const cfg = { ...fresh, device_names: { 'aa:bb:cc:00:00:02': 'Телефон Эрлана' } }
+    const tv = { ...lease('aa:bb:cc:00:00:01', 'android-1234'), vendor: 'SAMSUNG ELECTRONICS CO.,LTD', found: { name: 'Гостиная', kind: 'tv', model: 'Chromecast', source: 'mdns' as const, seen: 1 } }
+    const ph = { ...lease('aa:bb:cc:00:00:02', 'iPhone'), found: { name: 'iPhone Эрлана', kind: 'phone', source: 'mdns' as const, seen: 1 } }
+    const anon = { ...lease('a2:61:34:76:10:68', ''), random: true }
+    const hp = { ...lease('3c:d9:2b:00:00:05', ''), vendor: 'Hewlett Packard' }
+    const rows = deviceRows([tv, ph, anon, hp], cfg, {}, [])
+    const by = (m: string) => rows.find((r) => r.mac === m)!
+    expect([by('aa:bb:cc:00:00:01').name, by('aa:bb:cc:00:00:01').kind, by('aa:bb:cc:00:00:01').named]).toEqual(['Гостиная', 'tv', false])
+    expect([by('aa:bb:cc:00:00:02').name, by('aa:bb:cc:00:00:02').named]).toEqual(['Телефон Эрлана', true])
+    expect(deviceLabel(by('a2:61:34:76:10:68'))).toBe('Устройство со скрытым адресом')
+    expect(deviceLabel(by('3c:d9:2b:00:00:05'))).toBe('Устройство Hewlett Packard')
+    expect(deviceLabel({ name: '', vendor: null, random: false })).toBe('Устройство без имени')
+    expect(shortVendor('SAMSUNG ELECTRONICS CO.,LTD')).toBe('Samsung')
+    expect(shortVendor('HUAWEI TECHNOLOGIES CO.,LTD')).toBe('Huawei')
+    expect(shortVendor('Apple, Inc.')).toBe('Apple')
+    expect(isRandomMac('a2:61:34:76:10:68') && !isRandomMac('f4:3b:d8:ca:c8:1c')).toBe(true)
+    // имена пользователя переносятся в полные настройки и не отмечают устройство
+    const out = toConfig({ ...cfg, profiles: [profile] }, defaultSimple(), lan, catalog, knownDevices([tv, ph], cfg, {}))
+    expect(out.device_names).toEqual({ 'aa:bb:cc:00:00:02': 'Телефон Эрлана' })
+    expect(out.devices).toEqual([])
   })
 
   it('поля «по домену в строке» и сводка', () => {

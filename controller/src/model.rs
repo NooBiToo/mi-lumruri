@@ -35,6 +35,10 @@ pub struct Config {
     /// туннель). Выборочные правила по доменам IPv6 не используют: адреса доменов попадают в наборы только по IPv4.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ipv6_via_vpn: bool,
+    /// Имена устройств, которые дал пользователь (MAC → имя): только для экрана «Устройства», на маршрутизацию не
+    /// влияют и устройство не отмечают.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub device_names: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]

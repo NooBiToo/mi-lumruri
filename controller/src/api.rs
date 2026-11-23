@@ -88,7 +88,15 @@ pub fn check_origin(allowed: &str, origin: Option<&str>, fetch_site: Option<&str
     let Some(o) = origin else {
         return WriteAccess::Denied(Response::error(403, "origin_required", "запрос на запись без заголовка Origin отклонён"));
     };
-    if !list.contains(&o) {
+    // «https://*.домен[:порт]» — и поддомены (свои DNS-записи действуют на домен вместе с поддоменами)
+    let wild = |pat: &str| pat.split_once("://*.").is_some_and(|(sch, rest)| {
+        let (dom, port) = rest.split_once(':').map_or((rest, None), |(d, p)| (d, Some(p)));
+        o.strip_prefix(&format!("{sch}://")).is_some_and(|h| {
+            let (host, hp) = h.split_once(':').map_or((h, None), |(x, p)| (x, Some(p)));
+            hp == port && host.len() > dom.len() + 1 && host.ends_with(&format!(".{dom}")) && host.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+        })
+    });
+    if !list.contains(&o) && !list.iter().any(|p| wild(p)) {
         return WriteAccess::Denied(Response::error(403, "origin_forbidden", format!("источник {o} не допущен к записи")));
     }
     if let Some(s) = fetch_site {

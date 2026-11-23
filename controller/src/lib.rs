@@ -5,6 +5,8 @@ pub mod api;
 pub mod auth;
 pub mod backup;
 pub mod caps;
+pub mod devices;
+pub mod discover;
 pub mod dns;
 pub mod gate;
 pub mod manage;

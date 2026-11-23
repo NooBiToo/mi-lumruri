@@ -90,6 +90,8 @@ export interface Config {
   zapret?: ZapretConfig
   /** IPv6 через VPN для источников «весь интернет через VPN». */
   ipv6_via_vpn?: boolean
+  /** Имена устройств от пользователя (MAC → имя): только для экрана «Устройства». */
+  device_names?: Record<string, string>
 }
 
 export interface Issue { path: string; code: string; message: string }
@@ -168,7 +170,16 @@ async function call<T extends { ok: boolean; issues: Issue[]; error?: ApiError }
 const json = (body: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
 
 /** Клиент из аренд DHCP роутера; hostname — данные клиента LAN, показываются только как текст. */
-export interface Lease { mac: string; ip: string; hostname: string; device: string | null }
+/** Что устройство объявило о себе в сети (mDNS, SSDP): имя, тип (tv, phone, tablet, computer, printer, speaker…), модель. */
+export interface FoundName { name: string; kind?: string; model?: string; source: 'mdns' | 'ssdp'; seen: number }
+/**
+ * Устройство из аренд DHCP. hostname — имя, которое устройство сообщило при подключении; name — имя от пользователя;
+ * vendor — производитель по MAC (таблица прошивки); random — случайный (приватный) MAC; link — подключение по trafficd.
+ */
+export interface Lease {
+  mac: string; ip: string; hostname: string; device: string | null
+  name?: string | null; vendor?: string | null; icon?: string | null; random?: boolean; found?: FoundName | null; link?: Record<string, string> | null
+}
 
 export interface ManageResponse {
   ok: boolean
@@ -295,6 +306,10 @@ export const manage = {
   // секрет только записывается: панель не получает его обратно
   setSecret: (profile_id: string, secret: ProfileSecret) => call<ManageResponse>('/secrets', json({ profile_id, secret })),
   applyRequest: () => call<ManageResponse>('/apply-request', json({})),
+  /** Имя устройства (пустое — убрать); заявку на применение не ставит. */
+  setDeviceName: (base_revision: string, mac: string, name: string) => call<SaveResponse>('/device-name', json({ base_revision, mac, name })),
+  /** Поиск имён, которые устройства объявляют в сети (служба, несколько секунд). */
+  discover: () => call<ManageResponse>('/discover', json({})),
   notifyState: () => call<NotifyResponse>('/notify'),
   stats: () => call<StatsResponse>('/stats'),
   speed: () => call<SpeedResponse>('/speed'),

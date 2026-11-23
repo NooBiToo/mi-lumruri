@@ -288,6 +288,8 @@ stats_sample() {
   [ -f "$STATE/stats.json" ] || { [ -f "$ETC/stats.json" ] && cp -f "$ETC/stats.json" "$STATE/stats.json"; }
   w="$(wan_dev)"
   ${MITT_UBUS:-ubus} call trafficd ip >"$STATE/trafficd.json" 2>/dev/null || rm -f "$STATE/trafficd.json"
+  # подключение устройств (Wi‑Fi, сигнал) для экрана «Устройства»
+  ${MITT_UBUS:-ubus} call trafficd hw >"$STATE/trafficd-hw.json.t" 2>/dev/null && mv -f "$STATE/trafficd-hw.json.t" "$STATE/trafficd-hw.json"; rm -f "$STATE/trafficd-hw.json.t"
   if [ -f "$STATE/trafficd.json" ]; then
     MI_TT_LEASES="$LEASES" "$BIN/mi-tt-ctl" stats-sample "$STATE/stats.json" "$(if_bytes mitt0)" "$( [ -n "$w" ] && if_bytes "$w" || echo -)" "$STATE/trafficd.json" 2>>"$LOG/service.log"
   else
@@ -297,6 +299,29 @@ stats_sample() {
   # раз в час — копия в /data
   if [ $((now / 3600)) != "$(cat "$STATE/stats.saved" 2>/dev/null)" ] && [ -f "$STATE/stats.json" ]; then
     cp -f "$STATE/stats.json" "$ETC/stats.json.t" 2>/dev/null && mv -f "$ETC/stats.json.t" "$ETC/stats.json" && echo $((now / 3600)) >"$STATE/stats.saved"
+  fi
+}
+
+# --- сведения об устройствах (экран «Устройства», controller/src/devices.rs и discover.rs) ---
+# таблица производителей по MAC из прошивки (oui.tar.gz) — один раз в RAM; имена, объявленные в сети (mDNS, SSDP), —
+# раз в MITT_NAMES_EVERY (10 мин) и по кнопке панели; копия в /data — раз в час (переживает перезагрузку)
+OUI_TGZ="${MITT_OUI_TGZ:-$R/usr/share/xiaoqiang/oui.tar.gz}"
+lan_ip() { local ip; ip="$( (uci ${MITT_UCI_CONF:+-c "$MITT_UCI_CONF"} -q get network.lan.ipaddr) 2>/dev/null)"; echo "${ip:-192.168.31.1}"; }
+devices_prepare() {
+  [ -s "$STATE/oui.txt" ] || { [ -f "$OUI_TGZ" ] && tar -xzOf "$OUI_TGZ" >"$STATE/oui.txt.t" 2>/dev/null && mv -f "$STATE/oui.txt.t" "$STATE/oui.txt"; rm -f "$STATE/oui.txt.t"; }
+  [ -f "$STATE/names.json" ] || { [ -f "$ETC/names.json" ] && cp -f "$ETC/names.json" "$STATE/names.json"; }
+  return 0
+}
+names_scan() {
+  local now last
+  now=$(date +%s); last="$(cat "$STATE/names.last" 2>/dev/null || echo 0)"
+  if [ -f "$STATE/discover.request" ]; then rm -f "$STATE/discover.request"
+  elif [ $((now - last)) -lt "${MITT_NAMES_EVERY:-600}" ] && [ "$now" -ge "$last" ]; then return 0; fi
+  pid_alive names && return 0
+  echo "$now" >"$STATE/names.last"
+  start_bg names env MI_TT_LEASES="$LEASES" "$BIN/mi-tt-ctl" names-scan --from "$(lan_ip)" --out "$STATE/names.json" --wait "${MITT_NAMES_WAIT:-3000}"
+  if [ $((now / 3600)) != "$(cat "$STATE/names.saved" 2>/dev/null)" ] && [ -f "$STATE/names.json" ]; then
+    cp -f "$STATE/names.json" "$ETC/names.json.t" 2>/dev/null && mv -f "$ETC/names.json.t" "$ETC/names.json" && echo $((now / 3600)) >"$STATE/names.saved"
   fi
 }
 

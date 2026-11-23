@@ -102,6 +102,14 @@ pub fn main() -> ExitCode {
             Ok(false) => ExitCode::from(1),
             Err(m) => { eprintln!("{m}"); ExitCode::from(2) }
         },
+        // имена, которые устройства объявляют в LAN (mDNS, SSDP) — служба, раз в несколько минут
+        ["names-scan", "--from", from, "--out", out, rest @ ..] => {
+            let wait = match rest { ["--wait", ms] => ms.parse().unwrap_or(3000), _ => 3000 };
+            match mi_tt::discover::scan_cmd(from, out, wait, auth::now()) {
+                Ok(n) => { println!("{n}"); ExitCode::SUCCESS }
+                Err(m) => { eprintln!("{m}"); ExitCode::from(2) }
+            }
+        }
         ["notify-conf", secrets] => match read_limited(secrets, 256 * 1024).ok().and_then(|b| serde_json::from_slice::<render::Secrets>(&b).ok()).and_then(|s| mi_tt::notify::conf_lines(&s)) {
             Some(l) => { print!("{l}"); ExitCode::SUCCESS }
             None => ExitCode::from(1),
@@ -432,7 +440,15 @@ fn cgi_request() -> gate::Reply {
     let origin = if method == "GET" {
         WriteAccess::Denied(Response::error(405, "method_not_allowed", "чтение"))
     } else {
-        check_origin(&env("MI_TT_ALLOWED_ORIGINS").unwrap_or_default(), env("HTTP_ORIGIN").as_deref(), env("HTTP_SEC_FETCH_SITE").as_deref())
+        // и домены своих DNS-записей, указывающие на роутер (панель по своему домену) — см. manage::host_origins
+        let mut allowed = env("MI_TT_ALLOWED_ORIGINS").unwrap_or_default();
+        if let Some(cfg) = env("MI_TT_CONFIG") {
+            for o in mi_tt::manage::host_origins(&allowed, &cfg) {
+                allowed.push(',');
+                allowed.push_str(&o);
+            }
+        }
+        check_origin(&allowed, env("HTTP_ORIGIN").as_deref(), env("HTTP_SEC_FETCH_SITE").as_deref())
     };
     let cookie = env("HTTP_COOKIE");
     // HTTPS от самого веб-сервера (uhttpd с TLS) или от локального TLS-терминатора: на стоке 1.1.38 uhttpd без ustream-ssl,

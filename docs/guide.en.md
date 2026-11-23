@@ -2,7 +2,7 @@
 
 [Русский](guide.md) · **English** · [简体中文](guide.zh-CN.md)
 
-This guide covers Mi Lumruri version 0.8.0. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
+This guide covers Mi Lumruri version 0.9.0. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
 
 You need a BE7000 (RC06) with firmware 1.1.38, working root access over SSH from the home network, the installation TAR, and the parameters of your TrustTunnel server. The stock release firmware usually ships with SSH turned off.
 
@@ -219,7 +219,16 @@ Your own domain lists take one address per line. Subdomains are included automat
 - **All devices** (recommended): site settings apply to the whole home network, and new devices are included automatically.
 - **Selected only**: for example, only the TV and the laptop. Other devices open all sites directly. You select the devices with the Via VPN switch.
 
-The list is built from connected devices (DHCP leases): name, MAC, IP address and whether the device is online. A long list has a search. In Selected only mode, the pencil button **Rename** sets a readable name that is only for you. A renamed device is selected automatically.
+The list is built from connected devices (DHCP leases); a long list has a search. A device's name is taken in this order:
+
+1. the name you gave it: the pencil button **Rename** on any device, in any mode. The name saves immediately, is only for you and does not affect the VPN: the device is not selected and routes do not change;
+2. the name the device announces on the network itself: iPhone, iPad and Mac ("Erlan's iPhone"), Chromecast and Android TV ("Living room"), AirPlay speakers, printers, TVs with UPnP. The router queries the network every 10 minutes (mDNS and SSDP, only replies to its own queries); the **Find names on the network** button does it right away;
+3. the name the device reported when connecting (DHCP);
+4. the manufacturer by MAC address, from the Xiaomi firmware's manufacturer table: "Samsung device".
+
+The icon shows the type when it is known: TV, phone, tablet, computer, printer, speaker. The **hidden MAC** mark is on devices with a random Wi‑Fi address, which iPhone and Android use by default. Such an address can change, and then the name and the VPN choice are "lost". To avoid that, turn off "Private Wi‑Fi Address" for your home network on the phone (iPhone: Settings → Wi‑Fi → (i) next to the network) or "Randomized MAC" (Android: network settings → Privacy → Device MAC).
+
+**Details** on a device: how its traffic goes now, the manufacturer, its network name and model, the name when connecting, the connection (cable or Wi‑Fi with signal level, from firmware data), IP, MAC and traffic per day and week.
 
 **Whole internet** is a switch on each device when the Sites screen is in Selected only mode. For such a device, all sites go through the VPN, not only the selected ones. Keep off VPN and sites with DPI bypass still apply to it. The switch also works in All devices mode, for example for a TV that needs all its internet through the VPN while the other devices send only the selected sites through the VPN.
 
@@ -240,6 +249,8 @@ Below is the **Traffic** card for a day or a week: how much went through the rou
 ### Custom DNS records
 
 A separate menu page (on a phone, under More). Enter a domain and an IP address on the home network and click Add. The domain and all its subdomains will resolve to that address, for example for a server with Traefik. Records save automatically. For details, see [DNS](#dns).
+
+**The panel by your own domain.** Add a record with the router IP (for example, `router.home.example.com` → `192.168.31.1`), and the panel opens at `https://router.home.example.com:8443/`: the router itself allows settings to be written from domains of its own DNS records that point to its address, together with subdomains. The panel certificate is issued for the IP, so the browser asks once to confirm it for the domain too. If the panel is opened through a reverse proxy on another device (for example, Traefik), add that address to `/data/mi-lumruri/etc/panel.origins` (one per line, for example `https://router.home.example.com`) and restart the service.
 
 ### Diagnostics
 

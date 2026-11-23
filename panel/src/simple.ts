@@ -159,6 +159,10 @@ export function toConfig(base: Config, s: Simple, lan: Lan, catalog: ListCatalog
     const m = normalizeMac(d.mac)
     if (m) names.set(m, cleanName(d.name))
   }
+  for (const [mac, n] of Object.entries(base.device_names ?? {})) {
+    const m = normalizeMac(mac)
+    if (m && cleanName(n)) names.set(m, cleanName(n))
+  }
   for (const k of known) {
     const m = normalizeMac(k.mac)
     const n = cleanName(k.name)
@@ -209,6 +213,7 @@ export function toConfig(base: Config, s: Simple, lan: Lan, catalog: ListCatalog
   if (base.zapret !== undefined) out.zapret = base.zapret
   if (base.schedule !== undefined) out.schedule = base.schedule
   if (base.ipv6_via_vpn) out.ipv6_via_vpn = true
+  if (base.device_names && Object.keys(base.device_names).length) out.device_names = base.device_names
   return out
 }
 

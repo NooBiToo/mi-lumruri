@@ -13,7 +13,7 @@ import { gunzipSync } from 'node:zlib'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
-const VERSION = args.includes('--version') ? args[args.indexOf('--version') + 1] : '0.8.0'
+const VERSION = args.includes('--version') ? args[args.indexOf('--version') + 1] : '0.9.0'
 const OUT = args.includes('--out') ? args[args.indexOf('--out') + 1] : join(ROOT, 'out', 'package')
 const PKG = join(OUT, 'mi-lumruri')
 const DL = join(ROOT, '.tools', 'lab', 'dl')

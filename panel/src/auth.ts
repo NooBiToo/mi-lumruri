@@ -48,6 +48,7 @@ export function loginMessage(r: ApiResult<SessionResponse>): string | null {
     case 'https_required':
       return t('Вход возможен только по HTTPS.')
     case 'origin_forbidden':
+      return t('Запрос отклонён: страница открыта не с адреса панели. Откройте панель по IP роутера или добавьте в «Свои DNS-записи» ваш домен с IP роутера — тогда панель заработает и по нему.')
     case 'origin_required':
     case 'cross_site':
     case 'write_disabled':

@@ -89,10 +89,16 @@ export function knownDevices(leases: Lease[], cfg: Config, renames: Record<strin
   for (const l of leases) {
     const m = normalizeMac(l.mac)
     if (m && l.hostname) names.set(m, l.hostname)
+    // имя, объявленное в сети (mDNS, SSDP), точнее имени из DHCP
+    if (m && l.found?.name) names.set(m, l.found.name)
   }
   for (const d of cfg.devices) {
     const m = normalizeMac(d.mac)
     if (m && d.name) names.set(m, d.name)
+  }
+  for (const [mac, n] of Object.entries(cfg.device_names ?? {})) {
+    const m = normalizeMac(mac)
+    if (m && n.trim()) names.set(m, n.trim())
   }
   for (const [mac, name] of Object.entries(renames)) {
     const m = normalizeMac(mac)
@@ -101,19 +107,49 @@ export function knownDevices(leases: Lease[], cfg: Config, renames: Record<strin
   return [...names].map(([mac, name]) => ({ mac, name }))
 }
 
-/** Строка устройства на экране: имя (или «Устройство без имени»), IP, MAC, в сети ли сейчас. */
-export interface DeviceRow { mac: string; name: string; ip: string | null; online: boolean }
+/**
+ * Строка устройства на экране: имя (от пользователя, объявленное в сети или из DHCP), IP, MAC, в сети ли сейчас и
+ * подробности: производитель, тип, случайный MAC, подключение. named — имя дал пользователь.
+ */
+export interface DeviceRow {
+  mac: string; name: string; ip: string | null; online: boolean
+  named: boolean; hostname: string; vendor: string | null; kind: string; model: string; random: boolean
+  found: Lease['found']; link: Lease['link']
+}
+
+/** Случайный (локально администрируемый) MAC: так телефоны и ноутбуки скрывают настоящий адрес. */
+export function isRandomMac(mac: string): boolean {
+  return (Number.parseInt(mac.slice(0, 2), 16) & 0x02) !== 0
+}
+
+/** Подпись строки без имени: «Устройство Samsung» по производителю или «Устройство без имени». */
+export function deviceLabel(d: Pick<DeviceRow, 'name' | 'vendor' | 'random'>): string {
+  if (d.name) return d.name
+  if (d.vendor) return t('Устройство {vendor}', { vendor: shortVendor(d.vendor) })
+  return d.random ? t('Устройство со скрытым адресом') : t('Устройство без имени')
+}
+
+/** «SAMSUNG ELECTRONICS CO.,LTD» → «Samsung Electronics»; «Apple, Inc.» → «Apple». */
+export function shortVendor(v: string): string {
+  const s = v.replace(/[.,]?\s*(co\.?,?\s*ltd\.?|corporation|corp\.?|inc\.?|ltd\.?|limited|gmbh|technologies|technology|electronics co)\b.*$/i, '').trim() || v.trim()
+  return s === s.toUpperCase() && s.length > 3 ? s.toLowerCase().replace(/\b\p{L}/gu, (c) => c.toUpperCase()) : s
+}
 
 export function deviceRows(leases: Lease[], cfg: Config, renames: Record<string, string>, selected: string[]): DeviceRow[] {
   const known = new Map(knownDevices(leases, cfg, renames).map((k) => [k.mac, k.name]))
   const rows = new Map<string, DeviceRow>()
+  const userNamed = new Set([...cfg.devices.map((d) => normalizeMac(d.mac)), ...Object.keys(cfg.device_names ?? {}).map(normalizeMac), ...Object.keys(renames).map(normalizeMac)])
+  const row = (m: string, l: Lease | null): DeviceRow => ({
+    mac: m, name: known.get(m) ?? '', ip: l?.ip ?? null, online: !!l, named: userNamed.has(m), hostname: l?.hostname ?? '',
+    vendor: l?.vendor ?? null, kind: l?.found?.kind ?? '', model: l?.found?.model ?? '', random: l?.random ?? isRandomMac(m), found: l?.found ?? null, link: l?.link ?? null,
+  })
   for (const l of leases) {
     const m = normalizeMac(l.mac)
-    if (m && !rows.has(m)) rows.set(m, { mac: m, name: known.get(m) ?? '', ip: l.ip, online: true })
+    if (m && !rows.has(m)) rows.set(m, row(m, l))
   }
   for (const mac of [...cfg.devices.map((d) => d.mac), ...selected]) {
     const m = normalizeMac(mac)
-    if (m && !rows.has(m)) rows.set(m, { mac: m, name: known.get(m) ?? '', ip: null, online: false })
+    if (m && !rows.has(m)) rows.set(m, row(m, null))
   }
   return [...rows.values()].sort((a, b) => Number(b.online) - Number(a.online) || (a.name || '￿').localeCompare(b.name || '￿', 'ru'))
 }

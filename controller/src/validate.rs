@@ -67,6 +67,9 @@ pub fn check_ifname(n: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Имён устройств — не больше (у дома столько устройств не бывает; защита размера настроек).
+pub const MAX_DEVICE_NAMES: usize = 512;
+
 /// Нормализует MAC в вид `aa:bb:cc:dd:ee:ff`. Групповые адреса устройствам не принадлежат.
 pub fn normalize_mac(mac: &str) -> Result<String, String> {
     let parts: Vec<&str> = if mac.contains(':') { mac.split(':').collect() } else { mac.split('-').collect() };
@@ -249,6 +252,15 @@ pub fn validate_config(c: &Config) -> Vec<Issue> {
     limit(&mut issues, "profiles", c.profiles.len(), MAX_ITEMS);
     limit(&mut issues, "networks", c.networks.len(), MAX_ITEMS);
     limit(&mut issues, "devices", c.devices.len(), MAX_ITEMS);
+    limit(&mut issues, "device_names", c.device_names.len(), MAX_DEVICE_NAMES);
+    for (mac, name) in &c.device_names {
+        if normalize_mac(mac).ok().as_deref() != Some(mac.as_str()) {
+            issues.push(Issue::new(format!("device_names.{mac}"), "bad_mac", "MAC-адрес ожидается в виде aa:bb:cc:dd:ee:ff"));
+        }
+        if name.trim().is_empty() || name.chars().count() > 64 || name.chars().any(char::is_control) {
+            issues.push(Issue::new(format!("device_names.{mac}"), "bad_name", "имя — от 1 до 64 печатных символов"));
+        }
+    }
     limit(&mut issues, "groups", c.groups.len(), MAX_ITEMS);
     limit(&mut issues, "rules", c.rules.len(), MAX_RULES);
 

@@ -21,7 +21,7 @@ pub const MAX_LIST_BODY: usize = 8 * 1024 * 1024;
 
 pub const PATHS: &[&str] = &["/rules/delete", "/rules/move", "/profiles", "/profiles/delete", "/groups", "/groups/delete", "/categories",
     "/categories/delete", "/networks", "/networks/delete", "/devices", "/devices/delete", "/leases", "/dns", "/zapret", "/adblock/list",
-    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update", "/router", "/diag", "/service/restart", "/update", "/subscription", "/subscription/update", "/backup/export", "/backup/restore", "/notify", "/notify/test", "/stats", "/speed"];
+    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update", "/router", "/diag", "/service/restart", "/update", "/subscription", "/subscription/update", "/backup/export", "/backup/restore", "/notify", "/notify/test", "/stats", "/speed", "/device-name", "/discover"];
 
 pub fn is_manage_path(path: &str) -> bool {
     PATHS.contains(&path.trim_end_matches('/'))
@@ -70,6 +70,15 @@ struct With<T> {
     base_revision: String,
     #[serde(alias = "profile", alias = "group", alias = "category", alias = "network", alias = "device", alias = "dns", alias = "zapret")]
     item: Option<T>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeviceName {
+    base_revision: String,
+    mac: String,
+    /// Пустое — убрать имя.
+    name: String,
 }
 
 #[derive(Deserialize)]
@@ -180,6 +189,7 @@ pub fn leases_view(text: &str, cfg: &Config) -> Vec<Value> {
     let known: BTreeMap<String, &str> = cfg.devices.iter().filter_map(|d| normalize_mac(&d.mac).ok().map(|m| (m, d.id.as_str()))).collect();
     let mut seen = std::collections::BTreeSet::new();
     let mut out = Vec::new();
+    let extra = crate::devices::Extra::load();
     for line in text.lines().take(4096) {
         let f: Vec<&str> = line.split_whitespace().collect();
         if f.len() < 3 {
@@ -190,7 +200,11 @@ pub fn leases_view(text: &str, cfg: &Config) -> Vec<Value> {
             continue;
         }
         let host: String = f.get(3).filter(|h| **h != "*").map(|h| h.chars().filter(|c| !c.is_control()).take(64).collect()).unwrap_or_default();
-        out.push(json!({ "mac": mac, "ip": ip.to_string(), "hostname": host, "device": known.get(&mac) }));
+        let mut o = json!({ "mac": mac, "ip": ip.to_string(), "hostname": host, "device": known.get(&mac), "name": cfg.device_names.get(&mac) });
+        if let (Value::Object(a), Value::Object(b)) = (&mut o, extra.info(&mac)) {
+            a.extend(b);
+        }
+        out.push(o);
     }
     out
 }
@@ -460,6 +474,26 @@ fn uci_value(rest: &str) -> String {
 }
 
 /// Параметры секции `config interface 'lan'` из файла uci; при повторе опции побеждает последняя.
+/// Источники панели по своим DNS-записям: домен, который указывает на адрес роутера в LAN, — тот же роутер, поэтому
+/// панель, открытая по нему (`https://домен:порт` и через обратный прокси `https://домен`), может записывать настройки.
+/// Порт берётся из первого источника MI_TT_ALLOWED_ORIGINS (`https://<IP LAN>:<порт>`). Чужие адреса не допускаются.
+pub fn host_origins(allowed: &str, config_path: &str) -> Vec<String> {
+    let Some(lan) = std::fs::read_to_string(uci_network_path()).ok().as_deref().and_then(parse_uci_lan).and_then(|o| o.get("ipaddr").cloned()) else { return vec![] };
+    let lan = lan.split('/').next().unwrap_or_default().to_string();
+    let port = allowed.split(',').map(str::trim).find_map(|o| o.strip_prefix(&format!("https://{lan}:")).map(str::to_string));
+    let Ok(cfg) = read_config(config_path) else { return vec![] };
+    let mut out = Vec::new();
+    for h in cfg.dns.iter().flat_map(|d| d.hosts.iter()).filter(|h| h.address == lan) {
+        for d in [h.domain.clone(), format!("*.{}", h.domain)] {
+            if let Some(p) = &port {
+                out.push(format!("https://{d}:{p}"));
+            }
+            out.push(format!("https://{d}"));
+        }
+    }
+    out
+}
+
 fn parse_uci_lan(text: &str) -> Option<BTreeMap<String, String>> {
     let mut in_lan = false;
     let mut found = false;
@@ -593,6 +627,41 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
             };
             let text = read_limited(&leases_path().to_string_lossy(), 1024 * 1024).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
             Response { status: 200, body: json!({ "ok": true, "leases": leases_view(&text, &cfg), "issues": [] }) }
+        }
+        ("POST", "/device-name") => match parse_json::<DeviceName>(b, "") {
+            // имя устройства — отдельно от выбора VPN: заявку на применение не ставит (маршрутизация не меняется)
+            Ok(q) => {
+                let mac = match normalize_mac(&q.mac) {
+                    Ok(m) => m,
+                    Err(m) => return Some(bad(vec![Issue::new("mac", "bad_mac", m)])),
+                };
+                let name: String = q.name.trim().chars().take(65).collect();
+                saved(
+                    update_config(p, &q.base_revision, MAX_CONFIG_BYTES, |c| {
+                        if name.is_empty() {
+                            c.device_names.remove(&mac);
+                        } else {
+                            c.device_names.insert(mac.clone(), name.clone());
+                            // устройство уже в правилах — то же имя и там (его видно в обзоре и правилах)
+                            for d in c.devices.iter_mut().filter(|d| normalize_mac(&d.mac).ok().as_deref() == Some(mac.as_str())) {
+                                d.name = name.clone();
+                            }
+                        }
+                        Ok(if name.is_empty() { "clear" } else { "set" })
+                    }),
+                    "device_name",
+                )
+            }
+            Err(i) => bad(i),
+        },
+        ("POST", "/discover") => {
+            // поиск имён в сети выполняет служба (names-scan); CGI только ставит заявку
+            let d = run_dir();
+            let req = json!({ "requested_unix": crate::auth::now() });
+            match std::fs::create_dir_all(&d).map_err(|e| e.to_string()).and_then(|_| store::write_atomic(&d.join("discover.request"), req.to_string().as_bytes())) {
+                Ok(()) => Response { status: 202, body: json!({ "ok": true, "queued": true, "issues": [] }) },
+                Err(m) => Response::error(500, "write_failed", m),
+            }
         }
         ("POST", "/dns") => match parse_json::<With<DnsConfig>>(b, "") {
             Ok(q) => saved(
