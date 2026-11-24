@@ -52,6 +52,15 @@ msg() {
     en:sub_changed) echo "The TrustTunnel subscription changed the server settings; they are applied" ;;
     zh:sub_changed) echo "TrustTunnel 订阅更改了服务器参数，已应用" ;;
     *:sub_changed) echo "Подписка TrustTunnel изменила параметры сервера — применены" ;;
+    en:module_missing) echo "The USB drive with the ${p} module is unavailable. Its servers keep working until the router restarts" ;;
+    zh:module_missing) echo "装有 ${p} 模块的 U 盘不可用。该模块的服务器在路由器重启前仍会工作" ;;
+    *:module_missing) echo "Флешка с модулем ${p} недоступна. Серверы модуля работают до перезагрузки роутера" ;;
+    en:module_missing_off) echo "The USB drive with the ${p} module is unavailable: the module's servers are not running" ;;
+    zh:module_missing_off) echo "装有 ${p} 模块的 U 盘不可用：该模块的服务器未运行" ;;
+    *:module_missing_off) echo "Флешка с модулем ${p} недоступна — серверы модуля не работают" ;;
+    en:module_back) echo "The USB drive with the ${p} module is available again" ;;
+    zh:module_back) echo "装有 ${p} 模块的 U 盘已恢复可用" ;;
+    *:module_back) echo "Флешка с модулем ${p} снова доступна" ;;
     en:boot) echo "The router has started, the service is running" ;;
     zh:boot) echo "路由器已启动，服务正在运行" ;;
     *:boot) echo "Роутер загрузился, служба запущена" ;;

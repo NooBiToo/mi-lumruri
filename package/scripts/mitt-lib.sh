@@ -148,6 +148,7 @@ nap() { usleep 200000 2>/dev/null || sleep 1; }
 server_addr_learn() { # server_addr_learn [<номер туннеля>]
   local l name ip f="$ETC/server-addrs"
   tun_ctx "${1:-0}"
+  [ "$TE" = trusttunnel ] || return 0
   l="$(tail -n 60 "$TL" 2>/dev/null | grep 'Using endpoint: name=' | tail -n 1)"
   [ -n "$l" ] || return 0
   name="$(echo "$l" | sed -n 's/.*Using endpoint: name=\([^,]*\), address=.*/\1/p')"
@@ -156,19 +157,81 @@ server_addr_learn() { # server_addr_learn [<номер туннеля>]
   [ "$(head -n 1 "$f" 2>/dev/null)" = "$name $ip" ] && return 0
   { echo "$name $ip"; grep -v "^$name $ip\$" "$f" 2>/dev/null; } | head -n 3 >"$f.t" && mv -f "$f.t" "$f"
 }
-# Туннели: строки «номер TUN профиль» из рендера ($RENDER/tunnels.list); прежний рендер без списка — туннель 0.
+# Туннели: строки «номер TUN профиль программа» из рендера ($RENDER/tunnels.list; программа — trusttunnel или
+# sing-box, в списках до 0.11 её нет); прежний рендер без списка — туннель 0.
 tunnels_list() {
   if [ -f "$RENDER/tunnels.list" ]; then cat "$RENDER/tunnels.list"
-  elif [ -f "$RENDER/client.toml" ]; then echo "0 mitt0 -"; fi
+  elif [ -f "$RENDER/client.toml" ]; then echo "0 mitt0 - trusttunnel"; fi
 }
 tun_nums() { tunnels_list | cut -d' ' -f1; }
-# Контекст туннеля n: TR — файлы рендера, TS — состояние сторожа, TP — имя процесса клиента (pid и wanted — в $STATE),
-# TL — журнал клиента, TD — TUN. Туннель 0 — прежние пути (одиночная установка не меняется).
+# Контекст туннеля n: TE — программа, TR — файлы рендера, TS — состояние сторожа, TP — имя процесса (pid и wanted — в
+# $STATE), TL — журнал программы, TD — TUN. Туннель 0 с TrustTunnel — прежние пути (одиночная установка не меняется).
 tun_ctx() {
   TN="${1:-0}"; TD="mitt$TN"
-  if [ "$TN" = 0 ]; then TR="$RENDER"; TS="$STATE"; TP=trusttunnel
-  else TR="$RENDER/tun$TN"; TS="$STATE/tun$TN"; TP="trusttunnel$TN"; mkdir -p "$TS"; fi
+  TE="$(tunnels_list | awk -v n="$TN" '$1 == n { print $4; exit }')"; [ -n "$TE" ] || TE=trusttunnel
+  if [ "$TN" = 0 ]; then TR="$RENDER"; TS="$STATE"; else TR="$RENDER/tun$TN"; TS="$STATE/tun$TN"; mkdir -p "$TS"; fi
+  case "$TE" in
+    sing-box) TP="singbox$TN";;
+    *) if [ "$TN" = 0 ]; then TP=trusttunnel; else TP="trusttunnel$TN"; fi;;
+  esac
   TL="$LOG/$TP.log"
+}
+# Программа модуля в RAM (распаковывает modules_prepare): sing-box → $RUN/mod/sing-box/sing-box
+module_bin() { echo "$RUN/mod/$1/$1"; }
+# Состояние модуля на этом запуске: ok | missing (накопителя нет) | bad (файлы не прошли проверку) | пусто
+module_state() { sed -n "s/.*\"$1\":{\"state\":\"\([a-z]*\)\".*/\1/p" "$STATE/modules-state.json" 2>/dev/null; }
+# Модули: копия каталога из пакета (для панели) и распаковка установленных в RAM с проверкой подписи и хэшей. Файлы на
+# накопителе не читаются после распаковки: флешка может пропасть, а запущенные серверы модуля продолжат работать.
+modules_prepare() {
+  local name ver dir s f st="{" sep=""
+  mkdir -p "$STATE" "$RUN/mod"
+  [ -f "$SCR/modules.json" ] && cp -f "$SCR/modules.json" "$STATE/modules-catalog.json"
+  ctl module-list "$ETC/modules.json" >"$STATE/modules.list" 2>/dev/null || : >"$STATE/modules.list"
+  while read -r name ver dir; do
+    [ -n "$name" ] || continue
+    s=ok
+    if [ ! -f "$R$dir/manifest.json" ]; then
+      s=missing
+    elif [ "$(cat "$RUN/mod/$name/.ver" 2>/dev/null)" != "$ver $dir" ]; then
+      rm -rf "$RUN/mod/$name.new"; mkdir -p "$RUN/mod/$name.new"
+      for f in "$R$dir"/payload/*.xz; do [ -f "$f" ] && { unxz -c "$f" >"$RUN/mod/$name.new/$(basename "$f" .xz)" || s=bad; }; done
+      chmod 700 "$RUN/mod/$name.new"/* 2>/dev/null
+      if [ "$s" = ok ] && adm release verify "$R$dir" --pinned "$DATA/keys/release.pub" --unpacked "$RUN/mod/$name.new" >"$LOG/module-$name.json" 2>&1; then
+        echo "$ver $dir" >"$RUN/mod/$name.new/.ver"; rm -rf "$RUN/mod/$name"; mv "$RUN/mod/$name.new" "$RUN/mod/$name"
+        mlog "модуль $name $ver распакован в RAM"
+      else
+        s=bad; rm -rf "$RUN/mod/$name.new"; mlog "модуль $name: файлы на накопителе не прошли проверку"
+      fi
+    fi
+    st="$st$sep\"$name\":{\"state\":\"$s\",\"ram\":$([ -x "$(module_bin "$name")" ] && echo true || echo false)}"; sep=","
+  done <"$STATE/modules.list"
+  echo "$st}" >"$STATE/modules-state.json"
+}
+# Слежение за накопителем модуля (раз в MITT_MODULE_WATCH, 30 с): пропал — одно уведомление (запущенные серверы
+# работают из RAM до перезагрузки); вернулся — уведомление, а если программы в RAM нет — распаковка и применение.
+modules_watch() {
+  [ -s "$STATE/modules.list" ] || return 0
+  local now last name ver dir used
+  now=$(date +%s); last="$(cat "$STATE/modules-watch.last" 2>/dev/null || echo 0)"
+  [ $((now - last)) -ge "${MITT_MODULE_WATCH:-30}" ] || [ "$now" -lt "$last" ] || return 0
+  echo "$now" >"$STATE/modules-watch.last"
+  while read -r name ver dir; do
+    [ -n "$name" ] || continue
+    used=""; tunnels_list | awk -v e="$name" '$4 == e { f = 1 } END { exit !f }' && used=1
+    if [ -f "$R$dir/manifest.json" ]; then
+      [ -f "$STATE/mod-$name.missing" ] || continue
+      rm -f "$STATE/mod-$name.missing"; mlog "модуль $name: накопитель снова доступен"
+      if [ -x "$(module_bin "$name")" ]; then modules_prepare
+      else modules_prepare; printf '{"requested_unix":%s,"by":"module-back"}\n' "$now" >"$STATE/apply.request"; fi
+      [ -n "$used" ] && notify tunnel module_back "$name"
+    else
+      [ ! -f "$STATE/mod-$name.missing" ] || continue
+      touch "$STATE/mod-$name.missing"; mlog "модуль $name: накопитель $dir недоступен"; modules_prepare
+      if [ -n "$used" ]; then
+        if [ -x "$(module_bin "$name")" ]; then notify tunnel module_missing "$name"; else notify tunnel module_missing_off "$name"; fi
+      fi
+    fi
+  done <"$STATE/modules.list"
 }
 # первый поднятый TUN (уведомления и замер скорости через туннель) или пусто
 tun_up_dev() {
@@ -219,8 +282,9 @@ primary_reachable() {
 tunnel_tick() { # tunnel_tick [<номер туннеля>]
   local st con=0 tun=0 bk=0 fa=0 due w="" fb="" pp="" pb="" hp hb cfg a rest
   tun_ctx "${1:-0}"
-  st="$(tail -n 200 "$TL" 2>/dev/null | grep -o 'VPN_SS_[A-Z_]*' | tail -n 1)"
-  [ "$st" = VPN_SS_CONNECTED ] && con=1
+  # sing-box о подключении не пишет: «подключён» — процесс жив (проверку трафика делает сторож)
+  if [ "$TE" = sing-box ]; then pid_alive "$TP" && con=1
+  else st="$(tail -n 200 "$TL" 2>/dev/null | grep -o 'VPN_SS_[A-Z_]*' | tail -n 1)"; [ "$st" = VPN_SS_CONNECTED ] && con=1; fi
   tun_ready "$TD" && tun=1
   [ -f "$TR/client-backup.toml" ] && bk=1
   [ -f "$TR/fastest" ] && fa=1
@@ -399,6 +463,7 @@ tunnel_track() { # tunnel_track [<номер туннеля>]
   [ -f "$STATE/$TP.wanted" ] || { rm -f "$TS/tun-notified" "$TS/tun-bad-since"; return 0; }
   local st now since
   st="$(tail -n 200 "$TL" 2>/dev/null | grep -o 'VPN_SS_[A-Z_]*' | tail -n 1)"; now=$(date +%s)
+  [ "$TE" = sing-box ] && st=VPN_SS_CONNECTED
   if pid_alive "$TP" && [ "$st" = VPN_SS_CONNECTED ] && tun_ready "$TD"; then
     rm -f "$TS/tun-bad-since"
     [ "$(cat "$TS/tun-notified" 2>/dev/null)" = down ] && { notify tunnel tunnel_up; echo up >"$TS/tun-notified"; }
@@ -440,8 +505,8 @@ rom_track() {
   echo "$rom" >"$ETC/rom.seen"
 }
 
-# имена процессов клиентов туннелей (trusttunnel, trusttunnel<n>)
-tun_procs() { local n; for n in $(tun_nums); do [ "$n" = 0 ] && echo trusttunnel || echo "trusttunnel$n"; done; }
+# имена процессов туннелей (trusttunnel, trusttunnel<n>, singbox<n>)
+tun_procs() { tunnels_list | awk '{ if ($4 == "sing-box") print "singbox" $1; else if ($1 == 0) print "trusttunnel"; else print "trusttunnel" $1 }'; }
 status_write() {
   local e="" n
   for n in $(tun_procs) nfqws2 nginx uhttpd service; do

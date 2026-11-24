@@ -10,7 +10,7 @@ INTERVAL="${MITT_INTERVAL:-5}"
 engines_stop() {
   local f n d
   # клиенты всех туннелей, в том числе исчезнувших из настроек
-  for f in "$STATE"/trusttunnel*.wanted "$STATE"/trusttunnel*.pid; do
+  for f in "$STATE"/trusttunnel*.wanted "$STATE"/trusttunnel*.pid "$STATE"/singbox*.wanted "$STATE"/singbox*.pid; do
     [ -e "$f" ] || continue; n="$(basename "$f")"; n="${n%.*}"; rm -f "$STATE/$n.wanted"; pid_stop "$n"
   done
   for n in nfqws2 dnsproxy dnstunnel; do rm -f "$STATE/$n.wanted"; pid_stop "$n"; done
@@ -35,14 +35,23 @@ engines_start() {
     # shellcheck disable=SC2046
     pid_alive dnstunnel || start_bg dnstunnel "$BIN/mi-tt-dns" $(cat "$RENDER/dns-tunnel.args") --status "$STATE/dns-tunnel.json"
   fi
-  # клиенты туннелей (tunnels.list): все запускаются сразу, затем ожидание их TUN
-  local n
+  # программы туннелей (tunnels.list): все запускаются сразу, затем ожидание их TUN. sing-box — из модуля в RAM; модуля
+  # нет (флешка не подключена) — туннель не запускается, его правила действуют по политике отказа
+  local n started=""
   for n in $(tun_nums); do
-    tun_ctx "$n"; touch "$STATE/$TP.wanted"
-    pid_alive "$TP" || start_bg "$TP" ${MITT_TT_WRAP:-} "$BIN/trusttunnel_client" -c "$(tt_config "$n")"
+    tun_ctx "$n"
+    if [ "$TE" = sing-box ]; then
+      if [ ! -x "$(module_bin sing-box)" ]; then mlog "туннель $n: модуль sing-box недоступен — сервер не запущен"; continue; fi
+      touch "$STATE/$TP.wanted"
+      pid_alive "$TP" || start_bg "$TP" ${MITT_SB_WRAP:-} "$(module_bin sing-box)" run -c "$TR/sing-box.json"
+    else
+      touch "$STATE/$TP.wanted"
+      pid_alive "$TP" || start_bg "$TP" ${MITT_TT_WRAP:-} "$BIN/trusttunnel_client" -c "$(tt_config "$n")"
+    fi
+    started="$started $n"
   done
   # TUN должен быть поднят и с адресом до apply: маршрут таблицы 3100+n ссылается на него
-  for n in $(tun_nums); do ctl wait 15000 tun-up "mitt$n"; done
+  for n in $started; do ctl wait 15000 tun-up "mitt$n"; done
   if [ -f "$RENDER/nfqws2.args" ]; then
     touch "$STATE/nfqws2.wanted"
     # аргументы по одному в строке, без пробелов (формирует рендер)
@@ -80,6 +89,8 @@ full_cycle() { # full_cycle <причина>
 # всегда; в цикле — не больше трёх)
 rm -f "$ZT_RETRY"; zt_recover
 devices_prepare
+# модули: каталог для панели и распаковка установленных в RAM (до первого рендера и запуска программ туннелей)
+modules_prepare
 autostart_heal; AS_LAST=$(date +%s)
 full_cycle start
 while [ -f "$STATE/service.wanted" ]; do
@@ -93,6 +104,10 @@ while [ -f "$STATE/service.wanted" ]; do
   # диагностика — в фоне, одна одновременно: только чтение и пробные запросы, итог в $STATE/diag
   if [ -f "$STATE/diag.request" ] && ! pid_alive diag; then
     mv -f "$STATE/diag.request" "$STATE/diag.request.run"; start_bg diag sh "$SCR/mitt-diag.sh"
+  fi
+  # установка и удаление модуля — в фоне, одно одновременно (итог в $STATE/module.json)
+  if [ -f "$STATE/module.request" ] && ! pid_alive module; then
+    mv -f "$STATE/module.request" "$STATE/module.request.run"; start_bg module sh "$SCR/mitt-module.sh"
   fi
   # замер скорости — в фоне, один одновременно (итог в $STATE/speed.json)
   if [ -f "$STATE/speed.request" ] && ! pid_alive speed; then
@@ -170,7 +185,7 @@ while [ -f "$STATE/service.wanted" ]; do
     fi
   fi
   # уведомления: состояние туннеля и отправка очереди; статистика трафика
-  notify_flush; stats_sample; names_scan; storage_scan
+  modules_watch; notify_flush; stats_sample; names_scan; storage_scan
   # автозапуск: запись в firewall могли снять (сброс, прошивка, штатный интерфейс) — раз в 10 минут
   now=$(date +%s)
   if [ $((now - ${AS_LAST:-0})) -ge "${MITT_AUTOSTART_CHECK:-600}" ] || [ "$now" -lt "${AS_LAST:-0}" ]; then AS_LAST=$now; autostart_heal; fi

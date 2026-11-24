@@ -33,8 +33,8 @@ case "${1:-auto}" in
       pid_alive zapret-test && mlog "подбор Zapret не остановился по флагу — сигнал"
     fi
     # mihomo и dnscrypt — движки версий до 0.2: при обновлении их останавливает уже новый загрузчик
-    for f in "$STATE"/trusttunnel?*.pid; do [ -e "$f" ] || continue; n="$(basename "$f" .pid)"; rm -f "$STATE/$n.wanted"; pid_stop "$n"; done
-    for n in service trusttunnel nfqws2 dnsproxy dnstunnel mihomo dnscrypt nginx uhttpd zapret-test zapret-nfqws lists-update adblock-update diag update sub notify speed names; do rm -f "$STATE/$n.wanted"; pid_stop "$n"; done
+    for f in "$STATE"/trusttunnel?*.pid "$STATE"/singbox*.pid; do [ -e "$f" ] || continue; n="$(basename "$f" .pid)"; rm -f "$STATE/$n.wanted"; pid_stop "$n"; done
+    for n in service trusttunnel nfqws2 dnsproxy dnstunnel mihomo dnscrypt nginx uhttpd zapret-test zapret-nfqws lists-update adblock-update diag update sub notify speed names module; do rm -f "$STATE/$n.wanted"; pid_stop "$n"; done
     [ -x "$BIN/mi-tt-ctl" ] && zt_recover
     [ -x "$BIN/mi-tt-admin" ] && adm revert --state-dir "$RUN/admin" >"$STATE/revert.json" 2>&1
     # без своего файла dnsmasq перестаёт заносить адреса в снятые наборы и спрашивать резолвер туннеля

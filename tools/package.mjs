@@ -3,6 +3,9 @@
 // детерминирована, XZ и tar — без времени и владельцев).
 //   node tools/package.mjs [--version X]   →  out/package/mi-lumruri-<версия>.tar (+ каталог для проверки)
 //   и совместимая копия mi-trusttunnel-<версия>.tar (каталог mi-trusttunnel/ внутри) — для обновления из панели 0.4.x
+//   и модуль sing-box mitt-mod-sing-box-<версия sing-box>.tar (ставится со страницы «Модули»); его SHA-256 и размеры —
+//   в каталоге payload/scripts/modules.json основного пакета. --singbox-bin <файл> — другой sing-box (только лаборатория,
+//   x86_64).
 // Ключ подписи — .tools/keys/release-ed25519.pem (создаётся при первом запуске, в репозиторий не попадает).
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
@@ -33,6 +36,19 @@ if (sha(readFileSync(TT_TGZ)) !== TT_TGZ_SHA) throw new Error('SHA-256 архи�
 const tmp = join(OUT, 'work'); rmSync(tmp, { recursive: true, force: true }); mkdirSync(tmp, { recursive: true })
 execFileSync(PY, ['-I', '-c', 'import sys,tarfile;tarfile.open(sys.argv[1]).extract(sys.argv[3]+"/trusttunnel_client",sys.argv[2],filter="data")', TT_TGZ, tmp, `trusttunnel_client-${TT_VER}-linux-aarch64`])
 const TT_BIN = join(tmp, `trusttunnel_client-${TT_VER}-linux-aarch64`, 'trusttunnel_client')
+// Официальный sing-box (linux-arm64-musl, статическая: на стоке musl, сборка linux-arm64 требует glibc) — для модуля; архив закреплён по SHA-256 релиза.
+const SB_VER = '1.14.4'
+const SB_TGZ = join(DL, `sing-box-${SB_VER}-linux-arm64-musl.tar.gz`)
+const SB_TGZ_SHA = 'b95e25f921dc5e17a4cf13327243d1177642c7e35425bf5372862c477c359f56'
+let SB_BIN = args.includes('--singbox-bin') ? args[args.indexOf('--singbox-bin') + 1] : null
+if (!SB_BIN) {
+  if (!existsSync(SB_TGZ)) {
+    execFileSync('curl', ['-sSfL', '--proto', '=https', '-o', SB_TGZ, `https://github.com/SagerNet/sing-box/releases/download/v${SB_VER}/sing-box-${SB_VER}-linux-arm64-musl.tar.gz`])
+  }
+  if (sha(readFileSync(SB_TGZ)) !== SB_TGZ_SHA) throw new Error('SHA-256 архива sing-box arm64 не совпал')
+  execFileSync(PY, ['-I', '-c', 'import sys,tarfile;tarfile.open(sys.argv[1]).extract(sys.argv[3]+"/sing-box",sys.argv[2],filter="data")', SB_TGZ, tmp, `sing-box-${SB_VER}-linux-arm64-musl`])
+  SB_BIN = join(tmp, `sing-box-${SB_VER}-linux-arm64-musl`, 'sing-box')
+}
 const ZAP = join(ROOT, '.tools', 'lab', 'zapret2', 'zapret2-v1.0.7')
 if (!existsSync(join(ZAP, 'binaries', 'linux-arm64', 'nfqws2'))) throw new Error('нет zapret2: tools/lab/fetch-zapret.sh')
 
@@ -40,11 +56,11 @@ if (!existsSync(join(ZAP, 'binaries', 'linux-arm64', 'nfqws2'))) throw new Error
 rmSync(PKG, { recursive: true, force: true })
 for (const d of ['payload/bin', 'payload/engines', 'payload/www', 'payload/scripts', 'payload/defaults', 'payload/lists']) mkdirSync(join(PKG, d), { recursive: true })
 const files = []
-function xz(src, rel, unpacked) {
-  const dst = join(PKG, rel)
+function xz(src, rel, unpacked, base = PKG, list = files) {
+  const dst = join(base, rel)
   const [usha, usize] = execFileSync(PY, ['-I', join(ROOT, 'tools', 'xzpack.py'), 'xz', src, dst]).toString().trim().split(' ')
   const b = readFileSync(dst)
-  files.push({ path: rel, sha256: sha(b), size: b.length, unpacked, unpacked_sha256: usha, unpacked_size: Number(usize) })
+  list.push({ path: rel, sha256: sha(b), size: b.length, unpacked, unpacked_sha256: usha, unpacked_size: Number(usize) })
 }
 function plain(src, rel) {
   copyFileSync(src, join(PKG, rel))
@@ -92,6 +108,33 @@ if (!existsSync(KEYF)) {
 }
 const priv = createPrivateKey(readFileSync(KEYF))
 const pubHex = createPublicKey(priv).export({ type: 'spki', format: 'der' }).subarray(-32).toString('hex')
+
+// --- модуль sing-box: свой манифест и подпись тем же ключом; каталог — в основном пакете ---
+const MODDIR = join(OUT, 'module-sing-box', 'module')
+rmSync(dirname(MODDIR), { recursive: true, force: true })
+mkdirSync(join(MODDIR, 'payload'), { recursive: true })
+const mfiles = []
+xz(SB_BIN, 'payload/sing-box.xz', 'sing-box', MODDIR, mfiles)
+const mman = {
+  name: 'mi-lumruri-mod-sing-box', version: SB_VER, target: 'rc06-1.1.38-aarch64', created: '2026-11-24', pubkey: pubHex, files: mfiles,
+  data_bytes: mfiles.reduce((s, f) => s + f.size, 0), tmp_bytes: mfiles.reduce((s, f) => s + (f.unpacked_size ?? f.size), 0),
+}
+const mbytesMod = Buffer.from(JSON.stringify(mman, null, 1) + '\n')
+writeFileSync(join(MODDIR, 'manifest.json'), mbytesMod)
+writeFileSync(join(MODDIR, 'manifest.sig'), sign(null, mbytesMod, priv).toString('hex') + '\n')
+const MOD_TAR = join(OUT, `mitt-mod-sing-box-${SB_VER}.tar`)
+execFileSync(PY, ['-I', join(ROOT, 'tools', 'xzpack.py'), 'tar', MODDIR, MOD_TAR, 'module'])
+const modTarBytes = readFileSync(MOD_TAR)
+const catalog = { modules: [{
+  name: 'sing-box', version: SB_VER, title: 'sing-box', protocols: ['VLESS', 'Hysteria2', 'Trojan', 'Shadowsocks'],
+  kinds: ['vless', 'hysteria2', 'trojan', 'shadowsocks'], asset: basename(MOD_TAR), tar_sha256: sha(modTarBytes), tar_bytes: modTarBytes.length,
+  unpacked_bytes: mman.tmp_bytes,
+}] }
+writeFileSync(join(PKG, 'payload', 'scripts', 'modules.json'), JSON.stringify(catalog, null, 1) + '\n')
+{
+  const b = readFileSync(join(PKG, 'payload', 'scripts', 'modules.json'))
+  files.push({ path: 'payload/scripts/modules.json', sha256: sha(b), size: b.length, unpacked: null, unpacked_sha256: null, unpacked_size: null })
+}
 files.sort((a, b) => a.path.localeCompare(b.path))
 const manifest = {
   name: 'mi-lumruri', version: VERSION, target: 'rc06-1.1.38-aarch64', created: '2026-11-18', pubkey: pubHex, files,
@@ -114,7 +157,8 @@ const report = { version: VERSION, tar: tarPath, tar_bytes: tarSize, tar_sha256:
   files: files.map((f) => ({ path: f.path, size: f.size, unpacked_size: f.unpacked_size })) }
 writeFileSync(join(OUT, `report-${VERSION}.json`), JSON.stringify(report, null, 2) + '\n')
 // install.py сверяет TAR с SHA256SUMS рядом с ним
-writeFileSync(join(OUT, 'SHA256SUMS'), `${report.tar_sha256} *mi-lumruri-${VERSION}.tar\n${sha(readFileSync(compatPath))} *mi-trusttunnel-${VERSION}.tar\n`)
+writeFileSync(join(OUT, 'SHA256SUMS'), `${report.tar_sha256} *mi-lumruri-${VERSION}.tar\n${sha(readFileSync(compatPath))} *mi-trusttunnel-${VERSION}.tar\n${catalog.modules[0].tar_sha256} *${catalog.modules[0].asset}\n`)
+console.log(`модуль: ${MOD_TAR} ${n(modTarBytes.length)} Б, в RAM ${n(mman.tmp_bytes)} Б`)
 console.log(`пакет: ${tarPath} ${n(tarSize)} Б, sha256 ${report.tar_sha256}`)
 console.log(`на /data: ${n(manifest.data_bytes)} Б; в /tmp после распаковки: ${n(manifest.tmp_bytes)} Б; бюджет 20 000 000 Б, запас ${n(report.headroom)} Б`)
 console.log(`ключ релиза: ${report.key_fingerprint}`)
