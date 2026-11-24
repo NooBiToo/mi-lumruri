@@ -218,7 +218,7 @@ a:hover { color: var(--accent-hover); }
 .save__act { font: inherit; font-weight: 500; color: var(--accent); background: none; border: 0; padding: 0.125rem 0.25rem; border-radius: 4px; cursor: pointer; white-space: nowrap; }
 .save__act:hover { text-decoration: underline; }
 
-.master { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0.375rem 0.25rem 0.75rem; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); cursor: pointer; }
+.master { display: inline-flex; align-items: center; gap: 0.5rem; box-sizing: border-box; height: 2.375rem; padding: 0 0.375rem 0 0.75rem; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); cursor: pointer; }
 .master__label { font-size: 0.8125rem; font-weight: 500; }
 .out {
   display: inline-flex; align-items: center; gap: 0.375rem; font: inherit; font-size: 0.875rem; font-weight: 500; color: var(--muted);

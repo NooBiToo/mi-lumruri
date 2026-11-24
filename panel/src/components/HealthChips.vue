@@ -19,21 +19,21 @@ const label = computed(() => [
 </script>
 
 <template>
-  <button v-if="health && (cpu != null || memUsed != null || temp != null)" type="button" class="chips" :title="t('Состояние роутера: {s}', { s: label })" :aria-label="t('Состояние роутера: {s}', { s: label })" @click="emit('open')">
-    <span v-if="cpu != null" :class="['chip', `chip--${level(cpu, 70, 90)}`]"><Cpu :size="14" aria-hidden="true" /><span class="chip__v">{{ cpu }}%</span></span>
-    <span v-if="memUsed != null" :class="['chip', 'chip--mem', `chip--${level(memUsed, 80, 92)}`]"><MemoryStick :size="14" aria-hidden="true" /><span class="chip__v">{{ memUsed }}%</span></span>
-    <span v-if="temp != null" :class="['chip', `chip--${level(temp, 75, 90)}`]"><Thermometer :size="14" aria-hidden="true" /><span class="chip__v">{{ temp }}°</span></span>
+  <button v-if="health && (cpu != null || memUsed != null || temp != null)" type="button" class="hchips" :title="t('Состояние роутера: {s}', { s: label })" :aria-label="t('Состояние роутера: {s}', { s: label })" @click="emit('open')">
+    <span v-if="cpu != null" :class="['hchip', `hchip--${level(cpu, 70, 90)}`]"><Cpu :size="14" aria-hidden="true" /><span class="hchip__v">{{ cpu }}%</span></span>
+    <span v-if="memUsed != null" :class="['hchip', 'hchip--mem', `hchip--${level(memUsed, 80, 92)}`]"><MemoryStick :size="14" aria-hidden="true" /><span class="hchip__v">{{ memUsed }}%</span></span>
+    <span v-if="temp != null" :class="['hchip', `hchip--${level(temp, 75, 90)}`]"><Thermometer :size="14" aria-hidden="true" /><span class="hchip__v">{{ temp }}°</span></span>
   </button>
 </template>
 
 <style scoped>
-.chips { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.25rem; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
-.chips:hover { border-color: var(--line-strong); }
-.chips:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.chip { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.125rem 0.5rem; border-radius: 999px; font-size: 0.8125rem; color: var(--muted); }
-.chip__v { font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 500; }
-.chip--warn, .chip--warn .chip__v { color: var(--warn-ink, var(--warn)); }
-.chip--bad, .chip--bad .chip__v { color: var(--bad-ink, var(--bad)); }
+.hchips { display: inline-flex; align-items: center; gap: 0.75rem; box-sizing: border-box; height: 2.375rem; padding: 0 0.75rem; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: inherit; font: inherit; cursor: pointer; }
+.hchips:hover { border-color: var(--line-strong); }
+.hchips:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.hchip { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8125rem; color: var(--muted); }
+.hchip__v { font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 500; }
+.hchip--warn, .hchip--warn .hchip__v { color: var(--warn-ink, var(--warn)); }
+.hchip--bad, .hchip--bad .hchip__v { color: var(--bad-ink, var(--bad)); }
 /* телефон: процессор и температура, память — на «Обзоре» */
-@media (max-width: 640px) { .chip--mem:not(:only-child) { display: none; } }
+@media (max-width: 640px) { .hchip--mem:not(:only-child) { display: none; } }
 </style>
