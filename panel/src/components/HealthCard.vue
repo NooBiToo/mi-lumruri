@@ -24,6 +24,11 @@ const uptime = computed(() => {
 })
 const load = computed(() => (h.value?.load.length ? h.value.load.map((x) => new Intl.NumberFormat(dateTag(), { maximumFractionDigits: 2 }).format(x)).join(' · ') : null))
 const tag = dateTag()
+// датчики чипа (IPQ… tsens_tz_sensorN) безымянны: «Датчик N»; много датчиков — максимум, среднее и список по запросу
+const sensorName = (n: string) => { const m = /^tsens_tz_sensor(\d+)$/.exec(n); return m ? t('Датчик {n}', { n: m[1]! }) : n }
+const tMax = computed(() => Math.round(Math.max(...(h.value?.temps ?? []).map((s) => s.c))))
+const tAvg = computed(() => { const ts = h.value?.temps ?? []; return ts.length ? Math.round(ts.reduce((a, s) => a + s.c, 0) / ts.length) : 0 })
+const sortedTemps = computed(() => [...(h.value?.temps ?? [])].sort((a, b) => b.c - a.c))
 </script>
 
 <template>
@@ -53,11 +58,24 @@ const tag = dateTag()
       </div>
 
       <dl class="hl">
-        <template v-if="h.temps.length">
+        <template v-if="h.temps.length && h.temps.length <= 3">
           <div v-for="s in h.temps" :key="s.name" class="hl__row">
-            <dt>{{ t('Температура: {name}', { name: s.name }) }}</dt>
+            <dt>{{ t('Температура: {name}', { name: sensorName(s.name) }) }}</dt>
             <dd :class="`hl--${level(s.c, 75, 90)}`">{{ Math.round(s.c) }} °C</dd>
           </div>
+        </template>
+        <template v-else-if="h.temps.length">
+          <div class="hl__row"><dt>{{ t('Температура, максимум') }}</dt><dd :class="`hl--${level(tMax, 75, 90)}`">{{ tMax }} °C</dd></div>
+          <div class="hl__row"><dt>{{ t('Температура, в среднем') }}</dt><dd>{{ tAvg }} °C</dd></div>
+          <details class="sensors">
+            <summary class="meta">{{ t('Все датчики ({n})', { n: h.temps.length }) }}</summary>
+            <div class="sensors__grid">
+              <span v-for="s in sortedTemps" :key="s.name" class="sensors__item">
+                <span class="meta">{{ sensorName(s.name) }}</span>
+                <span :class="`hl--${level(s.c, 75, 90)}`">{{ Math.round(s.c) }} °C</span>
+              </span>
+            </div>
+          </details>
         </template>
         <div v-if="uptime" class="hl__row"><dt>{{ t('Работает без перезагрузки') }}</dt><dd>{{ uptime }}</dd></div>
         <div v-if="h.conntrack" class="hl__row"><dt>{{ t('Соединений') }}</dt><dd>{{ h.conntrack.count }}<span v-if="h.conntrack.max" class="meta"> / {{ h.conntrack.max }}</span></dd></div>
@@ -93,6 +111,10 @@ const tag = dateTag()
 .hl__row dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: 500; white-space: nowrap; }
 .hl--warn { color: var(--warn-ink, var(--warn)); }
 .hl--bad { color: var(--bad-ink, var(--bad)); }
+.sensors summary { cursor: pointer; font-size: 0.8125rem; }
+.sensors summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.sensors__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr)); gap: 0.25rem 1rem; margin-top: 0.5rem; }
+.sensors__item { display: flex; justify-content: space-between; gap: 0.5rem; font-size: 0.8125rem; font-variant-numeric: tabular-nums; }
 .rate { display: inline-flex; align-items: center; gap: 0.2rem; }
 .rate--vpn { color: var(--vpn, var(--accent)); }
 </style>

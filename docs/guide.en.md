@@ -2,7 +2,7 @@
 
 [Русский](guide.md) · **English** · [简体中文](guide.zh-CN.md)
 
-This guide covers Mi Lumruri version 0.13.0. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
+This guide covers Mi Lumruri version 0.13.1. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
 
 You need a BE7000 (RC06) with firmware 1.1.38, working root access over SSH from the home network, the installation TAR, and the parameters of your TrustTunnel server. The stock release firmware usually ships with SSH turned off.
 
@@ -258,7 +258,7 @@ The icon shows the type when it is known: TV, phone, tablet, computer, printer, 
 
 The screen is a grid: Routes and Traffic on the left, Router and Speed and latency on the right (one column on a narrow screen).
 
-**Router** shows the router status, refreshed every 5 seconds: CPU load (overall and per core, load average), used and free memory, temperature per sensor, time since the last restart, the number of connections, and the current internet (WAN port) and VPN speed. A short version is in the header on every screen: CPU, memory and the hottest sensor (CPU and temperature on a phone); clicking it opens Overview. High values are highlighted: CPU from 70 %, memory from 80 %, temperature from 75 °C.
+**Router** shows the router status, refreshed every 5 seconds: CPU load (overall and per core, load average), used and free memory, temperature (with many sensors, as on the BE7000, the maximum and average, with the full list under All sensors), time since the last restart, the number of connections, and the current internet (WAN port) and VPN speed. A short version is in the header on every screen: CPU, memory and the hottest sensor (CPU and temperature on a phone); clicking it opens Overview. High values are highlighted: CPU from 70 %, memory from 80 %, temperature from 75 °C.
 
 **Speed in Routes:** the Through VPN branch shows the channel speed from the last speed test through the VPN and the current tunnel traffic; the direct and DPI-bypass branches show the direct speed test result and the current traffic outside the VPN. With no speed test yet there is a Measure speed button.
 

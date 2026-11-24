@@ -45,4 +45,8 @@ export default {
   "Трафик по дням с {a} по {b}": "Daily traffic from {a} to {b}",
   "Журнал с {d}": "Log since {d}",
   "Динамику за месяцы покажет журнал трафика: включите его на странице «Модули».": "The traffic log shows the trend over months: turn it on on the Modules page.",
+  "Температура, максимум": "Temperature, maximum",
+  "Температура, в среднем": "Temperature, average",
+  "Все датчики ({n})": "All sensors ({n})",
+  "Датчик {n}": "Sensor {n}",
 }

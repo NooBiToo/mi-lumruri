@@ -40,7 +40,8 @@ test.beforeAll(async () => {
   put(join(proc, 'net', 'route'), 'Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\neth4\t00000000\t0100A8C0\t0003\t0\t0\t0\t00000000\n')
   put(join(proc, 'sys', 'net', 'netfilter', 'nf_conntrack_count'), '412\n')
   put(join(proc, 'sys', 'net', 'netfilter', 'nf_conntrack_max'), '65536\n')
-  for (const [z, ty, c] of [['thermal_zone0', 'cpu-thermal', '56200'], ['thermal_zone1', 'wifi-thermal', '61000']]) {
+  // как на BE7000: безымянные датчики чипа tsens_tz_sensorN
+  for (const [z, ty, c] of [['thermal_zone0', 'tsens_tz_sensor3', '56200'], ['thermal_zone1', 'tsens_tz_sensor4', '61000'], ['thermal_zone2', 'tsens_tz_sensor13', '52000'], ['thermal_zone3', 'tsens_tz_sensor14', '53000']]) {
     put(join(sys, 'class', 'thermal', z!, 'type'), ty!)
     put(join(sys, 'class', 'thermal', z!, 'temp'), c!)
   }
@@ -98,7 +99,10 @@ test('шапка и «Обзор»: состояние роутера, скор�
   await expect(chips).toContainText('40%')
   await expect(chips).toContainText('61°')
   const card = page.getByRole('group', { name: 'Роутер' })
-  await expect(card.getByText('Температура: wifi-thermal')).toBeVisible()
+  await expect(card.getByText('Температура, максимум')).toBeVisible()
+  await expect(card.locator('.hl__row', { hasText: 'Температура, в среднем' })).toContainText('56 °C')
+  await card.getByText('Все датчики (4)').click()
+  await expect(card.locator('.sensors__item', { hasText: 'Датчик 4' })).toContainText('61 °C')
   await expect(card.getByText('3 дня 4 ч')).toBeVisible()
   await expect(card.getByText('412')).toBeVisible()
   await expect(page.locator('.tspeed__cap--vpn')).toHaveText('199 Мбит/с')
