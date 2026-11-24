@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, ref, watch, type Component } from 'vue'
 import InputText from 'primevue/inputtext'
 import Button from 'primevue/button'
 import { ChevronDown, HardDrive, Laptop, Lightbulb, MonitorSmartphone, Pencil, Printer, Radar, Search, Smartphone, Speaker, Tablet, Tv, Watch } from 'lucide-vue-next'
-import { build, buildBlocker, config, knownDevicesNow, leases, loadConfig, loadLeases, notify, revision, save, serverReady, simple, simpleState } from '../store'
+import { build, buildBlocker, config, knownDevicesNow, leases, loadConfig, loadLeases, notify, profiles, revision, save, serverReady, simple, simpleState } from '../store'
 import { manage, type StatsResponse } from '../api'
 import { deviceLabel, deviceRows, plural, shortVendor, type DeviceRow } from '../status'
 import type { Simple } from '../simple'
@@ -16,8 +16,24 @@ import Segmented from '../components/Segmented.vue'
 const emit = defineEmits<{ navigate: [tab: 'server' | 'sites'] }>()
 
 /** all — устройства, у которых через VPN идёт весь интернет (при выборе отдельных сайтов). */
-interface Draft { mode: 'all' | 'selected'; macs: string[]; all: string[] }
-const toDraft = (s: Simple): Draft => ({ ...(s.devices === 'all' ? { mode: 'all' as const, macs: [] } : { mode: 'selected' as const, macs: [...s.devices] }), all: [...(s.vpnAll ?? [])] })
+interface Draft { mode: 'all' | 'selected'; macs: string[]; all: string[]; server: Record<string, string> }
+const toDraft = (s: Simple): Draft => ({ ...(s.devices === 'all' ? { mode: 'all' as const, macs: [] } : { mode: 'selected' as const, macs: [...s.devices] }), all: [...(s.vpnAll ?? [])], server: { ...(s.deviceServer ?? {}) } })
+/** Серверы устройств «весь интернет»: только отмеченные устройства и другой существующий сервер. */
+function cleanServers(d: Draft): Record<string, string> | undefined {
+  const def = profiles.value[0]?.id
+  const ids = new Set(profiles.value.map((p) => p.id))
+  const r = Object.fromEntries(Object.entries(d.server).filter(([mac, p]) => d.all.includes(mac) && p !== def && ids.has(p)).sort(([a], [b]) => a.localeCompare(b)))
+  return Object.keys(r).length ? r : undefined
+}
+const many = computed(() => profiles.value.length > 1)
+const serverOf = (mac: string): string => draft.value?.server[mac] ?? profiles.value[0]?.id ?? ''
+function setServer(mac: string, pid: string) {
+  if (!draft.value) return
+  const m = { ...draft.value.server }
+  if (pid === profiles.value[0]?.id) delete m[mac]
+  else m[mac] = pid
+  draft.value.server = m
+}
 /** Переключатель «весь интернет» нужен, только когда через VPN идут отдельные сайты (а не «всё через VPN»). */
 const sitesMode = computed(() => simple.value?.mode === 'selected')
 const draft = ref<Draft | null>(simple.value ? toDraft(simple.value) : null)
@@ -38,6 +54,7 @@ const dirty = computed(() => {
   const now = d.mode === 'all' ? [] : [...d.macs].sort()
   const allWas = [...(s.vpnAll ?? [])].sort().join()
   return (s.devices === 'all') !== (d.mode === 'all') || was.join() !== now.join() || allWas !== [...d.all].sort().join()
+    || JSON.stringify(cleanServers(d) ?? {}) !== JSON.stringify(Object.fromEntries(Object.entries(s.deviceServer ?? {}).sort(([a], [b]) => a.localeCompare(b))))
 })
 watch(simple, (s) => { if (s && (!draft.value || !dirty.value)) draft.value = toDraft(s) })
 
@@ -133,6 +150,9 @@ useAutosave({
     const s: Simple = { ...simple.value, devices: draft.value.mode === 'all' ? 'all' : [...draft.value.macs] }
     if (draft.value.all.length) s.vpnAll = [...draft.value.all]
     else delete s.vpnAll
+    const ds = cleanServers(draft.value)
+    if (ds) s.deviceServer = ds
+    else delete s.deviceServer
     const cfg = build(s, knownDevicesNow())
     if (typeof cfg === 'string') return cfg
     return save(cfg, '')
@@ -224,6 +244,10 @@ onMounted(() => { void loadLeases(); void manage.stats().then((r) => { if (r.sta
               <span class="dev__sw-label">{{ t('Весь интернет') }}</span>
               <span class="sw" aria-hidden="true"><span class="sw__knob" /></span>
             </button>
+            <select v-if="sitesMode && many && draft.all.includes(d.mac)" class="tile__server dev__server" :value="serverOf(d.mac)"
+              :aria-label="t('Сервер для «{name}»', { name: d.name || d.mac })" @change="setServer(d.mac, ($event.target as HTMLSelectElement).value)">
+              <option v-for="p in profiles" :key="p.id" :value="p.id">{{ p.name }}</option>
+            </select>
           </li>
           <li v-if="!shown.length" class="muted pad">{{ t('Ничего не нашлось.') }}</li>
         </ul>

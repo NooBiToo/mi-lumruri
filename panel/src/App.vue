@@ -6,7 +6,7 @@ import Message from 'primevue/message'
 import Skeleton from 'primevue/skeleton'
 import ToggleSwitch from 'primevue/toggleswitch'
 import Toast from 'primevue/toast'
-import { Activity, Check, ShieldCheck, CircleAlert, Globe, LayoutDashboard, LoaderCircle, LogOut, MonitorSmartphone, Server, SlidersHorizontal, Waypoints } from 'lucide-vue-next'
+import { Activity, Check, ShieldCheck, CircleAlert, Globe, LayoutDashboard, LoaderCircle, LogOut, MonitorSmartphone, Package, Server, SlidersHorizontal, Waypoints } from 'lucide-vue-next'
 import { useToast } from 'primevue/usetoast'
 import { usePrimeVue } from 'primevue/config'
 import { lang, t } from './i18n'
@@ -23,6 +23,7 @@ import ServerView from './views/ServerView.vue'
 import MoreView from './views/MoreView.vue'
 import DiagView from './views/DiagView.vue'
 import ZapretView from './views/ZapretView.vue'
+import ModulesView from './views/ModulesView.vue'
 import ManualBanner from './views/ManualBanner.vue'
 
 const toast = useToast()
@@ -47,7 +48,7 @@ const totpOn = ref(true)
 const lost = ref(false)
 const loading = ref(false)
 
-type Tab = 'status' | 'sites' | 'devices' | 'server' | 'zapret' | 'diag' | 'more'
+type Tab = 'status' | 'sites' | 'devices' | 'server' | 'zapret' | 'modules' | 'diag' | 'more'
 /** inBar — пункт нижней панели телефона; остальные открываются со страницы «Ещё». */
 const TABS = computed<{ value: Tab; label: string; short: string; icon: Component; inBar?: false }[]>(() => [
   { value: 'status', label: t('Обзор'), short: t('Обзор'), icon: LayoutDashboard },
@@ -55,6 +56,7 @@ const TABS = computed<{ value: Tab; label: string; short: string; icon: Componen
   { value: 'devices', label: t('Устройства'), short: t('Устройства'), icon: MonitorSmartphone },
   { value: 'server', label: t('Сервер'), short: t('Сервер'), icon: Server },
   { value: 'zapret', label: 'Zapret', short: 'Zapret', icon: ShieldCheck, inBar: false },
+  { value: 'modules', label: t('Модули'), short: t('Модули'), icon: Package, inBar: false },
   { value: 'diag', label: t('Диагностика'), short: t('Проверка'), icon: Activity, inBar: false },
   { value: 'more', label: t('Настройки'), short: t('Ещё'), icon: SlidersHorizontal },
 ])
@@ -229,6 +231,7 @@ onBeforeUnmount(() => { removeEventListener('hashchange', onHash); clearInterval
         <DevicesView v-else-if="tab === 'devices'" @navigate="go" />
         <ServerView v-else-if="tab === 'server'" @navigate="go" />
         <ZapretView v-else-if="tab === 'zapret'" @navigate="go" />
+        <ModulesView v-else-if="tab === 'modules'" />
         <DiagView v-else-if="tab === 'diag'" />
         <MoreView v-else :totp="totpOn" @navigate="go" />
       </main>

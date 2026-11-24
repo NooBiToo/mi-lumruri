@@ -91,6 +91,11 @@ pub fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(m) => { eprintln!("{m}"); ExitCode::from(2) }
         },
+        // накопители: /proc/mounts и df -k от службы → storage.json для панели
+        ["storage-scan", mounts, df, out] => match mi_tt::storage::scan_cmd(mounts, df, out, auth::now()) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(m) => { eprintln!("{m}"); ExitCode::from(2) }
+        },
         // решения о клиенте TrustTunnel (сторож, запасной сервер, выбор по задержке) — см. tunnel.rs
         ["tunnel", cmd @ ("due" | "step"), "--dir", dir, rest @ ..] => match mi_tt::tunnel::cli(cmd, dir, rest, auth::now()) {
             Ok(t) => { print!("{t}"); ExitCode::SUCCESS }

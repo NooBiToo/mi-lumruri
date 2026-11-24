@@ -26,7 +26,7 @@ export interface Endpoint {
 }
 export type TlsProfile = 'chrome' | 'chrome_canary' | 'safari' | 'firefox' | 'okhttp' | 'openssl' | 'boringssl'
 /** Профиль TrustTunnel; backup — запасной сервер (пароль — backup_password в секретах). */
-export interface Profile { id: string; name: string; kind: ProfileKind; on_failure: 'block' | 'direct'; endpoint?: Endpoint; backup?: Endpoint; prefer_fastest?: boolean }
+export interface Profile { id: string; name: string; kind: ProfileKind; on_failure: 'block' | 'direct'; tunnel?: number; endpoint?: Endpoint; backup?: Endpoint; prefer_fastest?: boolean }
 export interface Network { id: string; name: string; ssid: string; segment?: string; subnet?: string; bridge?: string; ports?: string[] }
 export interface Device { id: string; name: string; mac: string; network: string }
 
@@ -282,6 +282,11 @@ export interface NotifyResponse {
 }
 export interface NotifySet { telegram_token?: string; chat_id?: string; events?: string[]; lang?: string; disable?: boolean }
 /** Статистика трафика (controller/src/stats.rs): байты; devices — по MAC (или IP без аренды), имя из настроек или аренды. */
+/** Накопитель (GET /storage): байты; vendor/model — из sysfs, если есть. */
+export interface StorageDrive { path: string; device: string; fs: string; total: number; free: number; writable: boolean; exec: boolean; vendor?: string; model?: string }
+export interface StorageInfo { at: number | null; data: StorageDrive | null; usb: StorageDrive[] }
+export interface StorageResponse { ok: boolean; issues: Issue[]; error?: ApiError; storage: StorageInfo }
+
 export interface StatsResponse {
   ok: boolean; since: number | null; sampled: number | null; per_device: boolean
   vpn: { day: number; week: number }; wan: { day: number; week: number }
@@ -316,6 +321,7 @@ export const manage = {
   setPanelOrigins: (base_revision: string, origins: string[]) => call<SaveResponse>('/panel-origins', json({ base_revision, origins })),
   notifyState: () => call<NotifyResponse>('/notify'),
   stats: () => call<StatsResponse>('/stats'),
+  storage: () => call<StorageResponse>('/storage'),
   speed: () => call<SpeedResponse>('/speed'),
   startSpeed: () => call<SpeedResponse>('/speed', json({})),
   setNotify: (b: NotifySet) => call<ManageResponse>('/notify', json(b)),

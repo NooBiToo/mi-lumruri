@@ -17,6 +17,7 @@ pub mod preview;
 pub mod release;
 pub mod render;
 pub mod stats;
+pub mod storage;
 pub mod store;
 pub mod subscription;
 pub mod tunnel;

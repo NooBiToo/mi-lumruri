@@ -21,7 +21,7 @@ pub const MAX_LIST_BODY: usize = 8 * 1024 * 1024;
 
 pub const PATHS: &[&str] = &["/rules/delete", "/rules/move", "/profiles", "/profiles/delete", "/groups", "/groups/delete", "/categories",
     "/categories/delete", "/networks", "/networks/delete", "/devices", "/devices/delete", "/leases", "/dns", "/zapret", "/adblock/list",
-    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update", "/router", "/diag", "/service/restart", "/update", "/subscription", "/subscription/update", "/backup/export", "/backup/restore", "/notify", "/notify/test", "/stats", "/speed", "/device-name", "/discover", "/panel-origins"];
+    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update", "/router", "/diag", "/service/restart", "/update", "/subscription", "/subscription/update", "/backup/export", "/backup/restore", "/notify", "/notify/test", "/stats", "/speed", "/device-name", "/discover", "/panel-origins", "/storage"];
 
 pub fn is_manage_path(path: &str) -> bool {
     PATHS.contains(&path.trim_end_matches('/'))
@@ -776,6 +776,7 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
         ("POST", "/backup/export") => crate::backup::export(b, config_path),
         ("GET", "/notify") => crate::notify::get(config_path),
         ("GET", "/stats") => crate::stats::get(config_path),
+        ("GET", "/storage") => crate::storage::get(),
         ("GET", "/speed") => {
             let d = run_dir();
             let st = std::fs::read(d.join("speed.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());

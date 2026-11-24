@@ -13,6 +13,9 @@
 //   `vpn-all` (режим «всё») → профиль. Исключения важнее всего, а сайты с обходом не уходят в VPN и в режиме «всё»;
 // - устройства «весь интернет через VPN» (режим «выбранные»): перед правилами источников — `except-<dev>`,
 //   `zapret-<dev>` и `vpnall-<dev>` → `vpn-all` → профиль;
+// - несколько серверов: сервер по умолчанию — профиль с наименьшим номером туннеля; сервисы другого сервера — в группе
+//   `vpn-sites@<профиль>`, их правило `vpn-<src>@<профиль>` стоит перед `vpn-<src>`; устройство «весь интернет через
+//   VPN» может идти через свой сервер (действие правила `vpnall-<dev>`);
 // - `default_action`: профиль в режиме «всё» для всей сети, иначе «остальные сайты» (напрямую или с Zapret);
 // - последнее правило-метка, всегда выключенное (на маршрутизацию не влияет): `rest-lan`, а при выключенном VPN —
 //   `vpn-off`; его действие — выбор «остальные сайты», чтобы выбор не терялся, когда по правилам его не видно.
@@ -41,6 +44,10 @@ export interface Simple {
   devices: 'all' | string[]
   /** MAC устройств, у которых в режиме «выбранные» через VPN идёт весь интернет (исключения и сайты с обходом — как у всех). */
   vpnAll?: string[]
+  /** Сервисы через другой сервер (не по умолчанию): id сервиса → id профиля. */
+  serviceServer?: Record<string, string>
+  /** Устройства «весь интернет через VPN» через другой сервер: MAC → id профиля. */
+  deviceServer?: Record<string, string>
 }
 
 /** Устройство, известное панели (аренды DHCP и настройки); `name` — как его показывать и сохранять. */
@@ -54,6 +61,8 @@ export const SITES = 'vpn-sites'
 export const ZAPRET_SITES = 'zapret-sites'
 export const EXCEPT = 'vpn-except'
 export const ALL = 'vpn-all'
+/** Группа сервисов сервера, кроме сервера по умолчанию: `vpn-sites@<id профиля>`. */
+export const SITES_AT = `${SITES}@`
 const REST_ON = 'rest-lan'
 const REST_OFF = 'vpn-off'
 const SOURCE_PREFIX = 'itdoginfo:'
@@ -113,6 +122,11 @@ function cleanName(n: string | undefined): string {
 }
 
 const group = (id: string, name: string, destinations: Destination[]): Group => ({ id, name, destinations })
+
+/** Профили по номеру туннеля; первый — сервер по умолчанию. */
+export function sortedProfiles<T extends { tunnel?: number }>(profiles: T[]): T[] {
+  return [...profiles].sort((a, b) => (a.tunnel ?? 0) - (b.tunnel ?? 0))
+}
 const rule = (id: string, source: Source, groupId: string, action: Action, enabled: boolean): Rule => ({
   id, source, destination: { type: 'group', id: groupId }, action, enabled,
 })
@@ -140,9 +154,23 @@ export function toConfig(base: Config, s: Simple, lan: Lan, catalog: ListCatalog
       }
     }
   }
+  const profiles = sortedProfiles(base.profiles)
+  const profile = profiles[0]
+  const known_ = new Set(profiles.map((p) => p.id))
+  /** Сервер сервиса: другой существующий профиль или null (по умолчанию). */
+  const serverOf = (id: string): string | null => {
+    const p = s.serviceServer?.[id]
+    return p && p !== profile?.id && known_.has(p) ? p : null
+  }
   const sites: Destination[] = []
-  addServices(services, sites)
+  addServices(services.filter((id) => !serverOf(id)), sites)
   for (const d of uniqueDomains(s.customDomains)) sites.push({ type: 'domain_suffix', value: d })
+  // сервисы других серверов — по профилю в порядке номеров туннелей
+  const atSites: [string, Destination[]][] = profiles.slice(1).map((p): [string, Destination[]] => {
+    const into: Destination[] = []
+    addServices(services.filter((id) => serverOf(id) === p.id), into)
+    return [p.id, into]
+  }).filter(([, d]) => d.length > 0)
   const zapretSites: Destination[] = []
   addServices(zapretServices, zapretSites)
   for (const d of uniqueDomains(s.zapretDomains)) zapretSites.push({ type: 'domain_suffix', value: d })
@@ -150,6 +178,7 @@ export function toConfig(base: Config, s: Simple, lan: Lan, catalog: ListCatalog
 
   const groups: Group[] = []
   if (sites.length) groups.push(group(SITES, 'Сайты через VPN', sites))
+  for (const [pid, d] of atSites) groups.push(group(SITES_AT + pid, `Сайты через VPN (${pid})`, d))
   if (zapretSites.length) groups.push(group(ZAPRET_SITES, 'Сайты с обходом блокировок', zapretSites))
   if (except.length) groups.push(group(EXCEPT, 'Исключения', except))
   groups.push(group(ALL, 'Весь интернет', ALL_NETS))
@@ -177,10 +206,14 @@ export function toConfig(base: Config, s: Simple, lan: Lan, catalog: ListCatalog
 
   const vpnTarget = s.mode === 'all' ? ALL : sites.length ? SITES : null
   const lanAll = s.mode === 'all' && s.devices === 'all'
-  const profile = base.profiles[0]
   const needsProfile = lanAll || allMacs.length > 0 || (vpnTarget !== null && sources.length > 0)
   if (needsProfile && !profile) throw new Error('сначала настройте сервер VPN')
   const toVpn: Action = { type: 'profile', id: profile?.id ?? '' }
+  const toProfile = (id: string): Action => ({ type: 'profile', id })
+  const deviceTo = (mac: string): Action => {
+    const p = s.deviceServer?.[mac]
+    return p && p !== profile?.id && known_.has(p) ? toProfile(p) : toVpn
+  }
 
   const rules: Rule[] = []
   for (const mac of allMacs) {
@@ -188,12 +221,13 @@ export function toConfig(base: Config, s: Simple, lan: Lan, catalog: ListCatalog
     const src: Source = { type: 'device', id: key }
     if (except.length) rules.push(rule(`except-${key}`, src, EXCEPT, rest, s.enabled))
     if (zapretSites.length) rules.push(rule(`zapret-${key}`, src, ZAPRET_SITES, { type: 'direct_zapret' }, true))
-    rules.push(rule(`vpnall-${key}`, src, ALL, toVpn, s.enabled))
+    rules.push(rule(`vpnall-${key}`, src, ALL, deviceTo(mac), s.enabled))
   }
   for (const [key, src] of sources) {
     if (except.length) rules.push(rule(`except-${key}`, src, EXCEPT, rest, s.enabled))
     // обход блокировок без VPN от VPN не зависит: правило включено и при выключенном VPN
     if (zapretSites.length) rules.push(rule(`zapret-${key}`, src, ZAPRET_SITES, { type: 'direct_zapret' }, true))
+    for (const [pid] of atSites) rules.push(rule(`vpn-${key}@${pid}`, src, SITES_AT + pid, toProfile(pid), s.enabled))
     if (vpnTarget) rules.push(rule(`vpn-${key}`, src, vpnTarget, toVpn, s.enabled))
   }
   rules.push(rule(s.enabled ? REST_ON : REST_OFF, { type: 'lan' }, ALL, rest, false))
@@ -236,7 +270,6 @@ export function fromConfig(cfg: Config): FromConfig {
   if (cfg.networks.length !== 1 || home?.id !== HOME || !home.bridge || !home.subnet) {
     return notSimple(t('сети настроены вручную: простой вид использует одну домашнюю сеть роутера'))
   }
-  if (cfg.profiles.length > 1) return notSimple(t('настроено несколько профилей VPN'))
   const groups = new Map(cfg.groups.map((g) => [g.id, g]))
   const marker = cfg.rules.find((r) => r.id === REST_ON || r.id === REST_OFF)
   if (!marker) return notSimple(t('правила изменены вручную'))
@@ -263,6 +296,18 @@ export function fromConfig(cfg: Config): FromConfig {
   const zapretDomains: string[] = []
   const bad = readSites(SITES, services, customDomains) ?? readSites(ZAPRET_SITES, zapretServices, zapretDomains)
   if (bad) return notSimple(bad)
+  // сервисы других серверов
+  const serviceServer: Record<string, string> = {}
+  for (const g of cfg.groups.filter((x) => x.id.startsWith(SITES_AT))) {
+    const pid = g.id.slice(SITES_AT.length)
+    const svc: string[] = []
+    const dom: string[] = []
+    const e = readSites(g.id, svc, dom)
+    if (e) return notSimple(e)
+    if (dom.length) return notSimple(t('в списке сайтов есть записи, добавленные вручную'))
+    for (const id of svc) { services.push(id); serviceServer[id] = pid }
+  }
+  const defaultId = sortedProfiles(cfg.profiles)[0]?.id
   const exceptions: string[] = []
   for (const d of groups.get(EXCEPT)?.destinations ?? []) {
     if (d.type !== 'domain_suffix') return notSimple(t('в исключениях есть записи, добавленные вручную'))
@@ -273,10 +318,13 @@ export function fromConfig(cfg: Config): FromConfig {
   // устройства «весь интернет через VPN»: у них есть правило vpnall-<устройство>
   const allIds = [...new Set(working.flatMap((r) => (r.id.startsWith('vpnall-') && r.source.type === 'device' ? [r.source.id] : [])))]
   const vpnAll: string[] = []
+  const deviceServer: Record<string, string> = {}
   for (const id of allIds) {
     const mac = normalizeMac(cfg.devices.find((x) => x.id === id)?.mac ?? '')
     if (!mac) return notSimple(t('устройство «{id}» настроено вручную', { id }))
     vpnAll.push(mac)
+    const a = working.find((r) => r.id === `vpnall-${id}`)?.action
+    if (a?.type === 'profile' && a.id !== defaultId) deviceServer[mac] = a.id
   }
   const regular = working.filter((r) => !(r.source.type === 'device' && allIds.includes(r.source.id)))
   const lanRules = regular.some((r) => r.source.type === 'lan')
@@ -302,6 +350,8 @@ export function fromConfig(cfg: Config): FromConfig {
     devices: lanRules || macs.length === 0 ? 'all' : macs,
   }
   if (vpnAll.length) simple.vpnAll = vpnAll
+  if (Object.keys(serviceServer).length) simple.serviceServer = serviceServer
+  if (Object.keys(deviceServer).length) simple.deviceServer = deviceServer
 
   // проверка: из этих ответов получаются ровно те же настройки
   const catalog: ListCatalog = { source: '', commit: '', date: '', services: [] }

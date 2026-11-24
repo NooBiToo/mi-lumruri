@@ -19,7 +19,7 @@ import HostsView from './HostsView.vue'
 import { dateTag, t } from '../i18n'
 
 defineProps<{ totp: boolean }>()
-const emit = defineEmits<{ navigate: [tab: 'zapret' | 'diag'] }>()
+const emit = defineEmits<{ navigate: [tab: 'zapret' | 'modules' | 'diag'] }>()
 
 // ---- вкладки: «Сеть и DNS», «Уведомления», «Обновление», «Панель»; выбранная — в адресе (#more/<вкладка>) ----
 type Sub = 'dns' | 'notify' | 'update' | 'panel'
@@ -212,6 +212,10 @@ useAutosave({
     <nav class="card card--flush settings more-links" :aria-label="t('Другие разделы')">
       <button type="button" class="setrow more-link" @click="emit('navigate', 'zapret')">
         <span class="setrow__text"><span class="setrow__title">Zapret</span><span class="setrow__desc">{{ t('Способ обхода блокировок, подбор, автопроверка') }}</span></span>
+        <ChevronRight :size="18" class="more-link__icon" aria-hidden="true" />
+      </button>
+      <button type="button" class="setrow more-link" @click="emit('navigate', 'modules')">
+        <span class="setrow__text"><span class="setrow__title">{{ t('Модули') }}</span><span class="setrow__desc">{{ t('Новые протоколы VPN и флешка для них') }}</span></span>
         <ChevronRight :size="18" class="more-link__icon" aria-hidden="true" />
       </button>
       <button type="button" class="setrow more-link" @click="emit('navigate', 'diag')">

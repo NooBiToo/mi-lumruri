@@ -292,4 +292,29 @@ describe('simple', () => {
     expect(() => toConfig(none, simple({ services: ['youtube'] }), lan, catalog, known)).toThrow(/сервер/)
     expect(toConfig(none, simple({}), lan, catalog, known).rules.map((r) => r.id)).toEqual(['rest-lan'])
   })
+  it('несколько серверов: сервисы и устройство через другой сервер, туда-обратно; сервер по умолчанию — наименьший номер туннеля', () => {
+    const two: Config = { ...base, profiles: [{ ...base.profiles[0]!, id: 'hy', name: 'Второй', tunnel: 1 }, base.profiles[0]!] }
+    const s = simple({ services: ['youtube', 'meta', 'telegram'], customDomains: ['example.org'], serviceServer: { youtube: 'hy' },
+      devices: ['a4:77:33:10:20:30'], vpnAll: ['3c:22:fb:01:02:03'], deviceServer: { '3c:22:fb:01:02:03': 'hy' } })
+    const c = toConfig(two, s, lan, catalog, known)
+    expect(c.groups.find((g) => g.id === 'vpn-sites@hy')?.destinations).toEqual([{ type: 'category', id: 'svc-youtube' }])
+    expect(c.groups.find((g) => g.id === 'vpn-sites')?.destinations.some((d) => d.type === 'category' && d.id === 'svc-youtube')).toBe(false)
+    const ids = c.rules.map((r) => r.id)
+    expect(ids.indexOf('vpn-dev-a47733102030@hy')).toBeLessThan(ids.indexOf('vpn-dev-a47733102030'))
+    expect(c.rules.find((r) => r.id === 'vpn-dev-a47733102030@hy')?.action).toEqual({ type: 'profile', id: 'hy' })
+    expect(c.rules.find((r) => r.id === 'vpn-dev-a47733102030')?.action).toEqual({ type: 'profile', id: 'tt' })
+    expect(c.rules.find((r) => r.id === 'vpnall-dev-3c22fb010203')?.action).toEqual({ type: 'profile', id: 'hy' })
+    const back = fromConfig(JSON.parse(JSON.stringify(c)) as Config)
+    expect(back.canonical).toBe(true)
+    if (back.canonical) {
+      expect(back.simple.serviceServer).toEqual({ youtube: 'hy' })
+      expect(back.simple.deviceServer).toEqual({ '3c:22:fb:01:02:03': 'hy' })
+      expect([...back.simple.services].sort()).toEqual(['meta', 'telegram', 'youtube'])
+    }
+    // сервер удалили — его сервисы уходят на сервер по умолчанию, отметка забывается
+    const one = toConfig(base, s, lan, catalog, known)
+    expect(one.groups.some((g) => g.id.startsWith('vpn-sites@'))).toBe(false)
+    expect(one.rules.find((r) => r.id === 'vpnall-dev-3c22fb010203')?.action).toEqual({ type: 'profile', id: 'tt' })
+  })
+
 })

@@ -343,6 +343,15 @@ stats_sample() {
 # таблица производителей по MAC из прошивки (oui.tar.gz) — один раз в RAM; имена, объявленные в сети (mDNS, SSDP), —
 # раз в MITT_NAMES_EVERY (10 мин) и по кнопке панели; копия в /data — раз в час (переживает перезагрузку)
 OUI_TGZ="${MITT_OUI_TGZ:-$R/usr/share/xiaoqiang/oui.tar.gz}"
+# накопители (внутренняя память и USB) для страницы «Модули»: раз в MITT_STORAGE_EVERY (1 мин) — $STATE/storage.json
+storage_scan() {
+  local now last; now=$(date +%s); last="$(cat "$STATE/storage.last" 2>/dev/null || echo 0)"
+  [ $((now - last)) -ge "${MITT_STORAGE_EVERY:-60}" ] || [ "$now" -lt "$last" ] || return 0
+  echo "$now" >"$STATE/storage.last"
+  df -k >"$STATE/df.txt" 2>/dev/null
+  MI_TT_DATA="$DATA" ctl storage-scan "${MITT_PROC:-/proc}/mounts" "$STATE/df.txt" "$STATE/storage.json" 2>>"$LOG/service.log"
+  rm -f "$STATE/df.txt"
+}
 lan_ip() { local ip; ip="$( (uci ${MITT_UCI_CONF:+-c "$MITT_UCI_CONF"} -q get network.lan.ipaddr) 2>/dev/null)"; echo "${ip:-192.168.31.1}"; }
 devices_prepare() {
   [ -s "$STATE/oui.txt" ] || { [ -f "$OUI_TGZ" ] && tar -xzOf "$OUI_TGZ" >"$STATE/oui.txt.t" 2>/dev/null && mv -f "$STATE/oui.txt.t" "$STATE/oui.txt"; rm -f "$STATE/oui.txt.t"; }

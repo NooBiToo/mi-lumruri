@@ -6,12 +6,12 @@ import Message from 'primevue/message'
 import Password from 'primevue/password'
 import Textarea from 'primevue/textarea'
 import ToggleSwitch from 'primevue/toggleswitch'
-import { Check, ChevronDown, ClipboardPaste, Minus } from 'lucide-vue-next'
+import { Check, ChevronDown, ClipboardPaste, Minus, Plus, Trash2 } from 'lucide-vue-next'
 import Select from 'primevue/select'
-import { api, manage, type Endpoint, type SubscriptionResponse, type TlsProfile } from '../api'
+import { api, manage, type Config, type Endpoint, type Profile, type SubscriptionResponse, type TlsProfile } from '../api'
 import { emptyProfileForm, formToProfile, formToSecret, profileToForm, type ProfileForm } from '../manage'
 import { parseServer, TLS_PROFILES } from '../serverConfig'
-import { config, hasPassword, hasSubscription, loadSecrets, notify, profile, save, simple, tunnel } from '../store'
+import { build, config, freeTunnel, hasPassword, hasSubscription, knownDevicesNow, loadSecrets, notify, profile, profiles, save, selectedServer, simple, tunnel, withProfile } from '../store'
 import { when } from '../status'
 import { t } from '../i18n'
 import Segmented from '../components/Segmented.vue'
@@ -21,12 +21,51 @@ import SpeedCard from '../components/SpeedCard.vue'
 const emit = defineEmits<{ navigate: [tab: 'sites'] }>()
 
 const PROFILE_ID = 'tt'
-const formFrom = (): ProfileForm => (profile.value ? profileToForm(profile.value) : { ...emptyProfileForm(), id: PROFILE_ID, name: t('Мой сервер') })
+/** Добавление нового сервера (форма пустая, сохранение добавляет профиль со свободным номером туннеля). */
+const adding = ref(false)
+function newId(): string {
+  const ids = new Set(config.value?.profiles.map((p) => p.id) ?? [])
+  let n = profiles.value.length + 1
+  while (ids.has(`tt${n}`)) n++
+  return `tt${n}`
+}
+const formFrom = (): ProfileForm => {
+  if (profile.value && !adding.value) return profileToForm(profile.value)
+  const n = profiles.value.length
+  return { ...emptyProfileForm(), id: n ? newId() : PROFILE_ID, name: n ? t('Сервер {n}', { n: n + 1 }) : t('Мой сервер') }
+}
 const form = ref<ProfileForm>(formFrom())
 const pristine = ref(JSON.stringify(form.value))
 const dirty = computed(() => JSON.stringify(form.value) !== pristine.value)
-watch(profile, () => { if (!dirty.value) { form.value = formFrom(); pristine.value = JSON.stringify(form.value) } })
-const firstTime = computed(() => !profile.value?.endpoint)
+function resetForm() { form.value = formFrom(); pristine.value = JSON.stringify(form.value); pasted.value = ''; parsed.value = null; error.value = null; done.value = false }
+watch(profile, () => { if (!dirty.value && !adding.value) resetForm() })
+const firstTime = computed(() => adding.value || !profile.value?.endpoint)
+const many = computed(() => profiles.value.length > 1)
+function pick(id: string) { adding.value = false; selectedServer.value = id; confirmDelete.value = false; resetForm() }
+function startAdding() {
+  if (config.value && freeTunnel(config.value) < 0) { notify.show('error', t('Серверов не больше 16')); return }
+  adding.value = true; confirmDelete.value = false; resetForm()
+}
+function cancelAdding() { adding.value = false; resetForm() }
+// ---- удаление сервера: его сервисы и устройства переходят на сервер по умолчанию ----
+const confirmDelete = ref(false)
+const omit = (m: Record<string, string> | undefined, id: string) => {
+  const r = Object.fromEntries(Object.entries(m ?? {}).filter(([, v]) => v !== id))
+  return Object.keys(r).length ? r : undefined
+}
+async function removeServer() {
+  const c = config.value
+  const p = profile.value
+  if (!c || !p || !many.value) return
+  if (!confirmDelete.value) { confirmDelete.value = true; return }
+  confirmDelete.value = false
+  const base: Config = { ...c, profiles: c.profiles.filter((x) => x.id !== p.id) }
+  let next: Config | string = base
+  if (simple.value) next = build({ ...simple.value, serviceServer: omit(simple.value.serviceServer, p.id), deviceServer: omit(simple.value.deviceServer, p.id) }, knownDevicesNow(), base)
+  if (typeof next === 'string') { notify.show('error', t('Не получилось'), next); return }
+  const r = await save(next, t('Сервер «{name}» удалён', { name: p.name }))
+  if (r.ok) { selectedServer.value = null; resetForm() }
+}
 const advanced = ref(false)
 const FAILURE = computed(() => [{ value: 'block' as const, label: t('Не открывать') }, { value: 'direct' as const, label: t('Открывать напрямую') }])
 const tlsLabel = (id: TlsProfile): string => ({
@@ -59,7 +98,7 @@ function recognize() {
   f.clientRandomAuthKey = e.client_random_auth_key ?? ''
   if (r.password) f.password = r.password
   if (r.subscription) f.subscriptionUrl = r.subscription
-  if (r.name && !profile.value) f.name = r.name
+  if (r.name && (!profile.value || adding.value)) f.name = r.name
   // необязательные параметры — только если они есть в ссылке
   const extra = [
     ...(e.tls_profile ? [{ label: t('Профиль TLS'), value: tlsLabel(e.tls_profile) }] : []),
@@ -98,8 +137,16 @@ const blocker = computed(() => {
 })
 async function submit() {
   if (blocker.value || !config.value) return
-  const p = formToProfile(form.value, subscriptionOnly.value)
-  if (typeof p === 'string') { error.value = p; return }
+  const built = formToProfile(form.value, subscriptionOnly.value)
+  if (typeof built === 'string') { error.value = built; return }
+  // номер туннеля, запасной сервер и выбор по задержке — от сохранённого профиля; новому — свободный номер
+  const old = config.value.profiles.find((x) => x.id === built.id)
+  const tunnelNo = old ? (old.tunnel ?? 0) : freeTunnel(config.value)
+  if (tunnelNo < 0) { error.value = t('Серверов не больше 16'); return }
+  const p: Profile = { ...built }
+  if (tunnelNo) p.tunnel = tunnelNo
+  if (old?.backup) p.backup = old.backup
+  if (old?.prefer_fastest) p.prefer_fastest = true
   saving.value = true
   error.value = null
   try {
@@ -114,7 +161,7 @@ async function submit() {
     // пишется после настроек, и тогда применение запрашивается ещё раз.
     const known = config.value.profiles.some((x) => x.id === p.id)
     if (secret && known && !(await writeSecret())) return
-    const r = await save({ ...config.value, profiles: [p, ...config.value.profiles.slice(1)] }, secret && !known ? '' : undefined)
+    const r = await save(withProfile(config.value, p), secret && !known ? '' : undefined)
     if (!r.ok) { error.value = r.message; return }
     if (secret && !known) {
       if (!(await writeSecret())) return
@@ -128,6 +175,7 @@ async function submit() {
     pristine.value = JSON.stringify(form.value)
     pasted.value = ''
     done.value = true
+    if (adding.value) { adding.value = false; selectedServer.value = p.id }
     await loadSecrets()
   } finally {
     saving.value = false
@@ -178,6 +226,34 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
       </div>
     </Message>
 
+    <div v-if="profiles.length" class="card servers">
+      <div class="card__head">
+        <div>
+          <h2 class="card__title">{{ t('Серверы') }}</h2>
+          <p class="card__sub">{{ many ? t('Серверы работают одновременно. На «Сайтах» и «Устройствах» можно выбрать, через какой сервер идти; остальное идёт через сервер по умолчанию.') : t('Можно добавить ещё серверы: они будут работать одновременно, а на «Сайтах» и «Устройствах» появится выбор сервера.') }}</p>
+        </div>
+        <Button v-if="!adding" :label="t('Добавить сервер')" size="small" severity="secondary" variant="outlined" @click="startAdding">
+          <template #icon><Plus :size="16" class="p-button-icon-left" aria-hidden="true" /></template>
+        </Button>
+        <Button v-else :label="t('Отмена')" size="small" severity="secondary" variant="text" @click="cancelAdding" />
+      </div>
+      <div class="servers__list" role="group" :aria-label="t('Серверы')">
+        <button v-for="(p, i) in profiles" :key="p.id" type="button" :aria-pressed="!adding && profile?.id === p.id"
+          :class="['server-chip', { 'server-chip--on': !adding && profile?.id === p.id }]" @click="pick(p.id)">
+          <span class="server-chip__name">{{ p.name }}</span>
+          <span v-if="i === 0 && many" class="server-chip__tag">{{ t('по умолчанию') }}</span>
+        </button>
+        <span v-if="adding" class="server-chip server-chip--on server-chip--new">{{ t('Новый сервер') }}</span>
+      </div>
+      <div v-if="many && !adding" class="servers__actions">
+        <Button :label="confirmDelete ? t('Точно удалить «{name}»?', { name: profile?.name ?? '' }) : t('Удалить сервер')" size="small"
+          :severity="confirmDelete ? 'danger' : 'secondary'" variant="text" @click="removeServer">
+          <template #icon><Trash2 :size="16" class="p-button-icon-left" aria-hidden="true" /></template>
+        </Button>
+        <span v-if="confirmDelete" class="hint">{{ t('Его сайты и устройства перейдут на сервер по умолчанию.') }}</span>
+      </div>
+    </div>
+
     <div class="cols">
       <div class="cols__side">
         <div class="card">
@@ -218,6 +294,10 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
 
       <form class="card" @submit.prevent="submit">
         <h2 class="card__title">{{ t('Данные сервера') }}</h2>
+        <div class="field">
+          <label for="srv-name" class="field__label">{{ t('Название') }}</label>
+          <InputText id="srv-name" v-model="form.name" maxlength="64" />
+        </div>
         <div class="row2">
           <div class="field">
             <label for="srv-host" class="field__label">{{ t('Адрес сервера') }}</label>
@@ -316,4 +396,12 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
 
 <style scoped>
 .sub__actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.servers__list { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.server-chip { display: inline-flex; align-items: center; gap: 0.5rem; min-height: 2.5rem; padding: 0.4rem 0.9rem; border-radius: 999px;
+  border: 1px solid var(--line, var(--p-content-border-color)); background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.server-chip:focus-visible { outline: 2px solid var(--p-primary-color); outline-offset: 2px; }
+.server-chip--on { border-color: var(--p-primary-color); background: color-mix(in srgb, var(--p-primary-color) 12%, transparent); font-weight: 600; }
+.server-chip--new { cursor: default; font-style: italic; }
+.server-chip__tag { font-size: 0.75rem; opacity: 0.7; font-weight: 400; }
+.servers__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 </style>

@@ -10,7 +10,7 @@ import ToggleSwitch from 'primevue/toggleswitch'
 import { manage, type Endpoint } from '../api'
 import { emptyProfileForm, formToProfile, profileToForm, type ProfileForm } from '../manage'
 import { parseServer } from '../serverConfig'
-import { config, hasBackupPassword, loadSecrets, notify, profile, save, service } from '../store'
+import { config, hasBackupPassword, loadSecrets, notify, profile, save, service, withProfile } from '../store'
 import { t } from '../i18n'
 
 const backup = computed<Endpoint | undefined>(() => profile.value?.backup)
@@ -63,7 +63,7 @@ async function submit() {
       const s = await manage.setSecret(p.id, { backup_password: form.value.password })
       if (s.status !== 200) { error.value = t('Пароль не записан: {e}', { e: s.body.error?.message ?? String(s.status) }); return }
     }
-    const r = await save({ ...c, profiles: [{ ...p, backup: built.endpoint }, ...c.profiles.slice(1)] }, t('Запасной сервер сохранён'))
+    const r = await save(withProfile(c, { ...p, backup: built.endpoint }), t('Запасной сервер сохранён'))
     if (!r.ok) { error.value = r.message; return }
     form.value.password = ''
     pasted.value = ''
@@ -79,7 +79,7 @@ async function remove() {
   if (!c || !p) return
   const next = { ...p }
   delete next.backup
-  const r = await save({ ...c, profiles: [next, ...c.profiles.slice(1)] }, t('Запасной сервер удалён'))
+  const r = await save(withProfile(c, next), t('Запасной сервер удалён'))
   if (!r.ok) { notify.show('error', t('Не получилось'), r.message); return }
   await manage.setSecret(p.id, { backup_password: '' })
   form.value = emptyProfileForm()
@@ -95,7 +95,7 @@ async function setFastest(on: boolean) {
   fastBusy.value = true
   try {
     const next = { ...p, prefer_fastest: on || undefined }
-    await save({ ...c, profiles: [next, ...c.profiles.slice(1)] }, on ? t('Роутер будет выбирать сервер с меньшей задержкой') : t('Роутер будет возвращаться на основной сервер'))
+    await save(withProfile(c, next), on ? t('Роутер будет выбирать сервер с меньшей задержкой') : t('Роутер будет возвращаться на основной сервер'))
   } finally {
     fastBusy.value = false
   }

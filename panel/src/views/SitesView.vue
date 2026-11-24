@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import InputText from 'primevue/inputtext'
 import { Search } from 'lucide-vue-next'
-import { build, buildBlocker, catalog, knownDevicesNow, save, scrollTarget, serverReady, simple, simpleState } from '../store'
+import { build, buildBlocker, catalog, knownDevicesNow, profiles, save, scrollTarget, serverReady, simple, simpleState } from '../store'
 import { usesZapret } from '../status'
 import { normalizeDomain, serviceRoute, setServiceRoute, type ServiceRoute, type Simple } from '../simple'
 import { useAutosave, type Blocker } from '../autosave'
@@ -18,11 +18,21 @@ const emit = defineEmits<{ navigate: [tab: 'server' | 'devices' | 'zapret'] }>()
 // ---- черновик экрана ----
 interface Draft {
   mode: Simple['mode']; services: string[]; zapretServices: string[]; custom: string[]; zapret: string[]; except: string[]; rest: Simple['rest']
+  /** Сервисы через другой сервер: id сервиса → id профиля. */
+  server: Record<string, string>
 }
 const toDraft = (s: Simple): Draft => ({
   mode: s.mode, services: [...s.services], zapretServices: [...s.zapretServices], custom: [...s.customDomains], zapret: [...s.zapretDomains],
-  except: [...s.exceptions], rest: s.rest,
+  except: [...s.exceptions], rest: s.rest, server: { ...(s.serviceServer ?? {}) },
 })
+/** Отметки серверов только у сервисов через VPN и только для другого существующего сервера; пусто — undefined. */
+function cleanServers(d: Draft): Record<string, string> | undefined {
+  const def = profiles.value[0]?.id
+  const ids = new Set(profiles.value.map((p) => p.id))
+  const r = Object.fromEntries(Object.entries(d.server).filter(([svc, p]) => d.services.includes(svc) && p !== def && ids.has(p)).sort(([a], [b]) => a.localeCompare(b)))
+  return Object.keys(r).length ? r : undefined
+}
+const serversJson = (m: Record<string, string> | undefined) => JSON.stringify(Object.entries(m ?? {}).sort(([a], [b]) => a.localeCompare(b)))
 const draft = ref<Draft | null>(simple.value ? toDraft(simple.value) : null)
 /** Домены так, как их сохранит toConfig: без схемы, пути и повторов. */
 const domains = (list: string[]) => [...new Set(list.map(normalizeDomain).filter(Boolean))]
@@ -30,14 +40,24 @@ const sameList = (a: string[], b: string[]) => a.length === b.length && a.every(
 const next = computed<Simple | null>(() => simple.value && draft.value ? {
   ...simple.value, mode: draft.value.mode, services: [...draft.value.services].sort(), customDomains: domains(draft.value.custom),
   zapretServices: [...draft.value.zapretServices].sort(), zapretDomains: domains(draft.value.zapret),
-  exceptions: domains(draft.value.except), rest: draft.value.rest,
+  exceptions: domains(draft.value.except), rest: draft.value.rest, serviceServer: cleanServers(draft.value),
 } : null)
 const dirty = computed(() => {
   const a = simple.value, b = next.value
   if (!a || !b) return false
   return a.mode !== b.mode || a.rest !== b.rest || !sameList([...a.services].sort(), b.services) || !sameList(a.customDomains, b.customDomains)
     || !sameList([...a.zapretServices].sort(), b.zapretServices) || !sameList(a.zapretDomains, b.zapretDomains) || !sameList(a.exceptions, b.exceptions)
+    || serversJson(a.serviceServer) !== serversJson(b.serviceServer)
 })
+// ---- сервер сервиса (если серверов несколько) ----
+const many = computed(() => profiles.value.length > 1)
+const serverOf = (id: string): string => draft.value?.server[id] ?? profiles.value[0]?.id ?? ''
+function setServer(id: string, pid: string) {
+  if (!draft.value) return
+  if (pid === profiles.value[0]?.id) delete draft.value.server[id]
+  else draft.value.server[id] = pid
+  draft.value.server = { ...draft.value.server }
+}
 // настройки перечитаны (сохранение, другое окно): черновик без правок следует за ними
 watch(simple, (s) => { if (s && (!draft.value || !dirty.value)) draft.value = toDraft(s) })
 
@@ -173,6 +193,10 @@ onMounted(async () => {
                     <span>{{ o.label }}</span>
                   </label>
                 </div>
+                <select v-if="many && routeOf(s.id) === 'vpn'" class="tile__server" :value="serverOf(s.id)"
+                  :aria-label="t('Сервер для «{name}»', { name: t(s.name) })" @change="setServer(s.id, ($event.target as HTMLSelectElement).value)">
+                  <option v-for="p in profiles" :key="p.id" :value="p.id">{{ p.name }}</option>
+                </select>
               </div>
             </div>
           </div>

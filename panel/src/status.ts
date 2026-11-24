@@ -1,7 +1,7 @@
 // Логика экранов простой панели без DOM: состояние туннеля, ответы пользователя из настроек, устройства, тексты подбора Zapret.
 
 import type { Config, Lease, ListCatalog, ManageResponse, ZapretConfig, ZapretTestState } from './api'
-import { defaultSimple, fromConfig, normalizeMac, type KnownDevice, type Simple } from './simple'
+import { defaultSimple, fromConfig, normalizeMac, sortedProfiles, type KnownDevice, type Simple } from './simple'
 import { AUTO, pickedByTest, strategyName } from './zapret'
 import { dateTag, plural, t } from './i18n'
 
@@ -47,7 +47,7 @@ export interface TunnelState { tone: Tone; title: string; detail: string | null 
 
 /** Состояние для строки вверху и экрана «Состояние»: простыми словами, без названий служб. */
 export function tunnelState(s: ManageResponse | null, c: Config | null, simple: Simple | null): TunnelState {
-  const profile = c?.profiles[0]
+  const profile = c ? sortedProfiles(c.profiles)[0] : undefined
   if (c && !profile?.endpoint) return { tone: 'idle', title: t('Сервер VPN не настроен'), detail: t('Откройте «Сервер» и вставьте ссылку от своего сервера.') }
   const svc = s?.ok ? ((s.service ?? null) as ServiceStatus | null) : null
   // сбой применения важнее всего остального (и выключенного VPN): роутер работает не так, как показано на экранах

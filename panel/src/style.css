@@ -459,6 +459,9 @@ button.tnode:hover { border-color: var(--line-strong); }
 .route__opt--zapret.route__opt--on { background: var(--zap); color: #fff; box-shadow: none; }
 .route__opt:has(.route__radio:focus-visible) { outline: 2px solid var(--focus); outline-offset: 1px; }
 .route__radio { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+/* сервер сервиса через VPN (если серверов несколько) */
+.tile__server { grid-column: 2; justify-self: start; max-width: 100%; padding: 0.125rem 0.375rem; font: inherit; font-size: 0.8125rem; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+.tile__server:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 @media (prefers-color-scheme: dark) {
   .route__opt--vpn.route__opt--on, .route__opt--zapret.route__opt--on { color: #0f0f10; }
 }

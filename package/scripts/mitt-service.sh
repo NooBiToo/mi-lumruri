@@ -162,7 +162,7 @@ while [ -f "$STATE/service.wanted" ]; do
     fi
   fi
   # уведомления: состояние туннеля и отправка очереди; статистика трафика
-  notify_flush; stats_sample; names_scan
+  notify_flush; stats_sample; names_scan; storage_scan
   # автозапуск: запись в firewall могли снять (сброс, прошивка, штатный интерфейс) — раз в 10 минут
   now=$(date +%s)
   if [ $((now - ${AS_LAST:-0})) -ge "${MITT_AUTOSTART_CHECK:-600}" ] || [ "$now" -lt "${AS_LAST:-0}" ]; then AS_LAST=$now; autostart_heal; fi

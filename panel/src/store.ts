@@ -2,9 +2,9 @@
 // Сохраняет любой экран одной функцией `save` (замена настроек целиком, POST /config).
 
 import { computed, ref } from 'vue'
-import { api, manage, type ApiResult, type Config, type Issue, type Lan, type Lease, type ListsResponse, type ManageResponse, type ReplaceResponse, type SaveResponse, type ZapretConfig, type UpdateState } from './api'
+import { api, manage, type ApiResult, type Config, type Profile, type Issue, type Lan, type Lease, type ListsResponse, type ManageResponse, type ReplaceResponse, type SaveResponse, type ZapretConfig, type UpdateState } from './api'
 import { knownDevices, readSimple, tunnelState } from './status'
-import { HOME, toConfig, type KnownDevice, type Simple } from './simple'
+import { HOME, sortedProfiles, toConfig, type KnownDevice, type Simple } from './simple'
 import { t } from './i18n'
 
 export const config = ref<Config | null>(null)
@@ -21,11 +21,8 @@ export const lan = ref<Lan | null>(null)
 export const lanError = ref<string | null>(null)
 export const leases = ref<Lease[]>([])
 export const service = ref<ManageResponse | null>(null)
-export const hasPassword = ref(false)
-/** У профиля сохранена ссылка-подписка TrustTunnel (значение панель не получает). */
-export const hasSubscription = ref(false)
-/** Сохранён пароль запасного сервера. */
-export const hasBackupPassword = ref(false)
+/** Какие секреты сохранены у профилей (сами значения панель не получает): id профиля → есть ли. */
+export const secretsKnown = ref<{ profiles: Record<string, boolean>; subscriptions: Record<string, boolean>; backups: Record<string, boolean> }>({ profiles: {}, subscriptions: {}, backups: {} })
 /** Куда прокрутить экран, который сейчас откроется (id блока), например `zapret` на «Сайтах». */
 export const scrollTarget = ref<string | null>(null)
 
@@ -37,8 +34,28 @@ export const simpleState = computed(() => {
   return readSimple(config.value)
 })
 export const simple = computed<Simple | null>(() => (simpleState.value?.canonical ? simpleState.value.simple : null))
-export const profile = computed(() => config.value?.profiles[0] ?? null)
-export const serverReady = computed(() => !!profile.value?.endpoint)
+/** Серверы по номеру туннеля: первый — сервер по умолчанию. */
+export const profiles = computed(() => sortedProfiles(config.value?.profiles ?? []))
+/** Сервер, открытый на экране «Сервер» (id); null — сервер по умолчанию. */
+export const selectedServer = ref<string | null>(null)
+export const profile = computed(() => profiles.value.find((p) => p.id === selectedServer.value) ?? profiles.value[0] ?? null)
+export const defaultProfile = computed(() => profiles.value[0] ?? null)
+export const serverReady = computed(() => profiles.value.some((p) => !!p.endpoint))
+export const hasPassword = computed(() => !!(profile.value && secretsKnown.value.profiles[profile.value.id]))
+/** У профиля сохранена ссылка-подписка TrustTunnel (значение панель не получает). */
+export const hasSubscription = computed(() => !!(profile.value && secretsKnown.value.subscriptions[profile.value.id]))
+/** Сохранён пароль запасного сервера. */
+export const hasBackupPassword = computed(() => !!(profile.value && secretsKnown.value.backups[profile.value.id]))
+/** Настройки с профилем `p` вместо профиля с тем же id (или с добавленным). */
+export function withProfile(c: Config, p: Profile): Config {
+  const i = c.profiles.findIndex((x) => x.id === p.id)
+  return { ...c, profiles: i < 0 ? [...c.profiles, p] : c.profiles.map((x, j) => (j === i ? p : x)) }
+}
+/** Номер туннеля для нового сервера: первый свободный 0..15 (-1 — свободных нет). */
+export function freeTunnel(c: Config): number {
+  for (let n = 0; n <= 15; n++) if (!c.profiles.some((p) => (p.tunnel ?? 0) === n)) return n
+  return -1
+}
 export const tunnel = computed(() => tunnelState(service.value, config.value, simple.value))
 
 /** Сообщение пользователю (тост); App подставляет свою реализацию. */
@@ -53,9 +70,8 @@ export function reset() {
   lan.value = null
   leases.value = []
   service.value = null
-  hasPassword.value = false
-  hasSubscription.value = false
-  hasBackupPassword.value = false
+  secretsKnown.value = { profiles: {}, subscriptions: {}, backups: {} }
+  selectedServer.value = null
 }
 
 /** Первые замечания одной строкой для пользователя. */
@@ -106,10 +122,7 @@ async function loadLan() {
 
 export async function loadSecrets() {
   const r = await manage.secrets()
-  const id = profile.value?.id
-  hasPassword.value = !!(id && r.body.profiles?.[id])
-  hasSubscription.value = !!(id && r.body.subscriptions?.[id])
-  hasBackupPassword.value = !!(id && r.body.backups?.[id])
+  secretsKnown.value = { profiles: r.body.profiles ?? {}, subscriptions: r.body.subscriptions ?? {}, backups: r.body.backups ?? {} }
 }
 
 /** Итог последней проверки обновления (для отметки в меню «Дополнительно»). */
