@@ -14,7 +14,7 @@
 // - устройства «весь интернет через VPN» (режим «выбранные»): перед правилами источников — `except-<dev>`,
 //   `zapret-<dev>` и `vpnall-<dev>` → `vpn-all` → профиль;
 // - несколько серверов: сервер по умолчанию — профиль с наименьшим номером туннеля; сервисы другого сервера — в группе
-//   `vpn-sites@<профиль>`, их правило `vpn-<src>@<профиль>` стоит перед `vpn-<src>`; устройство «весь интернет через
+//   `vpn-sites--<профиль>`, их правило `vpn-<src>--<профиль>` стоит перед `vpn-<src>`; устройство «весь интернет через
 //   VPN» может идти через свой сервер (действие правила `vpnall-<dev>`);
 // - `default_action`: профиль в режиме «всё» для всей сети, иначе «остальные сайты» (напрямую или с Zapret);
 // - последнее правило-метка, всегда выключенное (на маршрутизацию не влияет): `rest-lan`, а при выключенном VPN —
@@ -61,8 +61,8 @@ export const SITES = 'vpn-sites'
 export const ZAPRET_SITES = 'zapret-sites'
 export const EXCEPT = 'vpn-except'
 export const ALL = 'vpn-all'
-/** Группа сервисов сервера, кроме сервера по умолчанию: `vpn-sites@<id профиля>`. */
-export const SITES_AT = `${SITES}@`
+/** Группа сервисов сервера, кроме сервера по умолчанию: `vpn-sites--<id профиля>`. */
+export const SITES_AT = `${SITES}--`
 const REST_ON = 'rest-lan'
 const REST_OFF = 'vpn-off'
 const SOURCE_PREFIX = 'itdoginfo:'
@@ -227,7 +227,7 @@ export function toConfig(base: Config, s: Simple, lan: Lan, catalog: ListCatalog
     if (except.length) rules.push(rule(`except-${key}`, src, EXCEPT, rest, s.enabled))
     // обход блокировок без VPN от VPN не зависит: правило включено и при выключенном VPN
     if (zapretSites.length) rules.push(rule(`zapret-${key}`, src, ZAPRET_SITES, { type: 'direct_zapret' }, true))
-    for (const [pid] of atSites) rules.push(rule(`vpn-${key}@${pid}`, src, SITES_AT + pid, toProfile(pid), s.enabled))
+    for (const [pid] of atSites) rules.push(rule(`vpn-${key}--${pid}`, src, SITES_AT + pid, toProfile(pid), s.enabled))
     if (vpnTarget) rules.push(rule(`vpn-${key}`, src, vpnTarget, toVpn, s.enabled))
   }
   rules.push(rule(s.enabled ? REST_ON : REST_OFF, { type: 'lan' }, ALL, rest, false))

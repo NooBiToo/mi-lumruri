@@ -62,6 +62,8 @@ export interface DnsConfig {
   secure?: SecureDns
   /** Свои записи: домен вместе с поддоменами отвечает адресом (IPv4 или IPv6). */
   hosts?: HostRecord[]
+  /** Профиль, через туннель которого идут DNS-вопросы (несколько серверов). */
+  tunnel_profile?: string
 }
 /** Выбор стратегий Zapret (controller/src/model.rs): `auto` — круговой режим, иначе id стратегии каталога. */
 export interface ZapretConfig { strategy: string; youtube: string }

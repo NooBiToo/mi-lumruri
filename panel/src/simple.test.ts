@@ -297,11 +297,11 @@ describe('simple', () => {
     const s = simple({ services: ['youtube', 'meta', 'telegram'], customDomains: ['example.org'], serviceServer: { youtube: 'hy' },
       devices: ['a4:77:33:10:20:30'], vpnAll: ['3c:22:fb:01:02:03'], deviceServer: { '3c:22:fb:01:02:03': 'hy' } })
     const c = toConfig(two, s, lan, catalog, known)
-    expect(c.groups.find((g) => g.id === 'vpn-sites@hy')?.destinations).toEqual([{ type: 'category', id: 'svc-youtube' }])
+    expect(c.groups.find((g) => g.id === 'vpn-sites--hy')?.destinations).toEqual([{ type: 'category', id: 'svc-youtube' }])
     expect(c.groups.find((g) => g.id === 'vpn-sites')?.destinations.some((d) => d.type === 'category' && d.id === 'svc-youtube')).toBe(false)
     const ids = c.rules.map((r) => r.id)
-    expect(ids.indexOf('vpn-dev-a47733102030@hy')).toBeLessThan(ids.indexOf('vpn-dev-a47733102030'))
-    expect(c.rules.find((r) => r.id === 'vpn-dev-a47733102030@hy')?.action).toEqual({ type: 'profile', id: 'hy' })
+    expect(ids.indexOf('vpn-dev-a47733102030--hy')).toBeLessThan(ids.indexOf('vpn-dev-a47733102030'))
+    expect(c.rules.find((r) => r.id === 'vpn-dev-a47733102030--hy')?.action).toEqual({ type: 'profile', id: 'hy' })
     expect(c.rules.find((r) => r.id === 'vpn-dev-a47733102030')?.action).toEqual({ type: 'profile', id: 'tt' })
     expect(c.rules.find((r) => r.id === 'vpnall-dev-3c22fb010203')?.action).toEqual({ type: 'profile', id: 'hy' })
     const back = fromConfig(JSON.parse(JSON.stringify(c)) as Config)
@@ -313,7 +313,7 @@ describe('simple', () => {
     }
     // сервер удалили — его сервисы уходят на сервер по умолчанию, отметка забывается
     const one = toConfig(base, s, lan, catalog, known)
-    expect(one.groups.some((g) => g.id.startsWith('vpn-sites@'))).toBe(false)
+    expect(one.groups.some((g) => g.id.startsWith('vpn-sites--'))).toBe(false)
     expect(one.rules.find((r) => r.id === 'vpnall-dev-3c22fb010203')?.action).toEqual({ type: 'profile', id: 'tt' })
   })
 

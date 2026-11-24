@@ -580,6 +580,7 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
         field: Default::default(),
         dns_tun,
         v6_tun,
+        down: Vec::new(),
     };
     if cfg.ipv6_via_vpn && !tunnels.is_empty() && tunnel_all.is_empty() {
         warnings.push("IPv6 через VPN действует только для «всё через VPN»: при выборе отдельных сайтов IPv6 устройств закрыт".into());

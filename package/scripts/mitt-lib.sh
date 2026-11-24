@@ -129,6 +129,11 @@ admin_apply() { # admin_apply <метка> [--guard-only]
   local rc=$?; [ "$rc" -eq 0 ] || cp -f "$STATE/apply.$tag.json" "$STATE/apply.$tag.fail.json" 2>/dev/null
   printf '{"tag":"%s","exit":%s,"at":%s}\n' "$tag" "$rc" "$(date +%s)" >"$STATE/last-apply.json"
   if [ "${1:-}" != --guard-only ]; then
+    # серверы, TUN которых при применении ещё не было (маршрута через них нет): служба доприменит, когда поднимутся
+    if [ "$rc" -eq 0 ]; then
+      tr -d ' \n\t' <"$STATE/apply.$tag.json" | sed -n 's/.*"tun_down":\[\([0-9,]*\)\].*/\1/p' | tr ',' ' ' >"$STATE/tun-down"
+      grep -q '[0-9]' "$STATE/tun-down" 2>/dev/null || rm -f "$STATE/tun-down"
+    fi
     [ "$rc" -eq 0 ] || { e="$(short_err "$STATE/apply.$tag.json")"; [ -n "$e" ] || e="код $rc"; }
     printf '{"tag":"%s","exit":%s,"at":%s,"error":%s}\n' "$tag" "$rc" "$(date +%s)" "$([ -n "$e" ] && printf '"%s"' "$e" || echo null)" >"$STATE/full-apply.json"
   fi

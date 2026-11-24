@@ -4,7 +4,7 @@ import InputText from 'primevue/inputtext'
 import ToggleSwitch from 'primevue/toggleswitch'
 import { ChevronDown, ChevronRight } from 'lucide-vue-next'
 import { CUSTOM_DNS, DNS_PRESETS, dnsPresetIp, dnsPresetOf, dnsToForm, formToDns, tunnelSecureModes, type DnsForm } from '../manage'
-import { config, save, service } from '../store'
+import { config, profiles, save, service } from '../store'
 import { when } from '../status'
 import { saveNow, useAutosave, type Blocker } from '../autosave'
 import { dnsIcon } from '../brand'
@@ -273,6 +273,14 @@ useAutosave({
           </label>
         </div>
         <p v-if="dnsNote" class="dns__note">{{ dnsNote }}</p>
+        <div v-if="profiles.length > 1" class="field">
+          <label for="dns-tunnel" class="field__label">{{ t('Через сервер') }}</label>
+          <select id="dns-tunnel" v-model="draft.dns.tunnelProfile" class="tile__server self-start">
+            <option value="">{{ t('По умолчанию ({name})', { name: profiles[0]?.name ?? '' }) }}</option>
+            <option v-for="p in profiles.slice(1)" :key="p.id" :value="p.id">{{ p.name }}</option>
+          </select>
+          <span class="field__hint">{{ t('Через этот сервер роутер спрашивает адреса сайтов, которые идут через VPN.') }}</span>
+        </div>
         <div class="field">
           <span id="tunnel-secure-title" class="field__label">{{ t('Шифрование') }}</span>
           <Segmented v-model="draft.dns.tunnelSecure" class="self-start" :options="TUNNEL_SECURE_MODES" :label="t('Шифрование DNS через VPN')" name="tunnel-secure" />

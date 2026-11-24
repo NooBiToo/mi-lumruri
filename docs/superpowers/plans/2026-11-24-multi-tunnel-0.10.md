@@ -160,7 +160,7 @@
 **Files:**
 - Modify: `panel/src/simple.ts` (+ test): `Simple.siteServer?: Record<string, string>` (ключ — id сервиса или
   домен, значение — id профиля), `Simple.deviceServer?: Record<string, string>` (MAC → профиль), группы
-  `vpn-sites` (сервер по умолчанию = `profiles` с наименьшим `tunnel`) и `vpn-sites@<pid>` для остальных, правила
+  `vpn-sites` (сервер по умолчанию = `profiles` с наименьшим `tunnel`) и `vpn-sites--<pid>` для остальных, правила
   `vpn-<src>@<pid>`; `fromConfig` разбирает обратно (несколько профилей больше не «ручные»).
 - Modify: `panel/src/views/ServerView.vue` (список серверов, «Добавить сервер», удаление с переназначением
   правил на сервер по умолчанию), `SitesView.vue`/`DevicesView.vue` (выбор сервера, если серверов >1),

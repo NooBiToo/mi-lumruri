@@ -210,6 +210,11 @@ check("два сервера одновременно: применение пр
       and "default dev mitt1" in zm and "trusttunnel.pid" in zm and "trusttunnel1.pid" in zm and "1 mitt1 tt2" in zm
       and seen("M-tv-video-mitt1") == (0, VPN) and len(mtx) == 2 and mtx[1] > mtx[0],
       [js("last-apply.multi.json"), zm[:900], text("apply.multi.json")[:600]])
+check("второй сервер недоступен: полное применение проходит, видео ТВ идёт через первый сервер",
+      js("last-apply.multi-down.json").get("exit") == 0 and seen("M-tv-video-tt1-while-tt2-down") == (0, VPN) and "fwmark 0x4010/0x40f0 lookup 3101" in text("zone.multi-down.txt"),
+      [js("last-apply.multi-down.json"), seen("M-tv-video-tt1-while-tt2-down"), text("zone.multi-down.txt"), text("apply.multi-down.json")[:500]])
+check("второй сервер снова доступен: маршрут 3101 через mitt1",
+      "dev mitt1" in text("zone.multi-up.txt"), [text("zone.multi-down.txt"), text("zone.multi-up.txt")])
 zo = text("zone.multi-off.txt")
 check("возврат к одному серверу: метка снова 0x4000/0x4000, второго клиента и mitt1 нет",
       "fwmark 0x4000/0x4000 lookup 3100" in zo and "trusttunnel1.pid" not in zo and "3101" not in zo, zo)

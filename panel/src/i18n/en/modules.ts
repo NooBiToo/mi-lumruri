@@ -31,4 +31,7 @@ export default {
   "Удалить сервер": "Remove server",
   "Его сайты и устройства перейдут на сервер по умолчанию.": "Its sites and devices move to the default server.",
   "Название": "Name",
+  "Через сервер": "Through server",
+  "По умолчанию ({name})": "Default ({name})",
+  "Через этот сервер роутер спрашивает адреса сайтов, которые идут через VPN.": "The router looks up the addresses of sites that go through the VPN through this server.",
 }

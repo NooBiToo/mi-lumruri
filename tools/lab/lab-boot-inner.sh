@@ -366,6 +366,27 @@ B1="$(tx1)"; wait_tunnel; probe M-tv-video-mitt1 tv; B2="$(tx1)"
 { nsx router ip rule show | awk -F: '$1>=3000 && $1<=3199'; echo "--- 3100"; nsx router ip route show table 3100 2>/dev/null
   echo "--- 3101"; nsx router ip route show table 3101 2>/dev/null; echo "--- procs"; ls "$RN" | grep -E '^trusttunnel[0-9]*\.pid$'
   echo "--- list"; cat "$RR/tmp/mi-lumruri/render/tunnels.list"; echo "--- mitt1 tx $B1 -> $B2"; } >"$OUT/zone.multi.txt" 2>&1
+# 6д) второй сервер недоступен (неверный пароль): применение проходит, видео ТВ идёт через первый сервер
+"${PY[@]}" -c 'import json,sys
+p=sys.argv[1]; c=json.load(open(p))
+for r in c["rules"]:
+    if r["id"]=="r-tv-video": r["action"]={"type":"profile","id":"tt-lab"}
+    if r["id"]=="r-tv-dns": r["action"]={"type":"profile","id":"tt2"}
+json.dump(c,open(p,"w"),ensure_ascii=False,indent=2)
+s=json.load(open(sys.argv[2])); s["profiles"]["tt2"]={"password":"wrong-password-lab"}; json.dump(s,open(sys.argv[2],"w"))' "$E/config.json" "$E/secrets.json" # secret-scan: allow неверный пароль стенда
+A0="$(at_of)"; post apply-request '{}' >/dev/null
+for i in $(seq 60); do [ "$(at_of)" -gt "${A0:-0}" ] 2>/dev/null && grep -q '"panel-request' "$RN/last-apply.json" && break; sleep 1; done
+cp "$RN/last-apply.json" "$OUT/last-apply.multi-down.json"; cp "$RN/apply.panel-request.json" "$OUT/apply.multi-down.json" 2>/dev/null
+wait_tunnel; probe M-tv-video-tt1-while-tt2-down tv
+{ nsx router ip rule show | awk -F: '$1>=3000 && $1<=3199'; echo "--- 3101"; nsx router ip route show table 3101 2>/dev/null; echo "--- down"; cat "$RN/tun-down" 2>/dev/null; } >"$OUT/zone.multi-down.txt" 2>&1
+# сервер снова доступен (верный пароль, заявка на применение): второй клиент подключается, маршрут через mitt1 — сразу
+# или доприменением службы, когда TUN поднимется
+"${PY[@]}" -c 'import json,sys
+s=json.load(open(sys.argv[1])); s["profiles"]["tt2"]=dict(s["profiles"]["tt-lab"]); json.dump(s,open(sys.argv[1],"w"))' "$E/secrets.json"
+A0="$(at_of)"; post apply-request '{}' >/dev/null
+for i in $(seq 60); do [ "$(at_of)" -gt "${A0:-0}" ] 2>/dev/null && grep -q '"panel-request' "$RN/last-apply.json" && break; sleep 1; done
+for i in $(seq 120); do nsx router ip route show table 3101 2>/dev/null | grep -q 'dev mitt1' && break; sleep 1; done
+{ nsx router ip route show table 3101 2>/dev/null; echo "--- down"; cat "$RN/tun-down" 2>/dev/null; echo "--- last"; cat "$RN/last-apply.json"; } >"$OUT/zone.multi-up.txt" 2>&1
 cp "$W/config.before-multi.json" "$E/config.json"; cp "$W/secrets.before-multi.json" "$E/secrets.json"
 A0="$(at_of)"; post apply-request '{}' >/dev/null
 for i in $(seq 60); do [ "$(at_of)" -gt "${A0:-0}" ] 2>/dev/null && grep -q '"panel-request' "$RN/last-apply.json" && break; sleep 1; done

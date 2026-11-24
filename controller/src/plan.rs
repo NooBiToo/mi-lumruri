@@ -221,6 +221,11 @@ pub struct PolicySpec {
     /// Туннель IPv6 источников `v6_tunnel`.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub v6_tun: u8,
+    /// Туннели, TUN которых сейчас нет (клиент ещё не подключился): без маршрута через TUN, только защита. Задаёт
+    /// mi-tt-admin по живому состоянию, когда туннелей несколько и хотя бы один поднят: отказ одного сервера не
+    /// мешает применить правила остальных. Не сохраняется.
+    #[serde(skip)]
+    pub down: Vec<u8>,
 }
 
 fn default_table() -> u32 {
@@ -595,7 +600,7 @@ pub fn build_plan(spec: &PolicySpec, v6_lan_prefixes: &[String], bridge_ports: &
             if !t.fail_open {
                 p.insert(Entry::Route { v6: false, table, dev: None, metric: METRIC_GUARD });
             }
-            if !guard_only {
+            if !guard_only && !spec.down.contains(&t.index) {
                 p.insert(Entry::Route { v6: false, table, dev: Some(t.dev.clone()), metric: METRIC_TUN });
             }
             p.insert(Entry::Rule { v6: false, prio: PRIO_MARK + u32::from(t.index), from: None, to: None, iif: None, fwmark: Some(mark(t.index)), lookup: Some(table.to_string()) });
@@ -626,7 +631,7 @@ pub fn build_plan(spec: &PolicySpec, v6_lan_prefixes: &[String], bridge_ports: &
         if !v6t.fail_open {
             p.insert(Entry::Route { v6: true, table, dev: None, metric: METRIC_GUARD });
         }
-        if !guard_only {
+        if !guard_only && !spec.down.contains(&v6t.index) {
             p.insert(Entry::Route { v6: true, table, dev: Some(v6t.dev.clone()), metric: METRIC_TUN });
         }
         for x in v6_lan_prefixes {
@@ -1282,6 +1287,17 @@ mod tests {
         assert!(l.contains("ip rule priority 3008 fwmark 0x4000/0x4000 lookup 3103"), "{l:#?}");
         assert!(l.contains("ip route default dev mitt3 metric 1 table 3103"), "{l:#?}");
         assert!(!l.iter().any(|x| x.contains("table 3100")), "{l:#?}");
+    }
+
+    #[test]
+    fn down_tunnel_keeps_guard_without_tun_route() {
+        let mut s = two_tun();
+        s.down = vec![1];
+        let l = labels(&build_plan(&s, &[], &whole(), false));
+        assert!(l.contains("ip route default dev mitt0 metric 1 table 3100"), "{l:#?}");
+        assert!(l.contains("ip route unreachable default metric 4096 table 3101"), "{l:#?}");
+        assert!(!l.contains("ip route default dev mitt1 metric 1 table 3101"), "{l:#?}");
+        assert!(l.contains("ip rule priority 3006 fwmark 0x4010/0x40f0 lookup 3101"), "{l:#?}");
     }
 
     #[test]

@@ -80,6 +80,8 @@ export interface DnsForm {
   secure: SecureMode; secureServer: SecureServer; nextdnsId: string; secureUrl: string; secureIps: string
   /** Шифрование DNS для сайтов через VPN (DoH/DoT поверх туннеля). */
   tunnelSecure: SecureMode
+  /** Через какой сервер идут эти вопросы (несколько серверов); '' — сервер по умолчанию. */
+  tunnelProfile: string
 }
 
 /** Какое шифрование DNS через VPN доступно для резолвера туннеля (контроллер: DnsConfig::tunnel_proxy_args). */
@@ -91,7 +93,7 @@ export function tunnelSecureModes(resolver: string): SecureMode[] {
 
 export function dnsDefault(): DnsForm {
   return { resolver: DEFAULT_TUNNEL_RESOLVER, adblock: false, adblockSource: 'light', adblockUrl: '', exceptions: '', hosts: [],
-    secure: 'off', secureServer: 'cloudflare', nextdnsId: '', secureUrl: '', secureIps: '', tunnelSecure: 'off' }
+    secure: 'off', secureServer: 'cloudflare', nextdnsId: '', secureUrl: '', secureIps: '', tunnelSecure: 'off', tunnelProfile: '' }
 }
 
 export function dnsToForm(d: DnsConfig | undefined): DnsForm {
@@ -101,7 +103,7 @@ export function dnsToForm(d: DnsConfig | undefined): DnsForm {
     adblockUrl: d.adblock?.url ?? '', exceptions: (d.adblock?.exceptions ?? []).join('\n'),
     hosts: (d.hosts ?? []).map((h) => ({ domain: h.domain, address: h.address })),
     secure: s?.protocol ?? 'off', secureServer: s?.server ?? 'cloudflare', nextdnsId: s?.nextdns_id ?? '', secureUrl: s?.url ?? '', secureIps: (s?.ips ?? []).join(', '),
-    tunnelSecure: d.tunnel_secure ?? 'off' }
+    tunnelSecure: d.tunnel_secure ?? 'off', tunnelProfile: d.tunnel_profile ?? '' }
 }
 
 /** Раздел `secure` из формы: поля NextDNS и своего сервера — только для них. Точнее проверит контроллер. */
@@ -132,6 +134,7 @@ export function formToDns(f: DnsForm): DnsConfig | null {
   const secure = formToSecure(f)
   if (secure) d.secure = secure
   if (f.hosts.length) d.hosts = f.hosts.map((h) => ({ domain: h.domain, address: h.address }))
+  if (f.tunnelProfile) d.tunnel_profile = f.tunnelProfile
   return Object.keys(d).length ? d : null
 }
 

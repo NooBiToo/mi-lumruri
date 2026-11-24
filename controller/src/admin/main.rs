@@ -211,7 +211,11 @@ fn read_live(warnings: &mut Vec<String>) -> Result<Live, String> {
 }
 
 fn tun_present() -> bool {
-    run_s("ip", &["link", "show", "dev", TUN_DEVICE]).is_ok()
+    dev_present(TUN_DEVICE)
+}
+
+fn dev_present(dev: &str) -> bool {
+    run_s("ip", &["link", "show", "dev", dev]).is_ok()
 }
 
 // ---------- возможности (только чтение) ----------
@@ -477,7 +481,7 @@ fn change(a: &Args, target: Option<Desired>) -> ExitCode {
         Ok(l) => l,
         Err(m) => return fail(2, "read_failed", m),
     };
-    let (mut field, mut degraded) = (None, false);
+    let (mut field, mut degraded, mut tun_down) = (None, false, Vec::<u8>::new());
     let (set, spec, rev) = match target {
         Some(mut d) => {
             warnings.extend(d.warnings.clone());
@@ -487,6 +491,16 @@ fn change(a: &Args, target: Option<Desired>) -> ExitCode {
             d.spec = sp;
             field = f.map(|x| x.name().to_string());
             degraded = needs && f.is_none();
+            // несколько туннелей: неподнятые — без маршрута через TUN (защита), остальные применяются; все не подняты —
+            // как при одном туннеле (применение не пройдёт, служба включит защиту целиком)
+            let used = d.spec.used_tunnels();
+            if used.len() > 1 && !a.guard_only {
+                let down: Vec<u8> = used.iter().filter(|t| !dev_present(&t.dev)).map(|t| t.index).collect();
+                if down.len() < used.len() {
+                    d.spec.down = down;
+                }
+            }
+            tun_down = d.spec.down.clone();
             let b = match build(a, &d) {
                 Ok(b) => b,
                 Err(code) => return code,
@@ -569,7 +583,7 @@ fn change(a: &Args, target: Option<Desired>) -> ExitCode {
     out(
         if ok { 0 } else { 1 },
         json!({ "ok": ok, "noop": steps.is_empty(), "phase": st.phase,
-            "config_revision": st.config_revision, "plan_sha256": st.plan_sha256, "mark_field": st.mark_field, "degraded": st.degraded, "steps": done, "verified": verified.unwrap_or(false),
+            "config_revision": st.config_revision, "plan_sha256": st.plan_sha256, "mark_field": st.mark_field, "degraded": st.degraded, "tun_down": tun_down, "steps": done, "verified": verified.unwrap_or(false),
             "set_errors": set_errors, "tun_present": tun_present(), "owned": st.owned.iter().map(Entry::label).collect::<Vec<_>>(), "warnings": warnings }),
     )
 }

@@ -26,7 +26,7 @@ The router's internal storage is small: about 20 MB, of which the firmware uses 
 
 | | |
 | --- | --- |
-| **Server** | Paste a `tt://` link or a `client.toml` file and the fields fill in. The server address can be an IP or a domain. Uses the official `trusttunnel_client` v1.3.0: HTTP/2 or HTTP/3, anti-DPI, custom certificate, TLS profile, client_random prefix or key. TrustTunnel 1.3 subscription link: the router fetches new server parameters on its own. Backup server: if the main server does not connect for 2 minutes, the router switches to the backup and returns when the main one responds again. If the server is down, listed sites either wait or open directly — your choice. |
+| **Server** | Paste a `tt://` link or a `client.toml` file and the fields fill in. The server address can be an IP or a domain. Uses the official `trusttunnel_client` v1.3.0: HTTP/2 or HTTP/3, anti-DPI, custom certificate, TLS profile, client_random prefix or key. TrustTunnel 1.3 subscription link: the router fetches new server parameters on its own. Backup server: if the main server does not connect for 2 minutes, the router switches to the backup and returns when the main one responds again. If the server is down, listed sites either wait or open directly — your choice. Up to 16 servers at once: a service on Sites and a device can each use their own server. |
 | **Sites** | Each service is set to **VPN**, **Zapret** or **Off**. Ready-made lists from [itdoginfo/allow-domains](https://github.com/itdoginfo/allow-domains), including service subnets, ship with the package and update automatically: from every 6 hours to weekly, or manually only. Your own VPN sites, your own DPI-bypass sites and exceptions are separate lists, one site per line. There is also an "Everything via VPN except exceptions" mode. Optionally, IPv6 also goes through the VPN for devices whose whole internet goes through the VPN. |
 | **Zapret** | nfqws2 from zapret2 with built-in strategies works out of the box. "Find a method" tests strategies on the router and applies the best one only if sites open better with it than without Zapret. You can also pick a method manually, with a separate one for YouTube. Scheduled re-check of the method. |
 | **Devices** | All home devices, or only the ones you select from the list of connected devices. A single device can have "Whole internet" through the VPN while the others send only the selected sites through the VPN. |
@@ -67,7 +67,8 @@ The package runs on the BE7000 with firmware 1.1.38: tunnel, selective routing, 
 
 - Listed sites are matched by IPv4 only: devices with VPN or Zapret rules have no outbound IPv6. The exception is devices whose whole internet goes through the VPN, with "IPv6 via VPN" turned on: their IPv6 goes through the tunnel, and the VPN server needs IPv6. Preset DNS servers have IPv6 addresses, but they are used only as a fallback.
 - Sites are matched by DNS: a device must use the router as its DNS server. "Secure DNS" (DoH) in a browser bypasses the lists.
-- Traffic goes through one TrustTunnel server. The backup server replaces the main one, and switching takes up to 2 minutes.
+- Several servers at once use the mark bits of the UU plugin (a game booster) or, if it is on, of the backup WAN. If both are on, one server works. The backup server replaces the main one, and switching takes up to 2 minutes.
+- The Modules page shows only storage for now; the VLESS, Hysteria2 and AmneziaWG modules arrive in the next versions.
 - DoT does not work everywhere: many ISPs block port 853.
 
 The full list is in the [guide](docs/guide.en.md#limitations).

@@ -161,6 +161,14 @@ while [ -f "$STATE/service.wanted" ]; do
       admin_apply tun-ready && echo full >"$STATE/protection"
     fi
   fi
+  # серверы, TUN которых при применении не было: когда хотя бы один поднялся — доприменить (не чаще раза в минуту)
+  if [ -s "$STATE/tun-down" ]; then
+    up=""; for n in $(cat "$STATE/tun-down"); do tun_ready "mitt$n" && up=1; done
+    now=$(date +%s); last=$(cat "$STATE/tun-down-retry" 2>/dev/null || echo 0)
+    if [ -n "$up" ] && { [ $((now - last)) -ge 60 ] || [ "$now" -lt "$last" ]; }; then
+      echo "$now" >"$STATE/tun-down-retry"; admin_apply tun-up && echo full >"$STATE/protection"
+    fi
+  fi
   # уведомления: состояние туннеля и отправка очереди; статистика трафика
   notify_flush; stats_sample; names_scan; storage_scan
   # автозапуск: запись в firewall могли снять (сброс, прошивка, штатный интерфейс) — раз в 10 минут

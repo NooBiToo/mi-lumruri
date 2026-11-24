@@ -2,7 +2,7 @@
 
 [Русский](guide.md) · **English** · [简体中文](guide.zh-CN.md)
 
-This guide covers Mi Lumruri version 0.9.2. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
+This guide covers Mi Lumruri version 0.10.0. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
 
 You need a BE7000 (RC06) with firmware 1.1.38, working root access over SSH from the home network, the installation TAR, and the parameters of your TrustTunnel server. The stock release firmware usually ships with SSH turned off.
 
@@ -134,7 +134,7 @@ The first command shows a QR code (scan it with an authenticator app) and prints
 
 ## 3. Configure in the panel
 
-The panel menu has seven screens: **Overview**, **Sites**, **Devices**, **Server**, **Zapret**, **Diagnostics** and **Settings**. On a phone, the bottom bar has only Overview, Sites, Devices, Server and More. Zapret and Diagnostics open from More, and so do the settings.
+The panel menu has eight screens: **Overview**, **Sites**, **Devices**, **Server**, **Zapret**, **Modules**, **Diagnostics** and **Settings**. On a phone, the bottom bar has only Overview, Sites, Devices, Server and More. Zapret, Modules and Diagnostics open from More, and so do the settings.
 
 Changes on the screens save automatically. There is no separate Apply button. The **Save** button exists only on the Server screen. The top bar shows whether the VPN is connected and the save progress: "Saving…", "Applying on the router", "Saved". The router applies settings on its own within a few seconds. The top bar also has the **VPN** switch and the Sign out button.
 
@@ -175,6 +175,14 @@ The **If the server is unavailable, sites from the list** switch: Don't open (re
 
 The package includes TrustTunnel client v1.3.0, which works with TrustTunnel server 1.3.1.
 
+#### Several servers
+
+You can have up to 16 servers, and they work **at the same time**: each has its own tunnel. The **Servers** card at the top of the screen lists them; click a server to open and edit it. **Add server** opens an empty form: paste the link, check the **Name** field and click Save. The first server in the list is the **default server**: everything without another server chosen goes through it. **Remove server** (click twice) removes a server; its sites and devices move to the default server.
+
+You choose which server to use on [Sites](#sites) (per service) and [Devices](#devices) (per Whole internet device), and the DNS for sites through the VPN in Settings → Network and DNS. The backup server, the watchdog and notifications work for each server separately. The speed test measures the default server.
+
+With one server, the router marks traffic as before (bit `0x4000`). With more than one, the server number goes into neighbouring mark bits: the four bits the firmware reserves for the UU plugin (a game booster), or, if UU has taken them, the four bits of the backup WAN (mwan3, needed only with a second ISP). If both sets are taken, only the default server works, the rules of the other servers follow their If the server is unavailable choice, and the log and a notification give the reason. The router never touches bits that someone else uses.
+
 #### Backup server
 
 The **Backup server** card appears on the Server screen after you save the main server. Click Add, paste the link or `client.toml` of the backup server and click Recognize, or fill in the address, port, server name, username, password and anti-DPI manually. Then click Save. As with the main server, the password is stored only on the router.
@@ -201,6 +209,8 @@ In the **What to open via VPN** card, choose a mode:
 - **Everything via VPN**. All internet traffic goes through the VPN, except sites from Keep off VPN and sites with DPI bypass. IPv6 stays closed in this mode until [IPv6 via VPN](#ipv6-via-vpn) is turned on in Settings.
 
 If only one device needs all its internet through the VPN, keep Selected only and turn on Whole internet for that device on the [Devices](#devices) screen.
+
+With several servers, a service set to **VPN** gets a server choice. By default it goes through the default server; your own sites through the VPN go through it too.
 
 **Services** are tiles with ready-made lists: YouTube, Instagram and Facebook, Discord, Telegram, ChatGPT and Google AI, TikTok, X and others. Services are split into groups, and there is a search. Each tile has three positions: **VPN** (through the VPN), **Zapret** (directly with DPI bypass) and **Off** (like all other sites). Everything blocked in Russia is a large general list. It is enough if you do not know what to choose. For services with their own networks (Telegram, Discord, Meta and others), their IP subnets are turned on together with the service. The Hosting and CDN group includes entire hosting networks. Only specialists need it.
 
@@ -230,7 +240,7 @@ The icon shows the type when it is known: TV, phone, tablet, computer, printer, 
 
 **Details** on a device: how its traffic goes now, the manufacturer, its network name and model, the name when connecting, the connection (cable or Wi‑Fi with signal level, from firmware data), IP, MAC and traffic per day and week.
 
-**Whole internet** is a switch on each device when the Sites screen is in Selected only mode. For such a device, all sites go through the VPN, not only the selected ones. Keep off VPN and sites with DPI bypass still apply to it. The switch also works in All devices mode, for example for a TV that needs all its internet through the VPN while the other devices send only the selected sites through the VPN.
+**Whole internet** is a switch on each device when the Sites screen is in Selected only mode. For such a device, all sites go through the VPN, not only the selected ones. Keep off VPN and sites with DPI bypass still apply to it. The switch also works in All devices mode, for example for a TV that needs all its internet through the VPN while the other devices send only the selected sites through the VPN. With several servers, a server choice appears next to Whole internet when it is on.
 
 ### Overview
 
@@ -251,6 +261,12 @@ Below is the **Traffic** card for a day or a week: how much went through the rou
 Settings → **Network and DNS** tab, at the bottom. Enter a domain and an IP address on the home network and click Add. The domain and all its subdomains will resolve to that address, for example for a server with Traefik. Records save automatically. For details, see [DNS](#dns).
 
 **The panel by your own domain.** Add a record with the router IP (for example, `router.home.example.com` → `192.168.31.1`), and the panel opens at `https://router.home.example.com:8443/`: the router itself allows settings to be written from domains of its own DNS records that point to its address, together with subdomains. The panel certificate is issued for the IP, so the browser asks once to confirm it for the domain too. If the panel is opened through a reverse proxy on another device (for example, Traefik), add its address in Settings → **Panel addresses** (for example, `https://router.home.example.com`); it takes effect immediately. Add it while the panel is open by the router IP.
+
+### Modules
+
+Modules add new VPN protocols to the package: VLESS, Hysteria2, AmneziaWG and others. They are large and do not fit in the router memory, so they go on a USB drive plugged into the router, or into internal memory if it has room. The **Storage** card shows the internal memory and connected USB drives: maker and model, free space, path and file system. The router checks drives once a minute, so a newly plugged drive shows up by itself.
+
+In version 0.10.0 the page shows storage only. The first modules (VLESS and Hysteria2, then AmneziaWG) and one-button installation arrive in the next versions. Then the router will also watch the drive with a module and send a notification if it disappears.
 
 ### Diagnostics
 
@@ -384,7 +400,7 @@ Under the simple screens runs the controller's rule model: source (device, netwo
 - **Firewall reload.** A full firewall (fw3) reload removes all iptables chains. For about 1–2 seconds, until the include applies the rules again, traffic goes directly. In the lab this window was 1.2 s.
 - **The Zapret method search was tested only in a lab without DPI.** There, all targets open without Zapret, and the search ends, as expected, with "No method works better than no bypass — the previous one is kept." Only a check on the router will show how the strategies work against a specific ISP's equipment.
 - **Lists update from GitHub.** If `raw.githubusercontent.com` is not reachable directly, the lists from the package or the last downloaded ones apply.
-- **One TrustTunnel server at a time.** The stock firmware leaves one mark bit free, so traffic goes through one server. The backup server replaces the main one rather than running alongside it, and switching takes up to 2 minutes.
+- **Several servers use the UU plugin or backup WAN bits.** The stock firmware leaves one mark bit free (`0x4000`). For several servers at once, the router takes the four UU plugin bits (`0xf0`), or, if UU has taken them, the four mwan3 bits (`0x0f00`). If you turn on both UU and a second WAN, only the default server works. Each server's backup server replaces it rather than running alongside it, and switching takes up to 2 minutes.
 - **Mark conflict.** The route is chosen by the mark bit `0x4000`. If firmware rules use it (for example, mwan3 sticky rules with several WANs), applying is rejected without changes.
 - **Guest networks** are not part of the simple settings.
 
