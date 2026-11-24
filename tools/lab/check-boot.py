@@ -223,7 +223,7 @@ def txd(dev):
     except Exception:
         return False
 check("модуль sing-box: флешка видна в «Модулях», модуль установлен из панели на неё (SHA-256 и подпись)",
-      '"usb-lab"' in text("storage.out") and '"state":"done"' in text("module.json") and '"state":"ok"' in text("modules.out"),
+      '"/mnt/usb-lab"' in text("storage.out") and '"state":"done"' in text("module.json") and '"state":"ok"' in text("modules.out"),
       [text("storage.out")[:300], text("module.json"), text("modules.out")[:600]])
 check("серверы модуля: VLESS и Hysteria2 на настоящем sing-box, видео ТВ через mitt2 (VLESS), затем через mitt3 (Hysteria2)",
       js("last-apply.sb.json").get("exit") == 0 and "2 mitt2 vl sing-box" in text("tunnels.sb.list") and "3 mitt3 hy sing-box" in text("tunnels.sb.list")
