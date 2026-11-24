@@ -256,7 +256,7 @@ fn render_cmd(cfg: &str, secrets: &str, out: &str) -> Response {
                 return Response::error(500, "write_failed", m);
             }
             warnings.extend(r.warnings.iter().cloned());
-            Response { status: 200, body: json!({ "ok": true, "source_revision": store::revision(&c), "tunnel": !r.tunnels.is_empty(), "tunnels": r.tunnels.iter().map(|t| json!({ "index": t.index, "dev": t.dev, "profile": t.profile })).collect::<Vec<_>>(),
+            Response { status: 200, body: json!({ "ok": true, "source_revision": store::revision(&c), "tunnel": !r.tunnels.is_empty(), "tunnels": r.tunnels.iter().map(|t| json!({ "index": t.index, "dev": t.dev, "profile": t.profile, "engine": t.engine.name() })).collect::<Vec<_>>(),
                 "policy": r.policy, "plan": r.plan.iter().map(|e| e.label()).collect::<Vec<_>>(), "routes": r.routes,
                 "nfqws2_args": r.nfqws2_args, "warnings": warnings, "issues": [] }) }
         }
@@ -298,7 +298,10 @@ fn write_tunnels(dir: &std::path::Path, tunnels: &[render::TunRender]) -> Result
         }
     };
     let files = |d: &std::path::Path, t: Option<&render::TunRender>| -> Result<(), String> {
-        put(d, "client.toml", t.map(|t| t.client_toml.as_str()), true)?;
+        // конфигурация программы туннеля; файл другой программы (сервер сменил вид) удаляется
+        for e in [render::Engine::TrustTunnel, render::Engine::SingBox] {
+            put(d, e.config_file(), t.filter(|t| t.engine == e).map(|t| t.config.as_str()), true)?;
+        }
         // запасной сервер: его client.toml и адрес основного для проверки возврата (служба, mitt-lib.sh)
         put(d, "client-backup.toml", t.and_then(|t| t.client_backup_toml.as_deref()), true)?;
         put(d, "primary.addr", t.and_then(|t| t.primary_addr.as_deref()), false)?;
@@ -319,7 +322,7 @@ fn write_tunnels(dir: &std::path::Path, tunnels: &[render::TunRender]) -> Result
             None => {}
         }
     }
-    let list: String = tunnels.iter().map(|t| format!("{} {} {}\n", t.index, t.dev, t.profile)).collect();
+    let list: String = tunnels.iter().map(|t| format!("{} {} {} {}\n", t.index, t.dev, t.profile, t.engine.name())).collect();
     put(dir, "tunnels.list", (!list.is_empty()).then_some(list.as_str()), false)
 }
 

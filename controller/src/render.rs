@@ -32,7 +32,7 @@ pub struct Secrets {
     pub notify: Option<crate::notify::NotifySecret>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProfileSecret {
     /// Пароль пользователя TrustTunnel.
@@ -45,6 +45,22 @@ pub struct ProfileSecret {
     /// Пароль запасного сервера (`backup` профиля).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backup_password: Option<String>,
+    /// Сервер модуля sing-box: ссылка `vless://`, `hysteria2://`, `trojan://` или `ss://` (в ней UUID или пароль).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
+}
+
+/// Секреты профиля пригодны для его вида: TrustTunnel — пароль, sing-box — ссылка этого вида.
+pub fn check_profile_secret(kind: crate::model::ProfileKind, s: &ProfileSecret) -> Result<(), String> {
+    if !kind.singbox() {
+        return check_secret(s).map_err(String::from);
+    }
+    let link = s.link.as_deref().filter(|l| !l.is_empty()).ok_or("нужна ссылка на сервер")?;
+    let p = crate::proxy::parse_link(link)?;
+    if p.kind != kind {
+        return Err(format!("ссылка — сервер {}, а профиль — {}", p.kind.label(), kind.label()));
+    }
+    Ok(())
 }
 
 /// Пароль задан и пригоден для client.toml.
@@ -68,9 +84,14 @@ pub fn check_subscription_url(u: &str) -> Result<(), &'static str> {
 
 /// Запись секретов из панели поверх прежних: незаданное поле не меняется, пустая ссылка-подписка — удалить её.
 /// Итог должен содержать пароль или подписку (пароль придёт из неё).
-pub fn merge_secret(old: Option<ProfileSecret>, new: ProfileSecret) -> Result<ProfileSecret, &'static str> {
-    let old = old.unwrap_or(ProfileSecret { password: None, subscription_url: None, backup_password: None });
+pub fn merge_secret(old: Option<ProfileSecret>, new: ProfileSecret) -> Result<ProfileSecret, String> {
+    let old = old.unwrap_or_default();
     let s = ProfileSecret {
+        link: match new.link {
+            Some(l) if l.is_empty() => None,
+            Some(l) => Some(l.trim().to_string()),
+            None => old.link,
+        },
         password: new.password.or(old.password),
         // пустой пароль запасного сервера — удалить его (сервер убран)
         backup_password: match new.backup_password {
@@ -91,10 +112,13 @@ pub fn merge_secret(old: Option<ProfileSecret>, new: ProfileSecret) -> Result<Pr
         check_subscription_url(u)?;
     }
     if let Some(p) = &s.backup_password {
-        check_secret(&ProfileSecret { password: Some(p.clone()), subscription_url: None, backup_password: None })?;
+        check_secret(&ProfileSecret { password: Some(p.clone()), ..Default::default() })?;
     }
-    if s.password.is_none() && s.subscription_url.is_none() {
-        return Err("нужен пароль или ссылка-подписка");
+    if let Some(l) = &s.link {
+        crate::proxy::parse_link(l)?;
+    }
+    if s.password.is_none() && s.subscription_url.is_none() && s.link.is_none() {
+        return Err("нужен пароль, ссылка-подписка или ссылка на сервер".into());
     }
     Ok(s)
 }
@@ -127,14 +151,39 @@ pub struct Rendered {
 }
 
 /// Файлы одного туннеля для службы: туннель 0 — в каталоге рендера, n>0 — в `tun<n>/`.
+/// Программа туннеля: официальный клиент TrustTunnel или sing-box из модуля.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Engine {
+    TrustTunnel,
+    SingBox,
+}
+
+impl Engine {
+    /// Имя в tunnels.list.
+    pub fn name(self) -> &'static str {
+        match self {
+            Engine::TrustTunnel => "trusttunnel",
+            Engine::SingBox => "sing-box",
+        }
+    }
+    /// Файл конфигурации в каталоге туннеля.
+    pub fn config_file(self) -> &'static str {
+        match self {
+            Engine::TrustTunnel => "client.toml",
+            Engine::SingBox => "sing-box.json",
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct TunRender {
     pub index: u8,
     pub profile: String,
+    pub engine: Engine,
     pub dev: String,
     pub fail_open: bool,
-    /// client.toml (с паролем).
-    pub client_toml: String,
+    /// Конфигурация программы туннеля (с паролем или ссылкой): client.toml или sing-box.json.
+    pub config: String,
     /// Запасной сервер (если задан и у него есть пароль) и адрес основного «host port» для проверки возврата.
     pub client_backup_toml: Option<String>,
     pub primary_addr: Option<String>,
@@ -349,11 +398,11 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
             Action::Block => Some((Act::Block, 0)),
             Action::Profile { id } => {
                 let p = idx.profiles[id.as_str()];
-                if p.endpoint.is_none() {
+                if p.endpoint.is_none() && !p.kind.singbox() {
                     issues.push(Issue::new(path, "no_endpoint", format!("у профиля «{id}» нет точки подключения")));
                     return None;
                 }
-                match secrets.profiles.get(id).map(check_secret) {
+                match secrets.profiles.get(id).map(|s| check_profile_secret(p.kind, s)) {
                     None => {
                         issues.push(Issue::new(path, "no_secret", format!("нет пароля профиля «{id}» в secrets.json")));
                         return None;
@@ -534,33 +583,51 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
     let known_addrs = std::env::var("MI_TT_SERVER_ADDRS").ok().filter(|s| !s.is_empty()).and_then(|f| std::fs::read_to_string(f).ok());
     let mut tunnels = Vec::new();
     for (&n, p) in &used {
+        let dev = tun_device(n);
+        let v6 = ipv6 && n == v6_tun;
+        let fail_open = p.on_failure == FailurePolicy::Direct;
+        if p.kind.singbox() {
+            // сервер модуля sing-box: ссылка из секретов (проверена в act_of)
+            let link = secrets.profiles[p.id.as_str()].link.as_deref().unwrap_or_default();
+            let px = crate::proxy::parse_link(link).map_err(|m| vec![Issue::new(format!("secrets.profiles.{}.link", p.id), "bad_link", m)])?;
+            warnings.extend(px.warnings.iter().map(|w| format!("сервер «{}»: {w}", p.name)));
+            tunnels.push(TunRender {
+                index: n,
+                profile: p.id.clone(),
+                engine: Engine::SingBox,
+                fail_open,
+                fastest: false,
+                config: crate::proxy::singbox_config(&px, &dev, n, v6),
+                client_backup_toml: None,
+                primary_addr: None,
+                servers_addr: format!("primary {} {}\n", px.info.server, px.info.port),
+                dev,
+            });
+            continue;
+        }
         let e = p.endpoint.as_ref().expect("проверено");
         if !plain_text(&e.username) {
             return Err(vec![Issue::new("profiles", "bad_username", "имя пользователя содержит недопустимые символы")]);
         }
-        let dev = tun_device(n);
-        let v6 = ipv6 && n == v6_tun;
         let fallback = known_addrs.as_deref().map(|t| fallback_addrs(&e.server, t)).unwrap_or_default();
         let main_toml = with_device(with_ipv6(client_toml_with(e, secrets.profiles[p.id.as_str()].password.as_deref().unwrap_or_default(), &fallback), v6), &dev);
         let client_backup_toml = p.backup.as_ref().and_then(|b| {
             let pw = secrets.profiles.get(p.id.as_str())?.backup_password.as_deref()?;
             Some(with_device(with_ipv6(client_toml(b, pw), v6), &dev))
         });
-        let primary_addr = client_backup_toml.as_ref().map(|_| format!("{} {}
-", e.server, e.port));
-        let mut servers_addr = format!("primary {} {}
-", e.server, e.port);
+        let primary_addr = client_backup_toml.as_ref().map(|_| format!("{} {}\n", e.server, e.port));
+        let mut servers_addr = format!("primary {} {}\n", e.server, e.port);
         if let Some(b) = &p.backup {
-            servers_addr.push_str(&format!("backup {} {}
-", b.server, b.port));
+            servers_addr.push_str(&format!("backup {} {}\n", b.server, b.port));
         }
         tunnels.push(TunRender {
             index: n,
             profile: p.id.clone(),
-            fail_open: p.on_failure == FailurePolicy::Direct,
+            engine: Engine::TrustTunnel,
+            fail_open,
             fastest: client_backup_toml.is_some() && p.prefer_fastest,
             dev,
-            client_toml: main_toml,
+            config: main_toml,
             client_backup_toml,
             primary_addr,
             servers_addr,

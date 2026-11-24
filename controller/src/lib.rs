@@ -14,6 +14,7 @@ pub mod model;
 pub mod notify;
 pub mod plan;
 pub mod preview;
+pub mod proxy;
 pub mod release;
 pub mod render;
 pub mod stats;

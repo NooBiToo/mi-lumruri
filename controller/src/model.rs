@@ -366,6 +366,9 @@ pub struct Profile {
     /// возвращаться на основной.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub prefer_fastest: bool,
+    /// Сводка сервера модуля sing-box (для панели); сам сервер — ссылка в secrets.json.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<crate::proxy::ProxyInfo>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -433,13 +436,26 @@ impl TlsProfile {
 #[serde(rename_all = "snake_case")]
 pub enum ProfileKind {
     Trusttunnel,
+    /// Виды модуля sing-box: сервер задаётся ссылкой (секрет `link`), сводка — `Profile.proxy`.
+    Vless,
+    Hysteria2,
+    Trojan,
+    Shadowsocks,
 }
 
 impl ProfileKind {
     pub fn label(self) -> &'static str {
         match self {
             ProfileKind::Trusttunnel => "TrustTunnel",
+            ProfileKind::Vless => "VLESS",
+            ProfileKind::Hysteria2 => "Hysteria2",
+            ProfileKind::Trojan => "Trojan",
+            ProfileKind::Shadowsocks => "Shadowsocks",
         }
+    }
+    /// Сервер работает через модуль sing-box.
+    pub fn singbox(self) -> bool {
+        self != ProfileKind::Trusttunnel
     }
 }
 

@@ -107,9 +107,23 @@ fn profiles_and_write_only_secrets() {
     let bad = json!({ "id": "tt-lab", "name": "Bad", "kind": "trusttunnel", "endpoint": { "server": "vpn example", "port": 443, "username": "u" } });
     let o = p.post("/profiles", json!({ "base_revision": p.rev(), "profile": bad }));
     assert_eq!((o.status, o.body["issues"][0]["code"].as_str()), (422, Some("bad_server")), "{}", o.body);
+    // сервер модуля sing-box: адрес — ссылкой, endpoint не принимается
     let hy = json!({ "id": "hy", "name": "Hysteria2", "kind": "hysteria2", "endpoint": { "server": "10.0.0.1", "port": 443 } });
-    assert_eq!(p.post("/profiles", json!({ "base_revision": p.rev(), "profile": hy })).status, 400, "удалённые виды профилей схема не принимает");
+    let o = p.post("/profiles", json!({ "base_revision": p.rev(), "profile": hy }));
+    assert_eq!(o.body["issues"][0]["code"].as_str(), Some("singbox_endpoint"), "{}", o.body);
     assert_eq!(std::fs::read(p.dir.join("config.json")).unwrap(), before);
+    let hy = json!({ "id": "hy", "name": "Hysteria2", "kind": "hysteria2", "proxy": { "server": "hy.example.com", "port": 443 } });
+    let o = p.post("/profiles", json!({ "base_revision": p.rev(), "profile": hy }));
+    assert_eq!(o.status, 200, "{}", o.body);
+    // ссылка другого вида — отказ; своего — записывается, в GET /secrets видна как «задано»
+    let vless = "vless://bf000d23-0752-40b4-affe-68f7707a9661@h.example.com:443?security=tls"; // secret-scan: allow тестовая ссылка
+    assert_eq!(p.post("/secrets", json!({ "profile_id": "hy", "secret": { "link": vless } })).code(), "bad_secret");
+    let hy_link = format!("hysteria2://{}@hy.example.com:443", rand_hex(12));
+    assert_eq!(p.post("/secrets", json!({ "profile_id": "hy", "secret": { "link": hy_link } })).status, 200);
+    assert_eq!(p.get("/secrets").body["profiles"]["hy"].as_bool(), Some(true));
+    assert!(!p.get("/secrets").body.to_string().contains(&hy_link));
+    assert_eq!(p.post("/profiles/delete", json!({ "base_revision": p.rev(), "id": "hy" })).status, 200);
+    let before = std::fs::read(p.dir.join("config.json")).unwrap();
     // секрет: только запись; GET отдаёт признак наличия, но не значение
     let o = p.get("/secrets");
     assert_eq!(o.body["profiles"]["tt-lab"].as_bool(), Some(false));

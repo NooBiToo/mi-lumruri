@@ -408,7 +408,7 @@ pub fn subscription_import(config_path: &str, profile_id: &str, json_path: &str)
         Ok(x) => x,
         Err(m) => return Response::error(422, "subscription_invalid", m),
     };
-    if let Err(m) = crate::render::check_secret(&ProfileSecret { password: Some(imp.password.clone()), subscription_url: None, backup_password: None }) {
+    if let Err(m) = crate::render::check_secret(&ProfileSecret { password: Some(imp.password.clone()), ..Default::default() }) {
         return Response::error(422, "subscription_invalid", format!("пароль из подписки: {m}"));
     }
     let sp = secrets_path(config_path);
@@ -436,7 +436,7 @@ pub fn subscription_import(config_path: &str, profile_id: &str, json_path: &str)
         }
     }
     if pw_changed {
-        let e = s.profiles.entry(profile_id.to_string()).or_insert(ProfileSecret { password: None, subscription_url: None, backup_password: None });
+        let e = s.profiles.entry(profile_id.to_string()).or_insert(ProfileSecret::default());
         e.password = Some(imp.password);
         let mut out = serde_json::to_vec_pretty(&s).unwrap_or_default();
         out.push(b'\n');
@@ -735,7 +735,8 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
             };
             // только признак наличия; значения секретов API никогда не возвращает
             // пароль задан; отдельно — есть ли ссылка-подписка (значения не возвращаются)
-            let m: serde_json::Map<String, Value> = cfg.profiles.iter().map(|pr| (pr.id.clone(), json!(s.profiles.get(&pr.id).is_some_and(|x| x.password.is_some())))).collect();
+            // у серверов модуля sing-box «пароль задан» — сохранена ссылка на сервер
+            let m: serde_json::Map<String, Value> = cfg.profiles.iter().map(|pr| (pr.id.clone(), json!(s.profiles.get(&pr.id).is_some_and(|x| x.password.is_some() || x.link.is_some())))).collect();
             let sub: serde_json::Map<String, Value> = cfg.profiles.iter().map(|pr| (pr.id.clone(), json!(s.profiles.get(&pr.id).is_some_and(|x| x.subscription_url.is_some())))).collect();
             let backup: serde_json::Map<String, Value> = cfg.profiles.iter().map(|pr| (pr.id.clone(), json!(s.profiles.get(&pr.id).is_some_and(|x| x.backup_password.is_some())))).collect();
             Response { status: 200, body: json!({ "ok": true, "profiles": m, "subscriptions": sub, "backups": backup, "issues": [] }) }
@@ -763,6 +764,11 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
                     Ok(m) => m,
                     Err(m) => return Some(Response::error(422, "bad_secret", format!("секреты профиля «{}»: {m}", pr.id))),
                 };
+                if merged.link.is_some() {
+                    if let Err(m) = crate::render::check_profile_secret(pr.kind, &merged) {
+                        return Some(Response::error(422, "bad_secret", format!("секреты профиля «{}»: {m}", pr.id)));
+                    }
+                }
                 s.profiles.insert(q.profile_id.clone(), merged);
                 let mut out = serde_json::to_vec_pretty(&s).unwrap_or_default();
                 out.push(b'\n');

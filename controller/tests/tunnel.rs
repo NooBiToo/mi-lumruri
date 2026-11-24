@@ -105,7 +105,7 @@ fn endpoint_validation_ip_username_certificate() {
         let (_, v) = validate(&with_endpoint(e));
         assert_eq!((v["ok"].as_bool(), v["issues"][0]["code"].as_str()), (Some(false), Some("parse")), "{f}");
     }
-    for kind in ["hysteria2", "vless", "wireguard"] {
+    for kind in ["wireguard", "vmess"] {
         let (_, v) = validate(&json!({ "version": 1, "default_action": { "type": "direct" }, "profiles": [{ "id": "x", "name": "X", "kind": kind }] }));
         assert_eq!(v["issues"][0]["code"], "parse", "{kind}");
     }
@@ -415,7 +415,7 @@ fn render_two_tunnels_writes_per_tunnel_files_and_list() {
     let sec = json!({ "version": 1, "profiles": { "tt-lab": { "password": secret() }, "tt2": { "password": secret() } } });
     let (code, v, out) = render(&c, &sec);
     assert_eq!(code, 0, "{v}");
-    assert_eq!(std::fs::read_to_string(out.join("tunnels.list")).unwrap(), "0 mitt0 tt-lab\n2 mitt2 tt2\n");
+    assert_eq!(std::fs::read_to_string(out.join("tunnels.list")).unwrap(), "0 mitt0 tt-lab trusttunnel\n2 mitt2 tt2 trusttunnel\n");
     let t2 = std::fs::read_to_string(out.join("tun2/client.toml")).unwrap();
     assert!(t2.contains("device_name = \"mitt2\"\n") && t2.contains("username = \"u2\"\n"), "{t2}");
     assert!(std::fs::read_to_string(out.join("client.toml")).unwrap().contains("device_name = \"mitt0\"\n"));
@@ -428,7 +428,7 @@ fn render_two_tunnels_writes_per_tunnel_files_and_list() {
     let (code, v) = render_to(&out, &c, &sec);
     assert_eq!(code, 0, "{v}");
     assert!(!out.join("tun2").exists());
-    assert_eq!(std::fs::read_to_string(out.join("tunnels.list")).unwrap(), "0 mitt0 tt-lab\n");
+    assert_eq!(std::fs::read_to_string(out.join("tunnels.list")).unwrap(), "0 mitt0 tt-lab trusttunnel\n");
     // DNS-туннель — выбранный профиль; при нескольких туннелях без метки, только привязка к TUN
     c["rules"].as_array_mut().unwrap().push(json!({ "id": "r2", "source": { "type": "device", "id": "tv" }, "destination": { "type": "group", "id": "music" },
         "action": { "type": "profile", "id": "tt2" } }));
@@ -438,4 +438,35 @@ fn render_two_tunnels_writes_per_tunnel_files_and_list() {
     assert_eq!(v["policy"]["dns_tun"], 2);
     let args = std::fs::read_to_string(out.join("dns-tunnel.args")).unwrap();
     assert!(args.contains("--device\nmitt2\n") && !args.contains("--mark"), "{args}");
+}
+
+#[test]
+fn render_singbox_profile_writes_config_not_client_toml() {
+    let mut c = lab();
+    c["profiles"].as_array_mut().unwrap().push(json!({ "id": "vl", "name": "VLESS", "kind": "vless", "tunnel": 1,
+        "proxy": { "server": "203.0.113.5", "port": 443, "security": "reality", "transport": "tcp" } }));
+    c["rules"][0]["action"] = json!({ "type": "profile", "id": "vl" });
+    let link = "vless://bf000d23-0752-40b4-affe-68f7707a9661@203.0.113.5:443?security=reality&sni=www.example.com&pbk=jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0&sid=01ab&flow=xtls-rprx-vision"; // secret-scan: allow тестовая ссылка
+    let sec = json!({ "version": 1, "profiles": { "tt-lab": { "password": secret() }, "vl": { "link": link } } });
+    let (code, v, out) = render(&c, &sec);
+    assert_eq!(code, 0, "{v}");
+    assert_eq!(std::fs::read_to_string(out.join("tunnels.list")).unwrap(), "1 mitt1 vl sing-box\n");
+    assert!(!out.join("tun1/client.toml").exists());
+    let j: Value = serde_json::from_str(&std::fs::read_to_string(out.join("tun1/sing-box.json")).unwrap()).unwrap();
+    assert_eq!(j["inbounds"][0]["interface_name"], "mitt1");
+    assert_eq!(j["outbounds"][0]["type"], "vless");
+    assert_eq!(j["outbounds"][0]["tls"]["reality"]["short_id"], "01ab");
+    assert_eq!(std::fs::read_to_string(out.join("tun1/servers.addr")).unwrap(), "primary 203.0.113.5 443\n");
+    // единственный туннель с номером 1: прежний бит метки, своя таблица
+    assert!(v["plan"].as_array().unwrap().iter().any(|e| e == "ip rule priority 3006 fwmark 0x4000/0x4000 lookup 3101"), "{v}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(out.join("tun1/sing-box.json")).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+    // ссылки нет — рендер отклоняется
+    let sec = json!({ "version": 1, "profiles": { "tt-lab": { "password": secret() } } });
+    let (code, v, _) = render(&c, &sec);
+    assert_eq!(code, 1, "{v}");
+    assert!(codes(&v).iter().any(|x| x.ends_with(":no_secret")), "{v}");
 }

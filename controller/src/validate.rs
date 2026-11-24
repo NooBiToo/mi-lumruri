@@ -387,6 +387,16 @@ pub fn validate_config(c: &Config) -> Vec<Issue> {
         }
     }
     for (i, p) in c.profiles.iter().enumerate() {
+        if p.kind.singbox() && (p.endpoint.is_some() || p.backup.is_some() || p.prefer_fastest) {
+            issues.push(Issue::new(format!("profiles[{i}]"), "singbox_endpoint", "у сервера модуля sing-box адрес задаётся ссылкой: endpoint, backup и prefer_fastest не используются"));
+        }
+        if let Some(x) = &p.proxy {
+            if !p.kind.singbox() {
+                issues.push(Issue::new(format!("profiles[{i}].proxy"), "proxy_for_trusttunnel", "сводка proxy — только для серверов модуля sing-box"));
+            } else if x.port == 0 || (x.server.parse::<IpAddr>().is_err() && normalize_domain(&x.server, 1).is_err()) {
+                issues.push(Issue::new(format!("profiles[{i}].proxy"), "bad_server", "адрес сервера — IP-адрес или доменное имя"));
+            }
+        }
         if let Some(e) = &p.endpoint {
             check_endpoint(&mut issues, &format!("profiles[{i}].endpoint"), e);
         }
