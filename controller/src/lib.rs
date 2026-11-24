@@ -3,6 +3,7 @@
 
 pub mod api;
 pub mod auth;
+pub mod awg;
 pub mod backup;
 pub mod caps;
 pub mod devices;

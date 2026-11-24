@@ -2,7 +2,7 @@
 import { t } from './i18n'
 
 /** Единственный вид VPN — TrustTunnel (официальный клиент). Профиль может быть только один. */
-export type ProfileKind = 'trusttunnel' | 'vless' | 'hysteria2' | 'trojan' | 'shadowsocks'
+export type ProfileKind = 'trusttunnel' | 'vless' | 'hysteria2' | 'trojan' | 'shadowsocks' | 'amneziawg'
 /** Сводка сервера модуля sing-box (сам сервер — ссылка в секретах). */
 export interface ProxyInfo { server: string; port: number; security?: string; transport?: string }
 

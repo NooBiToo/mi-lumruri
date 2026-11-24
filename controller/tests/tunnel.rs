@@ -517,3 +517,23 @@ fn proxy_subscription_import_picks_and_keeps_choice() {
     let (code, v) = run(&["proxy-sub-import", cfg.to_str().unwrap(), "vl", body.to_str().unwrap()]);
     assert_eq!((code, v["error"]["code"].as_str()), (1, Some("subscription_empty")), "{v}");
 }
+
+#[test]
+fn render_amneziawg_writes_uapi_and_addr() {
+    let mut c = lab();
+    c["profiles"].as_array_mut().unwrap().push(json!({ "id": "aw", "name": "AWG", "kind": "amneziawg", "tunnel": 4,
+        "proxy": { "server": "awg.example.com", "port": 51820, "security": "awg", "transport": "udp" } }));
+    c["rules"][0]["action"] = json!({ "type": "profile", "id": "aw" });
+    let conf = "[Interface]\nPrivateKey = yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=\nAddress = 10.8.0.2/32\nJc = 4\nH1 = 1-2\n\n[Peer]\nPublicKey = xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=\nEndpoint = awg.example.com:51820\n"; // secret-scan: allow тестовый ключ
+    let sec = json!({ "version": 1, "profiles": { "tt-lab": { "password": secret() }, "aw": { "link": conf } } });
+    let (code, v, out) = render(&c, &sec);
+    assert_eq!(code, 0, "{v}");
+    assert_eq!(std::fs::read_to_string(out.join("tunnels.list")).unwrap(), "4 mitt4 aw amneziawg\n");
+    let u = std::fs::read_to_string(out.join("tun4/awg.uapi")).unwrap();
+    assert!(u.contains("jc=4\n") && u.contains("h1=1-2\n") && u.contains("endpoint=awg.example.com:51820\n") && u.contains("allowed_ip=0.0.0.0/0\n"), "{u}");
+    assert_eq!(std::fs::read_to_string(out.join("tun4/awg.addr")).unwrap(), "10.8.0.2/32\nmtu 1280\n");
+    // конфигурация для другого вида профиля — отказ
+    c["profiles"][1]["kind"] = json!("vless");
+    let (code, _, _) = render(&c, &sec);
+    assert_eq!(code, 1);
+}

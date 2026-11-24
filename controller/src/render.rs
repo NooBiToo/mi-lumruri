@@ -52,10 +52,16 @@ pub struct ProfileSecret {
 
 /// Секреты профиля пригодны для его вида: TrustTunnel — пароль, sing-box — ссылка этого вида.
 pub fn check_profile_secret(kind: crate::model::ProfileKind, s: &ProfileSecret) -> Result<(), String> {
-    if !kind.singbox() {
+    if !kind.module() {
         return check_secret(s).map_err(String::from);
     }
     let link = s.link.as_deref().filter(|l| !l.is_empty()).ok_or("нужна ссылка на сервер")?;
+    if kind == crate::model::ProfileKind::Amneziawg {
+        return crate::awg::parse(link).map(|_| ()).map_err(|m| format!("конфигурация AmneziaWG: {m}"));
+    }
+    if crate::awg::looks_like_conf(link) {
+        return Err(format!("это конфигурация AmneziaWG, а профиль — {}", kind.label()));
+    }
     let p = crate::proxy::parse_link(link)?;
     if p.kind != kind {
         return Err(format!("ссылка — сервер {}, а профиль — {}", p.kind.label(), kind.label()));
@@ -115,7 +121,11 @@ pub fn merge_secret(old: Option<ProfileSecret>, new: ProfileSecret) -> Result<Pr
         check_secret(&ProfileSecret { password: Some(p.clone()), ..Default::default() })?;
     }
     if let Some(l) = &s.link {
-        crate::proxy::parse_link(l)?;
+        if crate::awg::looks_like_conf(l) {
+            crate::awg::parse(l).map_err(|m| format!("конфигурация AmneziaWG: {m}"))?;
+        } else {
+            crate::proxy::parse_link(l)?;
+        }
     }
     if s.password.is_none() && s.subscription_url.is_none() && s.link.is_none() {
         return Err("нужен пароль, ссылка-подписка или ссылка на сервер".into());
@@ -156,6 +166,7 @@ pub struct Rendered {
 pub enum Engine {
     TrustTunnel,
     SingBox,
+    AmneziaWg,
 }
 
 impl Engine {
@@ -164,6 +175,7 @@ impl Engine {
         match self {
             Engine::TrustTunnel => "trusttunnel",
             Engine::SingBox => "sing-box",
+            Engine::AmneziaWg => "amneziawg",
         }
     }
     /// Файл конфигурации в каталоге туннеля.
@@ -171,6 +183,7 @@ impl Engine {
         match self {
             Engine::TrustTunnel => "client.toml",
             Engine::SingBox => "sing-box.json",
+            Engine::AmneziaWg => "awg.uapi",
         }
     }
 }
@@ -182,8 +195,10 @@ pub struct TunRender {
     pub engine: Engine,
     pub dev: String,
     pub fail_open: bool,
-    /// Конфигурация программы туннеля (с паролем или ссылкой): client.toml или sing-box.json.
+    /// Конфигурация программы туннеля (с паролем или ключом): client.toml, sing-box.json или awg.uapi.
     pub config: String,
+    /// AmneziaWG: адреса интерфейса и MTU (`awg.addr`).
+    pub addr: Option<String>,
     /// Запасной сервер (если задан и у него есть пароль) и адрес основного «host port» для проверки возврата.
     pub client_backup_toml: Option<String>,
     pub primary_addr: Option<String>,
@@ -404,7 +419,7 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
                     pending.insert(p.name.clone());
                     return Some((if p.on_failure == FailurePolicy::Direct { Act::Direct } else { Act::Block }, 0));
                 }
-                if p.endpoint.is_none() && !p.kind.singbox() {
+                if p.endpoint.is_none() && !p.kind.module() {
                     issues.push(Issue::new(path, "no_endpoint", format!("у профиля «{id}» нет точки подключения")));
                     return None;
                 }
@@ -595,6 +610,25 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
         let dev = tun_device(n);
         let v6 = ipv6 && n == v6_tun;
         let fail_open = p.on_failure == FailurePolicy::Direct;
+        if p.kind == crate::model::ProfileKind::Amneziawg {
+            // сервер модуля amneziawg: конфигурация из секретов (проверена в act_of)
+            let text = secrets.profiles[p.id.as_str()].link.as_deref().unwrap_or_default();
+            let c = crate::awg::parse(text).map_err(|m| vec![Issue::new(format!("secrets.profiles.{}.link", p.id), "bad_link", m)])?;
+            tunnels.push(TunRender {
+                index: n,
+                profile: p.id.clone(),
+                engine: Engine::AmneziaWg,
+                fail_open,
+                fastest: false,
+                config: c.uapi(v6),
+                addr: Some(c.addr_file(v6)),
+                client_backup_toml: None,
+                primary_addr: None,
+                servers_addr: format!("primary {} {}\n", c.endpoint_host, c.endpoint_port),
+                dev,
+            });
+            continue;
+        }
         if p.kind.singbox() {
             // сервер модуля sing-box: ссылка из секретов (проверена в act_of)
             let link = secrets.profiles[p.id.as_str()].link.as_deref().unwrap_or_default();
@@ -607,6 +641,7 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
                 fail_open,
                 fastest: false,
                 config: crate::proxy::singbox_config(&px, &dev, n, v6),
+                addr: None,
                 client_backup_toml: None,
                 primary_addr: None,
                 servers_addr: format!("primary {} {}\n", px.info.server, px.info.port),
@@ -637,6 +672,7 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
             fastest: client_backup_toml.is_some() && p.prefer_fastest,
             dev,
             config: main_toml,
+            addr: None,
             client_backup_toml,
             primary_addr,
             servers_addr,
@@ -657,6 +693,7 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
         dns_tun,
         v6_tun,
         down: Vec::new(),
+        masq: tunnels.iter().filter(|t| t.engine == Engine::AmneziaWg).map(|t| t.dev.clone()).collect(),
     };
     if cfg.ipv6_via_vpn && !tunnels.is_empty() && tunnel_all.is_empty() {
         warnings.push("IPv6 через VPN действует только для «всё через VPN»: при выборе отдельных сайтов IPv6 устройств закрыт".into());

@@ -70,4 +70,8 @@ export default {
   "Сервер из подписки выбран, применяю на роутере": "Server from the subscription selected, applying on the router",
   "Подписка — список серверов от вашего провайдера VPN. Роутер забирает его по расписанию списков сайтов и по кнопке и подключается к выбранному серверу (по умолчанию — первому). Хранится только на роутере.": "A subscription is a server list from your VPN provider. The router fetches it on the site list schedule and by the button, and connects to the selected server (the first one by default). It is stored only on the router.",
   "Сервер из подписки": "Server from the subscription",
+  "Обфускация": "Obfuscation",
+  "AmneziaWG — содержимым файла конфигурации .conf.": "AmneziaWG: paste the contents of the .conf file.",
+  "Конфигурация AmneziaWG": "AmneziaWG configuration",
+  "В конфигурации есть закрытый ключ, поэтому она хранится только на роутере и сюда не возвращается. Вставьте новую, чтобы сменить сервер. AllowedIPs и DNS из неё не используются: что идёт через VPN, решают «Сайты» и «Устройства».": "The configuration contains a private key, so it is stored only on the router and never shown here. Paste a new one to change the server. Its AllowedIPs and DNS are not used: what goes through the VPN is decided on Sites and Devices.",
 }

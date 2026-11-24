@@ -103,6 +103,11 @@ pub fn main() -> ExitCode {
             Ok(t) => { print!("{t}"); ExitCode::SUCCESS }
             Err(m) => { eprintln!("{m}"); ExitCode::from(2) }
         },
+        // AmneziaWG: команды UAPI в сокет amneziawg-go (служба, после запуска программы)
+        ["awg-set", dev, file] => match mi_tt::awg::set_cmd(dev, file) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(m) => { eprintln!("mi-tt-ctl: {m}"); ExitCode::from(2) }
+        },
         // накопители: /proc/mounts и df -k от службы → storage.json для панели
         ["storage-scan", mounts, df, out] => match mi_tt::storage::scan_cmd(mounts, df, out, auth::now()) {
             Ok(()) => ExitCode::SUCCESS,
@@ -311,9 +316,10 @@ fn write_tunnels(dir: &std::path::Path, tunnels: &[render::TunRender]) -> Result
     };
     let files = |d: &std::path::Path, t: Option<&render::TunRender>| -> Result<(), String> {
         // конфигурация программы туннеля; файл другой программы (сервер сменил вид) удаляется
-        for e in [render::Engine::TrustTunnel, render::Engine::SingBox] {
+        for e in [render::Engine::TrustTunnel, render::Engine::SingBox, render::Engine::AmneziaWg] {
             put(d, e.config_file(), t.filter(|t| t.engine == e).map(|t| t.config.as_str()), true)?;
         }
+        put(d, "awg.addr", t.and_then(|t| t.addr.as_deref()), false)?;
         // запасной сервер: его client.toml и адрес основного для проверки возврата (служба, mitt-lib.sh)
         put(d, "client-backup.toml", t.and_then(|t| t.client_backup_toml.as_deref()), true)?;
         put(d, "primary.addr", t.and_then(|t| t.primary_addr.as_deref()), false)?;

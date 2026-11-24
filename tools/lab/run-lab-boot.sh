@@ -7,6 +7,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # пакет с модулем sing-box x86_64 (tools/lab/install-packages.sh: --singbox-bin) — серверы модуля запускаются в лаборатории
 PKG="${1:-$ROOT/out/package/boot/mi-lumruri}"
 MODTAR="$(ls "$(dirname "$PKG")"/mitt-mod-sing-box-*.tar 2>/dev/null | head -n 1)"
+AWGTAR="$(ls "$(dirname "$PKG")"/mitt-mod-amneziawg-*.tar 2>/dev/null | head -n 1)"
 "$ROOT/tools/fw/prepare.sh" >/dev/null
 "$ROOT/tools/lab/fetch-iptables.sh" >/dev/null
 "$ROOT/tools/lab/fetch-ipset.sh" >/dev/null
@@ -19,7 +20,7 @@ B="$ROOT/.tools/lab/bin"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"; OUT="$ROOT/out/lab/$STAMP-boot"; W="$(mktemp -d /tmp/mitt-boot.XXXXXX)"
 mkdir -p "$OUT" "$W/bin"; cp "$B/trusttunnel_client" "$B/trusttunnel_endpoint" "$W/bin/"; chmod +x "$W/bin/"*
 set +e
-ROOT="$ROOT" W="$W" OUT="$OUT" PKG="$PKG" MODTAR="$MODTAR" SBBIN="$ROOT/.tools/lab/bin/sing-box" TTCLIENT="$W/bin/trusttunnel_client" TTBIN="$W/bin/trusttunnel_endpoint" \
+ROOT="$ROOT" W="$W" OUT="$OUT" PKG="$PKG" MODTAR="$MODTAR" AWGTAR="$AWGTAR" AWGBIN="$ROOT/.tools/lab/bin/amneziawg-go" SBBIN="$ROOT/.tools/lab/bin/sing-box" TTCLIENT="$W/bin/trusttunnel_client" TTBIN="$W/bin/trusttunnel_endpoint" \
   unshare --user --map-root-user --net --mount --propagation private --pid --fork --mount-proc bash "$ROOT/tools/lab/lab-boot-inner.sh"
 RC=$?
 set -e

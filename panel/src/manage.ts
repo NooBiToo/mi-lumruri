@@ -77,7 +77,7 @@ export function formToProfile(f: ProfileForm, subscription = false): Profile | s
 export function formToSecret(f: ProfileForm): ProfileSecret | null {
   const s: ProfileSecret = {}
   if (f.kind !== 'trusttunnel') {
-    if (f.link.trim()) s.link = f.link.trim()
+    if (f.link.trim()) s.link = f.kind === 'amneziawg' ? f.link.replace(/\r\n?/g, '\n').trim() + '\n' : f.link.trim()
     if (f.subscriptionUrl.trim()) s.subscription_url = f.subscriptionUrl.trim()
     return Object.keys(s).length ? s : null
   }

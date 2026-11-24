@@ -38,7 +38,9 @@ case "$action" in
     mkdir -p "$W" || fail "временный каталог"
     tarf="$(dirname "$md")/.$asset.part"
     mkdir -p "$(dirname "$md")" 2>/dev/null || fail "накопитель недоступен для записи: $(dirname "$dir")"
-    if [ -n "${MITT_MODULE_SRC:-}" ] && lab; then
+    if [ -n "${MITT_MODULE_DIR:-}" ] && lab; then
+      cp "$MITT_MODULE_DIR/$asset" "$tarf" || fail "лаборатория: нет $MITT_MODULE_DIR/$asset"
+    elif [ -n "${MITT_MODULE_SRC:-}" ] && lab; then
       cp "$MITT_MODULE_SRC" "$tarf" || fail "лаборатория: нет $MITT_MODULE_SRC"
     elif ! "$CURL" -sSfL --proto '=https' --max-time 900 -o "$tarf" "https://github.com/$REPO/releases/latest/download/$asset" 2>"$W/curl.log"; then
       # в последнем релизе другой версии модуля нет — ищем ассет с этим именем в недавних релизах

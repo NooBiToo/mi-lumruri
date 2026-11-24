@@ -226,6 +226,10 @@ pub struct PolicySpec {
     /// мешает применить правила остальных. Не сохраняется.
     #[serde(skip)]
     pub down: Vec<u8>,
+    /// TUN туннелей, которым нужна подмена адреса источника (AmneziaWG: сервер пропускает только адрес клиента в
+    /// туннеле, а трафик устройств приходит с адресами LAN). TrustTunnel и sing-box проксируют сами.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub masq: Vec<String>,
 }
 
 fn default_table() -> u32 {
@@ -622,6 +626,13 @@ pub fn build_plan(spec: &PolicySpec, v6_lan_prefixes: &[String], bridge_ports: &
             p.insert(Entry::Jump { v6: false, table: m.into(), from: "OUTPUT".into(), chain: chain_name(&c) });
             p.insert(c);
         }
+    }
+    // nat POSTROUTING: подмена адреса источника на выходе в TUN туннелей AmneziaWG (только используемых)
+    let masq: Vec<&String> = spec.masq.iter().filter(|d| used.iter().any(|t| &t.dev == *d)).collect();
+    if !masq.is_empty() && !guard_only {
+        let c = chain(false, "nat", 'N', masq.iter().map(|d| vec![s("-o"), d.to_string(), s("-j"), s("MASQUERADE")]).collect());
+        p.insert(Entry::Jump { v6: false, table: "nat".into(), from: "POSTROUTING".into(), chain: chain_name(&c) });
+        p.insert(c);
     }
     // IPv6 через VPN: весь IPv6 источников «всё через VPN» (кроме LAN, link-local и multicast) — метка в mangle
     // ip6tables, ip -6 rule в таблицу 3100, там маршрут через TUN (или unreachable при отказе туннеля)
@@ -1112,7 +1123,8 @@ fn chain_name_of(e: &Entry) -> String {
 /// Таблицы iptables, состояние которых нужно прочитать (наши цепочки и переходы бывают только в них).
 pub fn ipt_tables() -> BTreeSet<(bool, String)> {
     // mangle IPv6 — метка «IPv6 через VPN»; без наших цепочек там ничего нет, чтение безопасно
-    [(false, "filter"), (false, "mangle"), (true, "filter"), (true, "mangle")].iter().map(|(v6, t)| (*v6, t.to_string())).collect()
+    // nat — подмена адреса для туннелей AmneziaWG; таблица есть на любом роутере (NAT в интернет)
+    [(false, "filter"), (false, "mangle"), (false, "nat"), (true, "filter"), (true, "mangle")].iter().map(|(v6, t)| (*v6, t.to_string())).collect()
 }
 
 #[cfg(test)]
@@ -1298,6 +1310,18 @@ mod tests {
         assert!(l.contains("ip route unreachable default metric 4096 table 3101"), "{l:#?}");
         assert!(!l.contains("ip route default dev mitt1 metric 1 table 3101"), "{l:#?}");
         assert!(l.contains("ip rule priority 3006 fwmark 0x4010/0x40f0 lookup 3101"), "{l:#?}");
+    }
+
+    #[test]
+    fn masquerade_only_for_used_awg_tunnels() {
+        let mut s = two_tun();
+        s.masq = vec!["mitt1".into(), "mitt7".into()];
+        let p = build_plan(&s, &[], &whole(), false);
+        let n = chain_rows(&p, "nat", 'N');
+        assert_eq!(n, &vec![vec!["-o".to_string(), "mitt1".into(), "-j".into(), "MASQUERADE".into()]]);
+        assert!(p.iter().any(|e| matches!(e, Entry::Jump { table, from, .. } if table == "nat" && from == "POSTROUTING")));
+        assert!(!build_plan(&s, &[], &whole(), true).iter().any(|e| matches!(e, Entry::Chain { table, .. } if table == "nat")));
+        assert!(!build_plan(&spec(), &[], &whole(), false).iter().any(|e| matches!(e, Entry::Chain { table, .. } if table == "nat")));
     }
 
     #[test]

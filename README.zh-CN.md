@@ -68,7 +68,7 @@ python install.py 192.168.31.1
 - 列表中的网站只按 IPv4 匹配：设置了 VPN 或 Zapret 规则的设备无法对外使用 IPv6。例外是开启「IPv6 走 VPN」时全部流量走 VPN 的设备：它们的 IPv6 经隧道传输，需要 VPN 服务器支持 IPv6。预设 DNS 服务器带有 IPv6 地址，但仅作为备用路径。
 - 网站按 DNS 识别：设备必须使用路由器作为 DNS 服务器。浏览器中的「安全 DNS」（DoH）会绕过列表。
 - 同时使用多个服务器会占用 UU 插件（游戏加速器）的标记位；如果 UU 已启用，则占用备用 WAN 的标记位。两者都启用时只有一个服务器工作。备用服务器替代主服务器启用，切换最多需要 2 分钟。
-- VLESS、Hysteria2、Trojan 和 Shadowsocks 服务器通过 U 盘或内部存储中的 sing-box 模块工作；AmneziaWG 模块将在下一个版本中提供。
+- VLESS、Hysteria2、Trojan 和 Shadowsocks 服务器通过 U 盘或内部存储中的 sing-box 模块工作；AmneziaWG 服务器通过 amneziawg 模块工作。
 - DoT 并非处处可用：许多运营商封锁了 853 端口。
 
 完整列表见[指南](docs/guide.zh-CN.md#限制)。

@@ -172,12 +172,26 @@ tun_ctx() {
   if [ "$TN" = 0 ]; then TR="$RENDER"; TS="$STATE"; else TR="$RENDER/tun$TN"; TS="$STATE/tun$TN"; mkdir -p "$TS"; fi
   case "$TE" in
     sing-box) TP="singbox$TN";;
+    amneziawg) TP="awg$TN";;
     *) if [ "$TN" = 0 ]; then TP=trusttunnel; else TP="trusttunnel$TN"; fi;;
   esac
   TL="$LOG/$TP.log"
 }
 # Программа модуля в RAM (распаковывает modules_prepare): sing-box → $RUN/mod/sing-box/sing-box
 module_bin() { echo "$RUN/mod/$1/$1"; }
+# AmneziaWG после запуска amneziawg-go: сокет UAPI → ключи, сервер и обфускация (mi-tt-ctl awg-set разрешает имя
+# сервера), затем адреса и MTU из awg.addr и подъём интерфейса
+awg_setup() { # awg_setup <номер туннеля>
+  local i=0 a rest sd="${MITT_AWG_SOCKDIR:-/var/run/amneziawg}"
+  tun_ctx "$1"
+  while [ ! -S "$sd/$TD.sock" ] && [ $i -lt 50 ]; do nap; i=$((i + 1)); done
+  [ -S "$sd/$TD.sock" ] || { mlog "туннель $TN: amneziawg-go не открыл сокет UAPI"; return 1; }
+  MI_TT_AWG_SOCKDIR="$sd" ctl awg-set "$TD" "$TR/awg.uapi" >>"$TL" 2>&1 || { mlog "туннель $TN: настройки AmneziaWG не приняты (см. $TL)"; return 1; }
+  while read -r a rest; do
+    case "$a" in mtu) ip link set dev "$TD" mtu "$rest";; ?*) ip addr add "$a" dev "$TD" 2>/dev/null;; esac
+  done <"$TR/awg.addr"
+  ip link set dev "$TD" up
+}
 # Состояние модуля на этом запуске: ok | missing (накопителя нет) | bad (файлы не прошли проверку) | пусто
 module_state() { sed -n "s/.*\"$1\":{\"state\":\"\([a-z]*\)\".*/\1/p" "$STATE/modules-state.json" 2>/dev/null; }
 # Модули: копия каталога из пакета (для панели) и распаковка установленных в RAM с проверкой подписи и хэшей. Файлы на
@@ -282,8 +296,8 @@ primary_reachable() {
 tunnel_tick() { # tunnel_tick [<номер туннеля>]
   local st con=0 tun=0 bk=0 fa=0 due w="" fb="" pp="" pb="" hp hb cfg a rest
   tun_ctx "${1:-0}"
-  # sing-box о подключении не пишет: «подключён» — процесс жив (проверку трафика делает сторож)
-  if [ "$TE" = sing-box ]; then pid_alive "$TP" && con=1
+  # sing-box и AmneziaWG о подключении не пишут: «подключён» — процесс жив (проверку трафика делает сторож)
+  if [ "$TE" != trusttunnel ]; then pid_alive "$TP" && con=1
   else st="$(tail -n 200 "$TL" 2>/dev/null | grep -o 'VPN_SS_[A-Z_]*' | tail -n 1)"; [ "$st" = VPN_SS_CONNECTED ] && con=1; fi
   tun_ready "$TD" && tun=1
   [ -f "$TR/client-backup.toml" ] && bk=1
@@ -463,7 +477,7 @@ tunnel_track() { # tunnel_track [<номер туннеля>]
   [ -f "$STATE/$TP.wanted" ] || { rm -f "$TS/tun-notified" "$TS/tun-bad-since"; return 0; }
   local st now since
   st="$(tail -n 200 "$TL" 2>/dev/null | grep -o 'VPN_SS_[A-Z_]*' | tail -n 1)"; now=$(date +%s)
-  [ "$TE" = sing-box ] && st=VPN_SS_CONNECTED
+  [ "$TE" = trusttunnel ] || st=VPN_SS_CONNECTED
   if pid_alive "$TP" && [ "$st" = VPN_SS_CONNECTED ] && tun_ready "$TD"; then
     rm -f "$TS/tun-bad-since"
     [ "$(cat "$TS/tun-notified" 2>/dev/null)" = down ] && { notify tunnel tunnel_up; echo up >"$TS/tun-notified"; }
@@ -506,7 +520,7 @@ rom_track() {
 }
 
 # имена процессов туннелей (trusttunnel, trusttunnel<n>, singbox<n>)
-tun_procs() { tunnels_list | awk '{ if ($4 == "sing-box") print "singbox" $1; else if ($1 == 0) print "trusttunnel"; else print "trusttunnel" $1 }'; }
+tun_procs() { tunnels_list | awk '{ if ($4 == "sing-box") print "singbox" $1; else if ($4 == "amneziawg") print "awg" $1; else if ($1 == 0) print "trusttunnel"; else print "trusttunnel" $1 }'; }
 status_write() {
   local e="" n
   for n in $(tun_procs) nfqws2 nginx uhttpd service; do

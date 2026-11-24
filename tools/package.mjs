@@ -16,7 +16,7 @@ import { gunzipSync } from 'node:zlib'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
-const VERSION = args.includes('--version') ? args[args.indexOf('--version') + 1] : '0.11.1'
+const VERSION = args.includes('--version') ? args[args.indexOf('--version') + 1] : '0.12.0'
 const OUT = args.includes('--out') ? args[args.indexOf('--out') + 1] : join(ROOT, 'out', 'package')
 const PKG = join(OUT, 'mi-lumruri')
 const DL = join(ROOT, '.tools', 'lab', 'dl')
@@ -48,6 +48,25 @@ if (!SB_BIN) {
   if (sha(readFileSync(SB_TGZ)) !== SB_TGZ_SHA) throw new Error('SHA-256 архива sing-box arm64 не совпал')
   execFileSync(PY, ['-I', '-c', 'import sys,tarfile;tarfile.open(sys.argv[1]).extract(sys.argv[3]+"/sing-box",sys.argv[2],filter="data")', SB_TGZ, tmp, `sing-box-${SB_VER}-linux-arm64-musl`])
   SB_BIN = join(tmp, `sing-box-${SB_VER}-linux-arm64-musl`, 'sing-box')
+}
+// amneziawg-go (userspace AmneziaWG) — готовых сборок нет: собирается здесь из исходников закреплённого коммита
+// (архив по SHA-256), Go без CGO — статическая программа. --awg-bin <файл> — другая (только лаборатория, x86_64).
+const AWG_REF = '08fe3d33bbb116be09a6183d02609311b8b0c9e8' // тег v3.1.20261116
+const AWG_TGZ = join(DL, `amneziawg-go-${AWG_REF}.tar.gz`)
+const AWG_TGZ_SHA = 'e33d8a62928222592df23b75356d79e0ea6b590943cbe3a4cfcdf9c357bb416e'
+const AWG_VER = '3.1.20261116'
+let AWG_BIN = args.includes('--awg-bin') ? args[args.indexOf('--awg-bin') + 1] : null
+if (!AWG_BIN) {
+  if (!existsSync(AWG_TGZ)) execFileSync('curl', ['-sSfL', '--proto', '=https', '-o', AWG_TGZ, `https://codeload.github.com/amnezia-vpn/amneziawg-go/tar.gz/${AWG_REF}`])
+  if (sha(readFileSync(AWG_TGZ)) !== AWG_TGZ_SHA) throw new Error('SHA-256 архива amneziawg-go не совпал')
+  execFileSync(PY, ['-I', '-c', 'import sys,tarfile;tarfile.open(sys.argv[1]).extractall(sys.argv[2],filter="data")', AWG_TGZ, tmp])
+  const src = join(tmp, `amneziawg-go-${AWG_REF}`)
+  AWG_BIN = join(tmp, 'amneziawg-arm64')
+  const G = join(ROOT, '.tools', 'go')
+  execFileSync('go', ['build', '-trimpath', '-ldflags=-s -w -buildid=', '-o', AWG_BIN, '.'], {
+    cwd: src, stdio: ['ignore', 'ignore', 'inherit'],
+    env: { ...process.env, CGO_ENABLED: '0', GOOS: 'linux', GOARCH: 'arm64', GOFLAGS: '-mod=readonly', GOPATH: G, GOCACHE: join(G, 'cache'), GOMODCACHE: join(G, 'mod') },
+  })
 }
 const ZAP = join(ROOT, '.tools', 'lab', 'zapret2', 'zapret2-v1.0.7')
 if (!existsSync(join(ZAP, 'binaries', 'linux-arm64', 'nfqws2'))) throw new Error('нет zapret2: tools/lab/fetch-zapret.sh')
@@ -109,27 +128,30 @@ if (!existsSync(KEYF)) {
 const priv = createPrivateKey(readFileSync(KEYF))
 const pubHex = createPublicKey(priv).export({ type: 'spki', format: 'der' }).subarray(-32).toString('hex')
 
-// --- модуль sing-box: свой манифест и подпись тем же ключом; каталог — в основном пакете ---
-const MODDIR = join(OUT, 'module-sing-box', 'module')
-rmSync(dirname(MODDIR), { recursive: true, force: true })
-mkdirSync(join(MODDIR, 'payload'), { recursive: true })
-const mfiles = []
-xz(SB_BIN, 'payload/sing-box.xz', 'sing-box', MODDIR, mfiles)
-const mman = {
-  name: 'mi-lumruri-mod-sing-box', version: SB_VER, target: 'rc06-1.1.38-aarch64', created: '2026-11-24', pubkey: pubHex, files: mfiles,
-  data_bytes: mfiles.reduce((s, f) => s + f.size, 0), tmp_bytes: mfiles.reduce((s, f) => s + (f.unpacked_size ?? f.size), 0),
+// --- модули: свой манифест и подпись тем же ключом; каталог — в основном пакете ---
+function moduleTar(name, version, bin, title, protocols, kinds) {
+  const dir = join(OUT, `module-${name}`, 'module')
+  rmSync(dirname(dir), { recursive: true, force: true })
+  mkdirSync(join(dir, 'payload'), { recursive: true })
+  const mf = []
+  // программа распаковывается под именем модуля: $RUN/mod/<имя>/<имя>
+  xz(bin, `payload/${name}.xz`, name, dir, mf)
+  const man = {
+    name: `mi-lumruri-mod-${name}`, version, target: 'rc06-1.1.38-aarch64', created: '2026-11-24', pubkey: pubHex, files: mf,
+    data_bytes: mf.reduce((s, f) => s + f.size, 0), tmp_bytes: mf.reduce((s, f) => s + (f.unpacked_size ?? f.size), 0),
+  }
+  const mb = Buffer.from(JSON.stringify(man, null, 1) + '\n')
+  writeFileSync(join(dir, 'manifest.json'), mb)
+  writeFileSync(join(dir, 'manifest.sig'), sign(null, mb, priv).toString('hex') + '\n')
+  const tar = join(OUT, `mitt-mod-${name}-${version}.tar`)
+  execFileSync(PY, ['-I', join(ROOT, 'tools', 'xzpack.py'), 'tar', dir, tar, 'module'])
+  const tb = readFileSync(tar)
+  return { name, version, title, protocols, kinds, asset: basename(tar), tar_sha256: sha(tb), tar_bytes: tb.length, unpacked_bytes: man.tmp_bytes }
 }
-const mbytesMod = Buffer.from(JSON.stringify(mman, null, 1) + '\n')
-writeFileSync(join(MODDIR, 'manifest.json'), mbytesMod)
-writeFileSync(join(MODDIR, 'manifest.sig'), sign(null, mbytesMod, priv).toString('hex') + '\n')
-const MOD_TAR = join(OUT, `mitt-mod-sing-box-${SB_VER}.tar`)
-execFileSync(PY, ['-I', join(ROOT, 'tools', 'xzpack.py'), 'tar', MODDIR, MOD_TAR, 'module'])
-const modTarBytes = readFileSync(MOD_TAR)
-const catalog = { modules: [{
-  name: 'sing-box', version: SB_VER, title: 'sing-box', protocols: ['VLESS', 'Hysteria2', 'Trojan', 'Shadowsocks'],
-  kinds: ['vless', 'hysteria2', 'trojan', 'shadowsocks'], asset: basename(MOD_TAR), tar_sha256: sha(modTarBytes), tar_bytes: modTarBytes.length,
-  unpacked_bytes: mman.tmp_bytes,
-}] }
+const catalog = { modules: [
+  moduleTar('sing-box', SB_VER, SB_BIN, 'sing-box', ['VLESS', 'Hysteria2', 'Trojan', 'Shadowsocks'], ['vless', 'hysteria2', 'trojan', 'shadowsocks']),
+  moduleTar('amneziawg', AWG_VER, AWG_BIN, 'AmneziaWG', ['AmneziaWG'], ['amneziawg']),
+] }
 writeFileSync(join(PKG, 'payload', 'scripts', 'modules.json'), JSON.stringify(catalog, null, 1) + '\n')
 {
   const b = readFileSync(join(PKG, 'payload', 'scripts', 'modules.json'))
@@ -157,8 +179,8 @@ const report = { version: VERSION, tar: tarPath, tar_bytes: tarSize, tar_sha256:
   files: files.map((f) => ({ path: f.path, size: f.size, unpacked_size: f.unpacked_size })) }
 writeFileSync(join(OUT, `report-${VERSION}.json`), JSON.stringify(report, null, 2) + '\n')
 // install.py сверяет TAR с SHA256SUMS рядом с ним
-writeFileSync(join(OUT, 'SHA256SUMS'), `${report.tar_sha256} *mi-lumruri-${VERSION}.tar\n${sha(readFileSync(compatPath))} *mi-trusttunnel-${VERSION}.tar\n${catalog.modules[0].tar_sha256} *${catalog.modules[0].asset}\n`)
-console.log(`модуль: ${MOD_TAR} ${n(modTarBytes.length)} Б, в RAM ${n(mman.tmp_bytes)} Б`)
+writeFileSync(join(OUT, 'SHA256SUMS'), `${report.tar_sha256} *mi-lumruri-${VERSION}.tar\n${sha(readFileSync(compatPath))} *mi-trusttunnel-${VERSION}.tar\n` + catalog.modules.map((m) => `${m.tar_sha256} *${m.asset}\n`).join(''))
+for (const m of catalog.modules) console.log(`модуль: ${m.asset} ${n(m.tar_bytes)} Б, в RAM ${n(m.unpacked_bytes)} Б`)
 console.log(`пакет: ${tarPath} ${n(tarSize)} Б, sha256 ${report.tar_sha256}`)
 console.log(`на /data: ${n(manifest.data_bytes)} Б; в /tmp после распаковки: ${n(manifest.tmp_bytes)} Б; бюджет 20 000 000 Б, запас ${n(report.headroom)} Б`)
 console.log(`ключ релиза: ${report.key_fingerprint}`)

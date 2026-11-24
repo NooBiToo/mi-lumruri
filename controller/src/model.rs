@@ -444,6 +444,8 @@ pub enum ProfileKind {
     Hysteria2,
     Trojan,
     Shadowsocks,
+    /// Модуль amneziawg: сервер — конфигурация AmneziaWG (секрет `link`).
+    Amneziawg,
 }
 
 impl ProfileKind {
@@ -454,10 +456,15 @@ impl ProfileKind {
             ProfileKind::Hysteria2 => "Hysteria2",
             ProfileKind::Trojan => "Trojan",
             ProfileKind::Shadowsocks => "Shadowsocks",
+            ProfileKind::Amneziawg => "AmneziaWG",
         }
     }
-    /// Сервер работает через модуль sing-box.
+    /// Сервер работает через модуль sing-box (ссылка vless://, hysteria2://, trojan://, ss://).
     pub fn singbox(self) -> bool {
+        matches!(self, ProfileKind::Vless | ProfileKind::Hysteria2 | ProfileKind::Trojan | ProfileKind::Shadowsocks)
+    }
+    /// Сервер работает через модуль (не TrustTunnel): адрес — в секрете `link`, в настройках — сводка `proxy`.
+    pub fn module(self) -> bool {
         self != ProfileKind::Trusttunnel
     }
 }

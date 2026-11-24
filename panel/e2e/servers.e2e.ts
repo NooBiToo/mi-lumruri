@@ -194,3 +194,22 @@ test('подписка сервера sing-box: добавление ссылк�
   expect(config().profiles.find((p: { id: string }) => p.id === id).sub_pick).toBe('B')
   expect(consoleErrors).toEqual([])
 })
+
+test('сервер AmneziaWG из конфигурации .conf: сводка в настройках, конфигурация — только в секретах', async ({ page }) => {
+  await login(page)
+  await simplify(page)
+  await nav(page, /Сервер/).click()
+  await page.getByRole('button', { name: 'Добавить сервер' }).click()
+  const conf = '[Interface]\nPrivateKey = yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=\nAddress = 10.8.0.2/32\nJc = 4\nJmin = 40\nJmax = 70\nH1 = 1-2\n\n[Peer]\nPublicKey = xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=\nAllowedIPs = 0.0.0.0/0\nEndpoint = awg.example.com:51820\n' // secret-scan: allow тестовый ключ
+  await page.locator('#paste').fill(conf)
+  await page.getByRole('button', { name: 'Распознать' }).click()
+  await expect(page.getByText('Обфускация')).toBeVisible()
+  await page.locator('#srv-name').fill('AWG дом')
+  await page.getByRole('button', { name: 'Сохранить' }).click()
+  await expect.poll(() => config().profiles.find((p: { name: string }) => p.name === 'AWG дом')?.proxy, { timeout: 10_000 })
+    .toEqual({ server: 'awg.example.com', port: 51820, security: 'awg', transport: 'udp' })
+  expect(config().profiles.find((p: { name: string }) => p.name === 'AWG дом').kind).toBe('amneziawg')
+  expect(JSON.stringify(config())).not.toContain('yAnz5TF')
+  await expect.poll(() => readFileSync(join(dirname(stand.opts.config), 'secrets.json'), 'utf8'), { timeout: 10_000 }).toContain('Jmin = 40')
+  expect(consoleErrors).toEqual([])
+})

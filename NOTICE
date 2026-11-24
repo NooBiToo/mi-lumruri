@@ -5,6 +5,16 @@ Mi Lumruri (mi-lumruri)
 Клиент TrustTunnel trusttunnel_client v1.3.0 (официальная статическая сборка linux-aarch64, без изменений):
 https://github.com/TrustTunnel/TrustTunnelClient, лицензия Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0).
 
+Модули (отдельные файлы релиза, ставятся со страницы «Модули»; в основной пакет не входят):
+
+  mitt-mod-sing-box-1.14.4.tar — sing-box 1.14.4 (официальная статическая сборка linux-arm64-musl, без изменений).
+  Copyright (C) 2022 by nekohasekai. Лицензия GNU General Public License v3.0 or later
+  (https://www.gnu.org/licenses/gpl-3.0.html). Исходный код этой версии: https://github.com/SagerNet/sing-box/tree/v1.14.4
+
+  mitt-mod-amneziawg-3.1.20261116.tar — amneziawg-go, коммит 08fe3d33bbb116be09a6183d02609311b8b0c9e8 (тег v3.1.20261116),
+  собран без изменений (Go, CGO_ENABLED=0, linux/arm64). Copyright (C) The WireGuard Authors, Amnezia; лицензия MIT.
+  Исходный код: https://github.com/amnezia-vpn/amneziawg-go/tree/08fe3d33bbb116be09a6183d02609311b8b0c9e8
+
 nfqws2, Lua-библиотеки и блобы из zapret2 v1.0.7 (bol-van, лицензия MIT, без изменений): https://github.com/bol-van/zapret2
 
 Стратегии Zapret в controller/data/zapret-strategies.json взяты из проекта

@@ -9,7 +9,7 @@ import ToggleSwitch from 'primevue/toggleswitch'
 import { Check, ChevronDown, ClipboardPaste, Minus, Plus, Trash2 } from 'lucide-vue-next'
 import Select from 'primevue/select'
 import { api, manage, type Config, type Endpoint, type ModuleInfo, type Profile, type SubscriptionResponse, type TlsProfile } from '../api'
-import { isProxyLink, parseProxyLink, PROTOCOL_LABEL } from '../proxyLink'
+import { isAwgConf, isProxyLink, parseAwgConf, parseProxyLink, PROTOCOL_LABEL } from '../proxyLink'
 import { emptyProfileForm, formToProfile, formToSecret, profileToForm, type ProfileForm } from '../manage'
 import { parseServer, TLS_PROFILES } from '../serverConfig'
 import { build, config, freeTunnel, hasPassword, hasSubscription, knownDevicesNow, loadConfig, loadSecrets, notify, profile, profiles, save, selectedServer, simple, tunnel, withProfile } from '../store'
@@ -91,6 +91,19 @@ function recognize() {
     parsed.value = { rows: [{ label: t('Подписка'), value: t('есть — список серверов роутер получит после сохранения') }], warnings: [] }
     return
   }
+  // конфигурация AmneziaWG (модуль amneziawg): целиком — секрет, в настройках — сводка
+  if (isAwgConf(text)) {
+    const x = parseAwgConf(text)
+    if ('error' in x) { parsed.value = { error: x.error }; return }
+    const f = form.value
+    f.kind = 'amneziawg'; f.proxy = x.info; f.link = text; f.subscriptionUrl = ''
+    parsed.value = { rows: [
+      { label: t('Протокол'), value: 'AmneziaWG' },
+      { label: t('Сервер'), value: `${x.info.server}:${x.info.port}` },
+      { label: t('Обфускация'), value: /^\s*Jc\s*=/im.test(text) ? t('есть') : null },
+    ], warnings: [] }
+    return
+  }
   // серверы модуля sing-box: ссылка целиком — секрет, в настройках — сводка
   if (isProxyLink(text)) {
     const x = parseProxyLink(text)
@@ -163,7 +176,7 @@ const moduleMissing = computed(() => isProxy.value && modules.value !== null && 
 // новая ссылка в поле «Ссылка» — обновить сводку
 watch(() => form.value.link, (l) => {
   if (!isProxy.value || !l.trim()) return
-  const x = parseProxyLink(l)
+  const x = form.value.kind === 'amneziawg' ? parseAwgConf(l) : parseProxyLink(l)
   if (!('error' in x) && x.kind === form.value.kind) form.value.proxy = x.info
 })
 const blocker = computed(() => {
@@ -171,7 +184,8 @@ const blocker = computed(() => {
   if (isProxy.value) {
     if (!f.proxy && !subscribed.value) return t('Вставьте ссылку на сервер.')
     if (!f.link.trim() && !hasPassword.value && !subscribed.value) return t('Вставьте ссылку на сервер.')
-    if (f.link.trim() && isProxyLink(f.link)) { const x = parseProxyLink(f.link); if ('error' in x) return x.error; if (x.kind !== f.kind) return t('Ссылка другого протокола: добавьте её отдельным сервером.') }
+    if (f.kind === 'amneziawg' && f.link.trim()) { const x = parseAwgConf(f.link); if ('error' in x) return x.error }
+    if (f.kind !== 'amneziawg' && f.link.trim() && isProxyLink(f.link)) { const x = parseProxyLink(f.link); if ('error' in x) return x.error; if (x.kind !== f.kind) return t('Ссылка другого протокола: добавьте её отдельным сервером.') }
     return null
   }
   if (subscriptionOnly.value) return null
@@ -320,7 +334,7 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
         <div class="card">
           <div>
             <h2 class="card__title">{{ firstTime ? t('Быстрая настройка') : t('Сменить сервер') }}</h2>
-            <p class="card__sub">{{ t('Вставьте ссылку') }} <span class="num">tt://</span> {{ t('или файл конфигурации клиента — поля заполнятся сами') }} {{ t('Серверы VLESS, Hysteria2, Trojan и Shadowsocks — ссылкой') }} <span class="num">vless://</span>, <span class="num">hy2://</span>, <span class="num">trojan://</span>, <span class="num">ss://</span>.</p>
+            <p class="card__sub">{{ t('Вставьте ссылку') }} <span class="num">tt://</span> {{ t('или файл конфигурации клиента — поля заполнятся сами') }} {{ t('Серверы VLESS, Hysteria2, Trojan и Shadowsocks — ссылкой') }} <span class="num">vless://</span>, <span class="num">hy2://</span>, <span class="num">trojan://</span>, <span class="num">ss://</span>. {{ t('AmneziaWG — содержимым файла конфигурации .conf.') }}</p>
           </div>
           <div class="field">
             <label for="paste" class="sr-only">{{ t('Ссылка или конфигурация сервера') }}</label>
@@ -372,19 +386,24 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
             <div v-if="form.proxy.security" class="preview__row"><dt>{{ t('Шифрование') }}</dt><dd>{{ form.proxy.security === 'none' ? t('нет') : form.proxy.security.toUpperCase() }}</dd></div>
             <div v-if="form.proxy.transport" class="preview__row"><dt>{{ t('Транспорт') }}</dt><dd class="num">{{ form.proxy.transport }}</dd></div>
           </dl>
-          <div class="field">
+          <div v-if="form.kind === 'amneziawg'" class="field">
+            <label for="srv-awg" class="field__label">{{ t('Конфигурация AmneziaWG') }}</label>
+            <Textarea id="srv-awg" v-model="form.link" rows="6" spellcheck="false" class="mono" :placeholder="hasPassword ? t('Сохранена. Оставьте пустым') : '[Interface]…'" />
+            <span class="field__hint">{{ t('В конфигурации есть закрытый ключ, поэтому она хранится только на роутере и сюда не возвращается. Вставьте новую, чтобы сменить сервер. AllowedIPs и DNS из неё не используются: что идёт через VPN, решают «Сайты» и «Устройства».') }}</span>
+          </div>
+          <div v-else class="field">
             <label for="srv-link" class="field__label">{{ t('Ссылка на сервер') }}</label>
             <Password v-model="form.link" input-id="srv-link" :feedback="false" toggle-mask fluid autocomplete="off"
               :placeholder="hasPassword ? t('Сохранена. Оставьте пустым') : 'vless://…'" />
             <span class="field__hint">{{ t('В ссылке есть ключ или пароль, поэтому она хранится только на роутере и сюда не возвращается. Вставьте новую, чтобы сменить сервер.') }}</span>
           </div>
-          <div class="field">
+          <div v-if="form.kind !== 'amneziawg'" class="field">
             <label for="srv-psub" class="field__label">{{ t('Ссылка-подписка') }}</label>
             <Password v-model="form.subscriptionUrl" input-id="srv-psub" :feedback="false" toggle-mask fluid autocomplete="off"
               :placeholder="hasSubscription ? t('Сохранена. Оставьте пустым') : 'https://…'" />
             <span class="field__hint">{{ t('Подписка — список серверов от вашего провайдера VPN. Роутер забирает его по расписанию списков сайтов и по кнопке и подключается к выбранному серверу (по умолчанию — первому). Хранится только на роутере.') }}</span>
           </div>
-          <template v-if="hasSubscription">
+          <template v-if="hasSubscription && form.kind !== 'amneziawg'">
             <span :class="['adblock__state', { 'adblock__state--bad': subState && !subState.ok }]" aria-live="polite">
               <span :class="['led', subState ? (subState.ok ? 'led--ok' : 'led--warn') : 'led--idle']" aria-hidden="true" />
               <span class="meta">{{ subText }}</span>

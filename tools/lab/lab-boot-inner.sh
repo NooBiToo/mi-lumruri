@@ -5,7 +5,7 @@
 # сервер TrustTunnel (trusttunnel_endpoint) — настоящий.
 #   tv 10.10.1.2 ─ br-lan 10.10.1.1 [router] 10.20.0.2 ─ [inet] ─ 10.30.0.2 [trusttunnel server]
 set -uo pipefail
-: "${ROOT:?}" "${W:?}" "${OUT:?}" "${PKG:?}" "${TTCLIENT:?}" "${TTBIN:?}" "${MODTAR:?}" "${SBBIN:?}"
+: "${ROOT:?}" "${W:?}" "${OUT:?}" "${PKG:?}" "${TTCLIENT:?}" "${TTBIN:?}" "${MODTAR:?}" "${SBBIN:?}" "${AWGTAR:?}" "${AWGBIN:?}"
 F=/tmp/mitt-fw/rootfs; Q="$ROOT/.tools/qemu/root/usr/bin/qemu-aarch64"
 PY=(python3 -I -X utf8)
 log() { printf '[boot] %s\n' "$*" | tee -a "$OUT/lab.log"; }
@@ -72,7 +72,7 @@ chmod +x "$W/dnsmasq-restart"
 # флешка: подставные /proc/mounts и df (точка монтирования — /mnt/usb-lab в корне эмуляции)
 mkdir -p "$W/proc" "$RR/mnt/usb-lab"; : >"$W/proc/mounts"
 printf '#!/bin/sh\necho "Filesystem 1K-blocks Used Available Use%% Mounted on"\necho "ubi0_1 40000 22000 18000 55%% /data"\ngrep -q usb-lab %s && echo "/dev/sda1 15000000 1000000 14000000 7%% /mnt/usb-lab"\nexit 0\n' "$W/proc/mounts" >"$SB/df-lab"; chmod +x "$SB/df-lab"
-ENVR=(PATH="$SB:$NFBIN" MITT_ROOT="$RR" MITT_LAB_BIN="$LB" MITT_PROC="$W/proc" MITT_DF="$SB/df-lab" MITT_STORAGE_EVERY=2 MITT_MODULE_WATCH=2 MITT_MODULE_SRC="$MODTAR" MITT_UCI_CONF="$RR/etc/config" MITT_INTERVAL=2 MITT_AUTOSTART_CHECK=4 MITT_LEASES="$RR/tmp/dhcp.leases"
+ENVR=(PATH="$SB:$NFBIN" MITT_ROOT="$RR" MITT_LAB_BIN="$LB" MITT_PROC="$W/proc" MITT_DF="$SB/df-lab" MITT_STORAGE_EVERY=2 MITT_MODULE_WATCH=2 MITT_MODULE_DIR="$(dirname "$MODTAR")" MITT_UCI_CONF="$RR/etc/config" MITT_INTERVAL=2 MITT_AUTOSTART_CHECK=4 MITT_LEASES="$RR/tmp/dhcp.leases"
   MITT_DNSMASQ_RESTART="$W/dnsmasq-restart" MITT_LISTS_URL="http://10.99.0.20:8080" MITT_ZAPRET_TARGETS="$W/zapret-targets.txt" MI_TT_IPTABLES="$NFBIN/iptables" MI_TT_IP6TABLES="$NFBIN/ip6tables" MI_TT_IPTABLES_SAVE="$NFBIN/iptables-save" MI_TT_IPSET="$NFBIN/ipset")
 
 # --- топология ---
@@ -454,6 +454,35 @@ cp "$RN/modules-state.json" "$OUT/modules-state.away.json" 2>/dev/null
 mv "$W/usb-away" "$RR/mnt/usb-lab"; echo "/dev/sda1 /mnt/usb-lab vfat rw,relatime 0 0" >"$W/proc/mounts"
 for i in $(seq 30); do grep -q "накопитель снова доступен" "$RR/tmp/mi-lumruri/log/mitt.log" 2>/dev/null && break; sleep 1; done
 grep "модуль sing-box" "$RR/tmp/mi-lumruri/log/mitt.log" >"$OUT/module-log.sb.txt" 2>/dev/null
+# 6ж) модуль amneziawg: ставится из панели на ту же флешку; сервер — настоящий amneziawg-go в «VPN» с теми же
+# параметрами обфускации; видео ТВ идёт через туннель AmneziaWG (адрес клиента в туннеле 10.66.0.2 виден эхо-серверу)
+phase amneziawg_module
+read -r AWG_CPRIV AWG_CPUB <<<"$("${PY[@]}" "$ROOT/tools/lab/wgkey.py")"; read -r AWG_SPRIV AWG_SPUB <<<"$("${PY[@]}" "$ROOT/tools/lab/wgkey.py")"
+b64hex() { "${PY[@]}" -c 'import base64,sys;print(base64.b64decode(sys.argv[1]).hex())' "$1"; }
+nsx vpn "$AWGBIN" -f awgs0 >>"$OUT/awg-server.log" 2>&1 &
+for i in $(seq 50); do [ -S /var/run/amneziawg/awgs0.sock ] && break; sleep 0.2; done
+printf 'private_key=%s\nlisten_port=51820\njc=4\njmin=40\njmax=70\ns1=15\ns2=23\nh1=1356111720\nh2=1356111721\nh3=1356111722\nh4=1356111723\npublic_key=%s\nallowed_ip=10.66.0.2/32\n' \
+  "$(b64hex "$AWG_SPRIV")" "$(b64hex "$AWG_CPUB")" | "${PY[@]}" "$ROOT/tools/lab/wgkey.py" uapi /var/run/amneziawg/awgs0.sock >"$OUT/awg-server-uapi.txt" 2>&1
+nsx vpn ip addr add 10.66.0.1/24 dev awgs0; nsx vpn ip link set awgs0 up; nsx vpn sh -c 'echo 1 > /proc/sys/net/ipv4/ip_forward'
+ip -n inet route add 10.66.0.0/24 via 10.30.0.2
+post modules/install '{"name":"amneziawg","target":"/mnt/usb-lab"}' >"$OUT/module-install-awg.out"
+for i in $(seq 120); do grep -q '"name":"amneziawg"' "$RN/module.json" 2>/dev/null && grep -q '"state":"\(done\|failed\)"' "$RN/module.json" && break; sleep 1; done
+cp "$RN/module.json" "$OUT/module-awg.json" 2>/dev/null
+"${PY[@]}" -c 'import json,sys
+p=sys.argv[1]; c=json.load(open(p))
+c["profiles"].append({"id":"aw","name":"AmneziaWG стенд","kind":"amneziawg","tunnel":4,"on_failure":"block","proxy":{"server":"10.30.0.2","port":51820,"security":"awg","transport":"udp"}})
+for r in c["rules"]:
+    if r["id"]=="r-tv-video": r["action"]={"type":"profile","id":"aw"}
+json.dump(c,open(p,"w"),ensure_ascii=False,indent=2)
+s=json.load(open(sys.argv[2]))
+s["profiles"]["aw"]={"link":"[Interface]\nPrivateKey = %s\nAddress = 10.66.0.2/32\nMTU = 1280\nJc = 4\nJmin = 40\nJmax = 70\nS1 = 15\nS2 = 23\nH1 = 1356111720\nH2 = 1356111721\nH3 = 1356111722\nH4 = 1356111723\n\n[Peer]\nPublicKey = %s\nAllowedIPs = 0.0.0.0/0\nEndpoint = 10.30.0.2:51820\nPersistentKeepalive = 25\n" % (sys.argv[3], sys.argv[4])}
+json.dump(s,open(sys.argv[2],"w"))' "$E/config.json" "$E/secrets.json" "$AWG_CPRIV" "$AWG_SPUB"
+A0="$(at_of)"; post apply-request '{}' >/dev/null
+for i in $(seq 90); do [ "$(at_of)" -gt "${A0:-0}" ] 2>/dev/null && grep -q '"panel-request' "$RN/last-apply.json" && break; sleep 1; done
+for i in $(seq 30); do nsx router ip link show mitt4 >/dev/null 2>&1 && break; sleep 1; done
+cp "$RN/last-apply.json" "$OUT/last-apply.awg.json"; cp "$RR/tmp/mi-lumruri/render/tunnels.list" "$OUT/tunnels.awg.list" 2>/dev/null
+probe A-tv-video-awg tv
+{ ls "$RN" | grep -E '^awg[0-9]+\.pid$'; nsx router ip addr show mitt4 2>&1 | head -4; tail -5 "$RR/tmp/mi-lumruri/log/awg4.log" 2>/dev/null; } >"$OUT/zone.awg.txt" 2>&1
 cp "$W/config.before-sb.json" "$E/config.json"; cp "$W/secrets.before-sb.json" "$E/secrets.json"
 A0="$(at_of)"; post apply-request '{}' >/dev/null
 for i in $(seq 60); do [ "$(at_of)" -gt "${A0:-0}" ] 2>/dev/null && grep -q '"panel-request' "$RN/last-apply.json" && break; sleep 1; done
@@ -462,7 +491,7 @@ wait_tunnel
 # 7) «перезагрузка роутера»: RAM очищена, правила ядра сняты; снова холодный старт без WAN
 phase reboot
 boot stop >"$OUT/stop.out" 2>&1
-pkill -f "$TTCLIENT" 2>/dev/null; pkill -f "mod/sing-box/sing-box" 2>/dev/null; pkill -f "usr/sbin/nginx" 2>/dev/null; pkill -f "usr/sbin/uhttpd" 2>/dev/null; sleep 1
+pkill -f "$TTCLIENT" 2>/dev/null; pkill -f "mod/sing-box/sing-box" 2>/dev/null; pkill -f "mod/amneziawg/amneziawg" 2>/dev/null; pkill -f "usr/sbin/nginx" 2>/dev/null; pkill -f "usr/sbin/uhttpd" 2>/dev/null; sleep 1
 rm -rf "$RR/tmp/mi-lumruri"; ip -n router link set r-wan down
 snapz after-reboot
 boot >"$OUT/boot2.out" 2>&1; echo "exit=$?" >>"$OUT/boot2.out"

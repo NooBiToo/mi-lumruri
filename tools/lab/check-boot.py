@@ -233,6 +233,10 @@ check("флешка с модулем пропала: уведомление, с
       "недоступен" in text("module-log.sb.txt") and "снова доступен" in text("module-log.sb.txt") and seen("S-tv-video-usb-away") == (0, VPN)
       and '"state":"missing","ram":true' in text("modules-state.away.json"),
       [text("module-log.sb.txt"), seen("S-tv-video-usb-away"), text("modules-state.away.json")])
+check("модуль amneziawg: установлен из панели, туннель AmneziaWG до настоящего amneziawg-go, видео ТВ через него (адрес клиента в туннеле)",
+      '"state":"done"' in text("module-awg.json") and js("last-apply.awg.json").get("exit") == 0 and "4 mitt4 aw amneziawg" in text("tunnels.awg.list")
+      and seen("A-tv-video-awg") == (0, "10.66.0.2") and "errno=0" in text("awg-server-uapi.txt"),
+      [text("module-awg.json"), js("last-apply.awg.json"), text("tunnels.awg.list"), seen("A-tv-video-awg"), text("zone.awg.txt"), text("awg-server-uapi.txt")])
 zo = text("zone.multi-off.txt")
 check("возврат к одному серверу: метка снова 0x4000/0x4000, второго клиента и mitt1 нет",
       "fwmark 0x4000/0x4000 lookup 3100" in zo and "trusttunnel1.pid" not in zo and "3101" not in zo, zo)

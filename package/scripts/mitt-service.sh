@@ -10,7 +10,7 @@ INTERVAL="${MITT_INTERVAL:-5}"
 engines_stop() {
   local f n d
   # клиенты всех туннелей, в том числе исчезнувших из настроек
-  for f in "$STATE"/trusttunnel*.wanted "$STATE"/trusttunnel*.pid "$STATE"/singbox*.wanted "$STATE"/singbox*.pid; do
+  for f in "$STATE"/trusttunnel*.wanted "$STATE"/trusttunnel*.pid "$STATE"/singbox*.wanted "$STATE"/singbox*.pid "$STATE"/awg*.wanted "$STATE"/awg*.pid; do
     [ -e "$f" ] || continue; n="$(basename "$f")"; n="${n%.*}"; rm -f "$STATE/$n.wanted"; pid_stop "$n"
   done
   for n in nfqws2 dnsproxy dnstunnel; do rm -f "$STATE/$n.wanted"; pid_stop "$n"; done
@@ -44,6 +44,10 @@ engines_start() {
       if [ ! -x "$(module_bin sing-box)" ]; then mlog "туннель $n: модуль sing-box недоступен — сервер не запущен"; continue; fi
       touch "$STATE/$TP.wanted"
       pid_alive "$TP" || start_bg "$TP" ${MITT_SB_WRAP:-} "$(module_bin sing-box)" run -c "$TR/sing-box.json"
+    elif [ "$TE" = amneziawg ]; then
+      if [ ! -x "$(module_bin amneziawg)" ]; then mlog "туннель $n: модуль amneziawg недоступен — сервер не запущен"; continue; fi
+      touch "$STATE/$TP.wanted"
+      pid_alive "$TP" || { start_bg "$TP" ${MITT_AWG_WRAP:-} "$(module_bin amneziawg)" -f "$TD"; awg_setup "$n"; }
     else
       touch "$STATE/$TP.wanted"
       pid_alive "$TP" || start_bg "$TP" ${MITT_TT_WRAP:-} "$BIN/trusttunnel_client" -c "$(tt_config "$n")"

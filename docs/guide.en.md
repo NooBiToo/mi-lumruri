@@ -2,7 +2,7 @@
 
 [Русский](guide.md) · **English** · [简体中文](guide.zh-CN.md)
 
-This guide covers Mi Lumruri version 0.11.1. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
+This guide covers Mi Lumruri version 0.12.0. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
 
 You need a BE7000 (RC06) with firmware 1.1.38, working root access over SSH from the home network, the installation TAR, and the parameters of your TrustTunnel server. The stock release firmware usually ships with SSH turned off.
 
@@ -183,6 +183,10 @@ Supported: VLESS over TCP, WebSocket, gRPC, HTTP and HTTPUpgrade, with no encryp
 
 **Subscription.** If your VPN provider gives you an `https://…` subscription link (a server list, usually base64), paste it into the Quick setup field of a new server or into the Subscription link field of an existing one and save. The router downloads the list on the site list schedule and by the Update by subscription button, takes the supported servers from it (VLESS, Hysteria2, Trojan, Shadowsocks; the rest are skipped) and connects to the selected one. You choose it in the Server from the subscription list; by default it is the first one, and on updates the router keeps the selected one while it is in the list. The server protocol may change with the choice. Until the list is downloaded, this server's sites follow the If the server is unavailable choice. The list with keys is stored only on the router. Subscriptions work for each server separately, including several TrustTunnel servers.
 
+#### AmneziaWG servers
+
+You need the [amneziawg module](#modules) (about 1 MB, it fits in internal memory too). On the Server screen click Add server, paste the contents of an AmneziaWG configuration file (a `.conf` with `[Interface]` and `[Peer]` sections, as the Amnezia app or the server gives it) into the Quick setup field and click Recognize. AmneziaWG 1.x and 2.0 obfuscation parameters are supported: Jc, Jmin, Jmax, S1–S4, H1–H4 (a number or a range), I1–I5, plus PresharedKey, PersistentKeepalive and MTU (1280 if not set). The configuration is stored only on the router. Its AllowedIPs, DNS and PostUp/PostDown commands are not used: what goes through the VPN is decided on Sites and Devices. Exactly one `[Peer]` section is needed; the router resolves the server name in Endpoint on every connection.
+
 #### Several servers
 
 You can have up to 16 servers, and they work **at the same time**: each has its own tunnel. The **Servers** card at the top of the screen lists them; click a server to open and edit it. **Add server** opens an empty form: paste the link, check the **Name** field and click Save. The first server in the list is the **default server**: everything without another server chosen goes through it. **Remove server** (click twice) removes a server; its sites and devices move to the default server.
@@ -273,6 +277,8 @@ Settings → **Network and DNS** tab, at the bottom. Enter a domain and an IP ad
 ### Modules
 
 Modules add new VPN protocols to the package: VLESS, Hysteria2, AmneziaWG and others. They are large and do not fit in the router memory, so they go on a USB drive plugged into the router, or into internal memory if it has room. The **Storage** card shows the internal memory and connected USB drives: maker and model, free space, path and file system. The router checks drives once a minute, so a newly plugged drive shows up by itself.
+
+**The amneziawg module** provides AmneziaWG servers: the amneziawg-go program (about 1 MB on the drive and 3 MB in RAM), built from source. It is installed, updated and removed the same way as the sing-box module (below).
 
 **The sing-box module** provides VLESS, Hysteria2, Trojan and Shadowsocks servers (the package carries sing-box 1.14.4). It is about a 20 MB download and takes about 85 MB of RAM while running. In the module card choose where to install it, a USB drive or internal memory (unavailable options show why: not enough space, read-only), and click **Install**. The router downloads the module from GitHub, checks its SHA-256 against the signed package and its signature with the release key, puts it on the drive and unpacks it into RAM. The card shows the progress. A newer module version is installed with Update to …; Remove module is available when no server uses it.
 

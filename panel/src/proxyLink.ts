@@ -8,7 +8,23 @@ export interface ProxySummary { kind: Exclude<ProfileKind, 'trusttunnel'>; info:
 
 const SCHEMES: Record<string, ProxySummary['kind']> = { vless: 'vless', hysteria2: 'hysteria2', hy2: 'hysteria2', trojan: 'trojan', ss: 'shadowsocks' }
 
-export const PROTOCOL_LABEL: Record<ProxySummary['kind'], string> = { vless: 'VLESS', hysteria2: 'Hysteria2', trojan: 'Trojan', shadowsocks: 'Shadowsocks' }
+export const PROTOCOL_LABEL: Record<ProxySummary['kind'], string> = { vless: 'VLESS', hysteria2: 'Hysteria2', trojan: 'Trojan', shadowsocks: 'Shadowsocks', amneziawg: 'AmneziaWG' }
+
+/** Похоже на конфигурацию WireGuard/AmneziaWG (как controller/src/awg.rs). */
+export function isAwgConf(text: string): boolean {
+  return text.includes('[Interface]') && text.includes('[Peer]')
+}
+
+/** Сводка конфигурации AmneziaWG: сервер из Endpoint; ключи и параметры проверит контроллер. */
+export function parseAwgConf(text: string): ProxySummary | { error: string } {
+  const get = (k: string) => new RegExp(`^\\s*${k}\\s*=\\s*(.+?)\\s*$`, 'im').exec(text)?.[1]
+  if (!get('PrivateKey')) return { error: 'в [Interface] нет PrivateKey' }
+  if (!get('PublicKey')) return { error: 'в [Peer] нет PublicKey' }
+  const ep = get('Endpoint')
+  const hp = ep ? hostPort(ep) : null
+  if (!hp) return { error: 'в [Peer] нет Endpoint адрес:порт' }
+  return { kind: 'amneziawg', info: { ...hp, security: 'awg', transport: 'udp' } }
+}
 
 /** Это ссылка сервера модуля sing-box (по схеме). */
 export function isProxyLink(text: string): boolean {

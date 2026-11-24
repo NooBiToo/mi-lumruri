@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isProxyLink, parseProxyLink } from './proxyLink'
+import { isAwgConf, isProxyLink, parseAwgConf, parseProxyLink } from './proxyLink'
 
 describe('proxyLink', () => {
   it('vless reality, hysteria2, trojan ws, ss base64', () => {
@@ -16,5 +16,11 @@ describe('proxyLink', () => {
     expect(parseProxyLink('vless://h.example.com:443')).toHaveProperty('error')
     expect(parseProxyLink('vless://u@h.example.com')).toHaveProperty('error')
     expect(parseProxyLink('vmess://abc')).toHaveProperty('error')
+  })
+  it('amneziawg conf', () => {
+    const c = '[Interface]\nPrivateKey = abc=\nAddress = 10.8.0.2/32\nJc = 4\n\n[Peer]\nPublicKey = def=\nEndpoint = [2001:db8::1]:51820\n'
+    expect(isAwgConf(c)).toBe(true)
+    expect(parseAwgConf(c)).toEqual({ kind: 'amneziawg', info: { server: '2001:db8::1', port: 51820, security: 'awg', transport: 'udp' } })
+    expect(parseAwgConf(c.replace('Endpoint', 'X'))).toHaveProperty('error')
   })
 })
