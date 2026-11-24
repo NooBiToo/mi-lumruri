@@ -465,6 +465,8 @@ printf 'private_key=%s\nlisten_port=51820\njc=4\njmin=40\njmax=70\ns1=15\ns2=23\
   "$(b64hex "$AWG_SPRIV")" "$(b64hex "$AWG_CPUB")" | "${PY[@]}" "$ROOT/tools/lab/wgkey.py" uapi /var/run/amneziawg/awgs0.sock >"$OUT/awg-server-uapi.txt" 2>&1
 nsx vpn ip addr add 10.66.0.1/24 dev awgs0; nsx vpn ip link set awgs0 up; nsx vpn sh -c 'echo 1 > /proc/sys/net/ipv4/ip_forward'
 ip -n inet route add 10.66.0.0/24 via 10.30.0.2
+# флешку только что «вынимали»: дождаться, пока служба снова увидит её
+for i in $(seq 30); do grep -q usb-lab "$RN/storage.json" 2>/dev/null && break; sleep 1; done
 post modules/install '{"name":"amneziawg","target":"/mnt/usb-lab"}' >"$OUT/module-install-awg.out"
 for i in $(seq 120); do grep -q '"name":"amneziawg"' "$RN/module.json" 2>/dev/null && grep -q '"state":"\(done\|failed\)"' "$RN/module.json" && break; sleep 1; done
 cp "$RN/module.json" "$OUT/module-awg.json" 2>/dev/null

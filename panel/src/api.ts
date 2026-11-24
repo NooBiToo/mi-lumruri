@@ -98,6 +98,8 @@ export interface Config {
   device_names?: Record<string, string>
   /** Дополнительные адреса панели (https://хост[:порт]), например обратный прокси. */
   panel_origins?: string[]
+  /** Журнал трафика по дням: срок в месяцах и накопитель (путь из GET /storage). */
+  history?: { months: number; target: string }
 }
 
 export interface Issue { path: string; code: string; message: string }
@@ -303,11 +305,27 @@ export interface ModulesResponse {
   op: null | { state: 'running' | 'done' | 'failed'; action: string; name: string; at: number; message: string | null }
 }
 
+/** Состояние роутера (GET /health). */
+export interface HealthResponse {
+  ok: boolean; issues: Issue[]; error?: ApiError
+  at_ms: number; cpu: number | null; cores: number[]; load: number[]; uptime: number | null
+  mem: { total: number; available: number } | null
+  temps: { name: string; c: number }[]
+  conntrack: { count: number; max: number | null } | null
+  net: { wan: { dev: string; rx: number; tx: number } | null; vpn: { rx: number; tx: number; tunnels: number } | null }
+}
+
 export interface StatsResponse {
   ok: boolean; since: number | null; sampled: number | null; per_device: boolean
   vpn: { day: number; week: number }; wan: { day: number; week: number }
   hours: { t: number; vpn: number; wan: number }[]
-  devices: { key: string; name: string | null; known: boolean; day: number; week: number }[]
+  devices: { key: string; name: string | null; vendor?: string | null; known: boolean; day: number; week: number }[]
+  /** Журнал по дням (если включён): итоги по дням и по устройствам за 30, 90 и 365 дней. */
+  history?: null | {
+    months: number; target: string
+    days: { t: number; vpn: number; wan: number }[]
+    devices: { key: string; name: string | null; vendor?: string | null; month: number; quarter: number; year: number }[]
+  }
   issues: Issue[]; error?: ApiError
 }
 /** Замер скорости и задержки (mitt-speed.sh): Мбит/с по пути или ошибка; задержка — мс до TCP-подключения. */
@@ -344,6 +362,7 @@ export const manage = {
   notifyState: () => call<NotifyResponse>('/notify'),
   stats: () => call<StatsResponse>('/stats'),
   storage: () => call<StorageResponse>('/storage'),
+  health: () => call<HealthResponse>('/health'),
   modules: () => call<ModulesResponse>('/modules'),
   installModule: (name: string, target: string) => call<ManageResponse>('/modules/install', json({ name, target })),
   removeModule: (name: string) => call<ManageResponse>('/modules/remove', json({ name })),

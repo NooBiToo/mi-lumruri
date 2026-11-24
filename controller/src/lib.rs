@@ -10,6 +10,8 @@ pub mod devices;
 pub mod discover;
 pub mod dns;
 pub mod gate;
+pub mod health;
+pub mod history;
 pub mod manage;
 pub mod model;
 pub mod modules;

@@ -265,6 +265,8 @@ fn render_cmd(cfg: &str, secrets: &str, out: &str) -> Response {
                 // второй mi-tt-dns — для доменов туннеля; нужен, только когда туннель есть и в него идут домены
                 .and_then(|_| opt("dns-tunnel.args", tunnel_dns_args(&config, &r).map(|a| a.join("\n") + "\n"), false))
                 .and_then(|_| opt("schedule", Some(config.schedule.unwrap_or_default().file()), false))
+                // журнал трафика: файл и срок для службы (stats_sample); нет файла — журнал выключен
+                .and_then(|_| opt("history", config.history.as_ref().map(|h| format!("file={}\nmonths={}\n", mi_tt::history::file_for(&h.target), h.months)), false))
                 // откуда служба скачивает список рекламы; нет файла — блокировка выключена
                 .and_then(|_| opt("adblock.url", config.dns.as_ref().and_then(|d| d.adblock.as_ref()).filter(|a| a.enabled)
                     .and_then(|a| a.list_url()).map(|u| format!("{u}\n")), false))

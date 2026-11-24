@@ -4,11 +4,27 @@
 import { computed, onMounted, ref } from 'vue'
 import { manage, type StatsResponse } from '../api'
 import { dateTag, t } from '../i18n'
+import { shortVendor } from '../status'
 import Segmented from './Segmented.vue'
 
+type Range = 'day' | 'week' | 'month' | 'quarter' | 'year'
 const st = ref<StatsResponse | null>(null)
-const range = ref<'day' | 'week'>('day')
-const RANGES = computed(() => [{ value: 'day' as const, label: t('Сутки') }, { value: 'week' as const, label: t('Неделя') }])
+const range = ref<Range>('day')
+const hist = computed(() => st.value?.history ?? null)
+/** Длинные периоды — только с журналом и только те, что он покрывает. */
+const RANGES = computed(() => [
+  { value: 'day' as const, label: t('Сутки') }, { value: 'week' as const, label: t('Неделя') },
+  ...(hist.value ? [{ value: 'month' as const, label: t('Месяц') }] : []),
+  ...(hist.value && hist.value.months >= 3 ? [{ value: 'quarter' as const, label: t('3 месяца') }] : []),
+  ...(hist.value && hist.value.months >= 12 ? [{ value: 'year' as const, label: t('Год') }] : []),
+])
+const SPAN: Record<'month' | 'quarter' | 'year', number> = { month: 30, quarter: 90, year: 365 }
+const long = computed(() => range.value === 'month' || range.value === 'quarter' || range.value === 'year')
+const daysIn = computed(() => {
+  if (!long.value || !hist.value) return []
+  const from = Date.now() / 1000 - SPAN[range.value as 'month'] * 86400
+  return hist.value.days.filter((d) => d.t > from)
+})
 
 onMounted(async () => {
   const r = await manage.stats()
@@ -24,11 +40,22 @@ function bytes(n: number): string {
   return new Intl.NumberFormat(dateTag(), { style: 'unit', unit: units[i], unitDisplay: 'short', maximumFractionDigits: v < 10 && i > 0 ? 1 : 0 }).format(v)
 }
 
-const vpn = computed(() => st.value?.vpn[range.value] ?? 0)
-const wan = computed(() => st.value?.wan[range.value] ?? 0)
+const sumDays = (f: (d: { vpn: number; wan: number }) => number) => daysIn.value.reduce((a, d) => a + f(d), 0)
+const vpn = computed(() => (long.value ? sumDays((d) => d.vpn) : st.value?.vpn[range.value as 'day'] ?? 0))
+const wan = computed(() => (long.value ? sumDays((d) => d.wan) : st.value?.wan[range.value as 'day'] ?? 0))
+/** Имя устройства: как на «Устройствах»; без имени — производитель по MAC или сам адрес. */
+const nameOf = (d: { key: string; name?: string | null; vendor?: string | null }) => d.name || (d.vendor ? t('Устройство {vendor}', { vendor: shortVendor(d.vendor) }) : d.key)
 const share = computed(() => (wan.value > 0 ? Math.min(100, Math.round((vpn.value / wan.value) * 100)) : 0))
-const devices = computed(() => (st.value?.devices ?? []).filter((d) => d[range.value] > 0).sort((a, b) => b[range.value] - a[range.value]).slice(0, 8))
-const top = computed(() => Math.max(1, ...devices.value.map((d) => d[range.value])))
+const devices = computed(() => {
+  const r = range.value
+  const rows = long.value
+    ? (hist.value?.devices ?? []).map((d) => ({ key: d.key, label: nameOf(d), v: d[r as 'month'] }))
+    : (st.value?.devices ?? []).map((d) => ({ key: d.key, label: nameOf(d), v: d[r as 'day'] }))
+  return rows.filter((d) => d.v > 0).sort((a, b) => b.v - a.v).slice(0, 8)
+})
+const top = computed(() => Math.max(1, ...devices.value.map((d) => d.v)))
+const dayPeak = computed(() => Math.max(1, ...daysIn.value.map((d) => d.wan)))
+const dateOf = (s: number) => new Date(s * 1000).toLocaleDateString(dateTag(), { day: 'numeric', month: 'short' })
 const hours = computed(() => st.value?.hours ?? [])
 const peak = computed(() => Math.max(1, ...hours.value.map((h) => h.wan)))
 const empty = computed(() => !!st.value && !st.value.sampled)
@@ -59,15 +86,25 @@ const empty = computed(() => !!st.value && !st.value.sampled)
           <rect :x="i * 6" :y="40 - (Math.min(h.vpn, h.wan) / peak) * 40" width="5" :height="(Math.min(h.vpn, h.wan) / peak) * 40" class="stats__bar stats__bar--vpn" />
         </g>
       </svg>
+      <svg v-if="long && daysIn.length > 1" class="stats__bars" :viewBox="`0 0 ${daysIn.length * 6} 40`" preserveAspectRatio="none" role="img"
+        :aria-label="t('Трафик по дням с {a} по {b}', { a: dateOf(daysIn[0]!.t), b: dateOf(daysIn[daysIn.length - 1]!.t) })">
+        <g v-for="(d, i) in daysIn" :key="d.t">
+          <title>{{ dateOf(d.t) }}: {{ bytes(d.wan) }}, {{ t('через VPN') }} {{ bytes(d.vpn) }}</title>
+          <rect :x="i * 6" :y="40 - (d.wan / dayPeak) * 40" width="5" :height="(d.wan / dayPeak) * 40" class="stats__bar" />
+          <rect :x="i * 6" :y="40 - (Math.min(d.vpn, d.wan) / dayPeak) * 40" width="5" :height="(Math.min(d.vpn, d.wan) / dayPeak) * 40" class="stats__bar stats__bar--vpn" />
+        </g>
+      </svg>
+      <p v-if="long && daysIn.length" class="meta">{{ t('Журнал с {d}', { d: dateOf(daysIn[0]!.t) }) }}</p>
       <ul v-if="devices.length" class="stats__devices">
         <li v-for="d in devices" :key="d.key" class="stats__device">
-          <span class="stats__name">{{ d.name || d.key }}</span>
-          <span class="stats__track" aria-hidden="true"><span class="stats__fill" :style="{ width: `${(d[range] / top) * 100}%` }" /></span>
-          <span class="meta stats__val">{{ bytes(d[range]) }}</span>
+          <span class="stats__name" :title="d.key">{{ d.label }}</span>
+          <span class="stats__track" aria-hidden="true"><span class="stats__fill" :style="{ width: `${(d.v / top) * 100}%` }" /></span>
+          <span class="meta stats__val">{{ bytes(d.v) }}</span>
         </li>
       </ul>
       <p v-else-if="!st.per_device" class="hint">{{ t('По устройствам не видно: штатный учёт трафика прошивки (trafficd) не ответил') }}</p>
       <p class="hint">{{ t('«Весь интернет» — порт WAN роутера, туда входит и зашифрованный трафик VPN. «Через VPN» — трафик внутри туннеля') }}</p>
+      <p v-if="!hist" class="hint">{{ t('Динамику за месяцы покажет журнал трафика: включите его на странице «Модули».') }}</p>
     </template>
   </div>
 </template>

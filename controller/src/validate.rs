@@ -381,6 +381,14 @@ pub fn validate_config(c: &Config) -> Vec<Issue> {
             issues.push(Issue::new(format!("profiles[{i}].tunnel"), "duplicate_tunnel", format!("номер туннеля {} уже у профиля profiles[{j}]", p.tunnel)));
         }
     }
+    if let Some(h) = &c.history {
+        if !(1..=24).contains(&h.months) {
+            issues.push(Issue::new("history.months", "bad_months", "срок журнала — от 1 до 24 месяцев"));
+        }
+        if !h.target.starts_with('/') || h.target.len() > 256 || h.target.contains("..") || h.target.chars().any(|c| c.is_control() || c == '"' || c == '\\') {
+            issues.push(Issue::new("history.target", "bad_target", "накопитель журнала — абсолютный путь"));
+        }
+    }
     if let Some(id) = c.dns.as_ref().and_then(|d| d.tunnel_profile.as_deref()) {
         if !c.profiles.iter().any(|p| p.id == id) {
             issues.push(Issue::new("dns.tunnel_profile", "unknown_profile", format!("нет профиля «{id}»")));

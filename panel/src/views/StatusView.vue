@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import { ArrowRight } from 'lucide-vue-next'
-import { api, type ZapretTestState } from '../api'
+import { api, manage, type SpeedResponse, type ZapretTestState } from '../api'
+import { bitrate, rates, useHealth } from '../health'
+import HealthCard from '../components/HealthCard.vue'
+import SpeedCard from '../components/SpeedCard.vue'
 import { catalog, config, leases, lists, loadLeases, loadLists, loadStatus, profile, service, serverReady, simple, simpleState, tunnel } from '../store'
 import { AUTO, deviceRows, plural, when, zapretIdle } from '../status'
 import { dateTag, t } from '../i18n'
@@ -35,6 +38,33 @@ const zapretWay = computed(() => (zapretAuto.value ? t('способ автом�
 const zapretUsed = computed(() => !!simple.value && !zapretIdle(simple.value))
 /** nfqws2 запущен по данным службы (до первого статуса считаем, что да). */
 const nfqwsUp = computed(() => ((service.value?.service as { engines?: Record<string, boolean> } | undefined)?.engines?.nfqws2) !== false)
+// ---- скорость маршрутов: канал — последний замер (через VPN / напрямую), сейчас — по счётчикам TUN и WAN ----
+const speedSt = ref<SpeedResponse | null>(null)
+let speedTimer: number | undefined
+async function loadSpeed() {
+  clearTimeout(speedTimer)
+  try { const r = await manage.speed(); if (r.status === 200) speedSt.value = r.body } catch { /* панель недоступна */ }
+  if (speedSt.value?.running || speedSt.value?.speed?.state === 'running') speedTimer = window.setTimeout(() => void loadSpeed(), 2000)
+}
+async function measure() {
+  const r = await manage.startSpeed()
+  if (r.status === 202) speedTimer = window.setTimeout(() => void loadSpeed(), 2000)
+}
+const stopHealth = useHealth()
+onBeforeUnmount(() => { stopHealth(); clearTimeout(speedTimer) })
+const tag = dateTag()
+const mbps = (p: unknown) => (p && typeof p === 'object' && 'mbps' in p ? bitrate((p as { mbps: number }).mbps * 1e6, tag) : null)
+function speedOf(kind: 'vpn' | 'zapret' | 'direct') {
+  const s = speedSt.value?.speed
+  const running = !!speedSt.value?.running || s?.state === 'running'
+  const cap = running ? t('замеряю…') : s ? mbps(kind === 'vpn' ? s.tunnel : s.direct) : null
+  const r = rates.value
+  const now = kind === 'vpn'
+    ? (r.vpn ? t('сейчас ↓{d} ↑{u}', { d: bitrate(r.vpn.rx, tag), u: bitrate(r.vpn.tx, tag) }) : null)
+    : (r.wan ? t('сейчас ↓{d}', { d: bitrate(Math.max(0, r.wan.rx - (r.vpn?.rx ?? 0)), tag) }) : null)
+  const title = s?.at ? t('Канал — замер {d} с роутера; «сейчас» — текущий трафик', { d: when(s.at) }) : t('Замера скорости ещё не было')
+  return { cap: cap ?? (running ? t('замеряю…') : null), now, title }
+}
 const cut = (ids: { id: string; name: string }[], domains: string[]) => {
   const d = domains.slice(0, MAX_DOMAINS)
   return { items: ids, domains: d, more: domains.length - d.length }
@@ -45,7 +75,7 @@ const branches = computed<TopoBranch[]>(() => {
   const out: TopoBranch[] = []
   const vpnTone: Tone = !s.enabled ? 'idle' : tunnel.value.tone === 'ok' ? 'vpn' : (tunnel.value.tone as Tone)
   out.push({
-    key: 'vpn', kind: 'vpn', tone: vpnTone, live: s.enabled && vpnTone === 'vpn',
+    key: 'vpn', kind: 'vpn', tone: vpnTone, live: s.enabled && vpnTone === 'vpn', speed: s.enabled ? speedOf('vpn') : undefined,
     name: s.mode === 'all' ? t('Весь интернет через VPN') : t('Через VPN'),
     meta: s.enabled ? (host.value ?? t('сервер не настроен')) : t('VPN выключен'),
     ...(s.mode === 'all' ? cut([], []) : cut(services.value, s.customDomains)),
@@ -53,13 +83,13 @@ const branches = computed<TopoBranch[]>(() => {
       : !services.value.length && !s.customDomains.length ? t('Сайты не выбраны') : undefined,
   })
   if (zapretServices.value.length || s.zapretDomains.length) {
-    out.push({ key: 'zapret', kind: 'zapret', tone: nfqwsUp.value ? 'zapret' : 'bad', live: nfqwsUp.value,
+    out.push({ key: 'zapret', kind: 'zapret', tone: nfqwsUp.value ? 'zapret' : 'bad', live: nfqwsUp.value, speed: { ...speedOf('direct'), now: null },
       name: t('С обходом блокировок'), meta: zapretWay.value, ...cut(zapretServices.value, s.zapretDomains) })
   }
   if (s.mode === 'selected') {
     // при выключенном VPN остальные сайты идут напрямую без обработки (default_action — direct)
     const z = s.enabled && s.rest === 'zapret' && zapretUsed.value
-    out.push({ key: 'rest', kind: z ? 'zapret' : 'direct', tone: z ? (nfqwsUp.value ? 'zapret' : 'bad') : 'ok', live: z ? nfqwsUp.value : true,
+    out.push({ key: 'rest', kind: z ? 'zapret' : 'direct', tone: z ? (nfqwsUp.value ? 'zapret' : 'bad') : 'ok', live: z ? nfqwsUp.value : true, speed: speedOf('direct'),
       name: t('Остальные сайты'), meta: z ? t('напрямую с обходом, {way}', { way: zapretWay.value }) : t('напрямую'), ...cut([], []) })
   } else if (s.exceptions.length) {
     out.push({ key: 'except', kind: 'direct', tone: 'ok', live: true, name: t('Исключения'),
@@ -90,6 +120,7 @@ onMounted(async () => {
   void loadStatus()
   void loadLists()
   void loadLeases()
+  void loadSpeed()
   const r = await api.zapretTest()
   if (r.body.ok && r.body.test) test.value = r.body.test
 })
@@ -128,13 +159,15 @@ onMounted(async () => {
       {{ t('Настройки изменены вручную, поэтому здесь их не показать. Подробнее — на экране «Сайты».') }}
     </Message>
 
+    <div class="ov-grid">
+    <div class="ov-main">
     <div v-if="simple" class="card routes">
       <div class="card__head">
         <h2 id="routes-title" class="card__title">{{ t('Маршруты') }}</h2>
         <button type="button" class="link-btn" @click="emit('navigate', 'sites')">{{ t('Изменить') }}</button>
       </div>
 
-      <TopoMap :branches="branches" :devices="devTopo" :hub="hubTopo" @devices="emit('navigate', 'devices')" />
+      <TopoMap :branches="branches" :devices="devTopo" :hub="hubTopo" @devices="emit('navigate', 'devices')" @measure="measure" />
 
       <div class="routes__foot">
         <span :class="['meta', { 'warn-text': listsStatus && !listsStatus.ok }]">
@@ -146,5 +179,11 @@ onMounted(async () => {
     </div>
 
     <StatsCard v-if="serverReady" />
+    </div>
+    <aside class="ov-side" :aria-label="t('Состояние роутера')">
+      <HealthCard />
+      <SpeedCard v-if="serverReady" />
+    </aside>
+    </div>
   </section>
 </template>

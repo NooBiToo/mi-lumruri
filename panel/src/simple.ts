@@ -249,6 +249,7 @@ export function toConfig(base: Config, s: Simple, lan: Lan, catalog: ListCatalog
   if (base.ipv6_via_vpn) out.ipv6_via_vpn = true
   if (base.device_names && Object.keys(base.device_names).length) out.device_names = base.device_names
   if (base.panel_origins?.length) out.panel_origins = base.panel_origins
+  if (base.history) out.history = base.history
   return out
 }
 

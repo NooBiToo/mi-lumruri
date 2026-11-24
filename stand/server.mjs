@@ -64,6 +64,9 @@ function runCgi(opts, req, body) {
     if (opts.leases) env.MI_TT_LEASES = opts.leases
     if (opts.lists) env.MI_TT_LISTS_DIR = opts.lists
     if (opts.uciNetwork) env.MI_TT_UCI_NETWORK = opts.uciNetwork
+    // состояние роутера (GET /health): подставные /proc и /sys стенда
+    if (opts.proc) env.MI_TT_PROC = opts.proc
+    if (opts.sys) env.MI_TT_SYS = opts.sys
     for (const h of ['origin', 'host', 'sec-fetch-site', 'cookie', 'x-mitt-csrf']) {
       if (req.headers[h]) env['HTTP_' + h.toUpperCase().replace(/-/g, '_')] = String(req.headers[h])
     }

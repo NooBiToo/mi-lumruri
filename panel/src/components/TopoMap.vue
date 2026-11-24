@@ -20,6 +20,8 @@ export interface TopoBranch {
   domains: string[]
   more: number
   note?: string
+  /** Скорость маршрута: канал по последнему замеру (null — замера нет) и сейчас; подсказка — откуда цифры. */
+  speed?: { cap: string | null; now: string | null; title: string }
 }
 export interface TopoDevice { mac: string; initials: string; hue: number; name: string }
 
@@ -28,7 +30,7 @@ const props = defineProps<{
   devices: { title: string; meta: string; avatars: TopoDevice[]; extra: number }
   hub: { tone: Tone; meta: string }
 }>()
-const emit = defineEmits<{ devices: [] }>()
+const emit = defineEmits<{ devices: []; measure: [] }>()
 
 const root = ref<HTMLElement | null>(null)
 const devEl = ref<HTMLElement | null>(null)
@@ -104,6 +106,11 @@ watch(() => props.branches, () => void nextTick(layout), { deep: true })
           <span :class="['led', `led--${b.tone}`]" aria-hidden="true" />
           <span class="tdst__name">{{ b.name }}</span>
           <span class="meta tdst__meta">{{ b.meta }}</span>
+          <span v-if="b.speed" class="tspeed" :title="b.speed.title">
+            <span v-if="b.speed.cap" :class="['tspeed__cap', `tspeed__cap--${b.kind}`]">{{ b.speed.cap }}</span>
+            <button v-else type="button" class="link-btn tspeed__btn" @click="emit('measure')">{{ t('Замерить скорость') }}</button>
+            <span v-if="b.speed.now" class="tspeed__now">{{ b.speed.now }}</span>
+          </span>
         </div>
         <p v-if="b.note" class="tdst__note">{{ b.note }}</p>
         <ul v-if="b.items.length || b.domains.length" class="tdst__items">

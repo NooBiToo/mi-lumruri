@@ -407,6 +407,16 @@ stats_sample() {
   echo "$now" >"$STATE/stats.last"
   [ -f "$STATE/stats.json" ] || { [ -f "$ETC/stats.json" ] && cp -f "$ETC/stats.json" "$STATE/stats.json"; }
   w="$(wan_dev)"
+  # журнал трафика по дням (рендер: history — файл и срок); флешки нет — показание идёт только в недельную статистику
+  local hf="" hm="" off=""
+  if [ -f "$RENDER/history" ]; then
+    hf="$(sed -n 's/^file=//p' "$RENDER/history")"; hm="$(sed -n 's/^months=//p' "$RENDER/history")"
+    # смещение местного времени: date +%z → +0300 → 10800
+    off="$(date +%z 2>/dev/null | awk '{ s = substr($0, 1, 1); h = substr($0, 2, 2) + 0; m = substr($0, 4, 2) + 0; v = h * 3600 + m * 60; if (s == "-") v = -v; print v }')"
+    # флешка должна быть смонтирована: пустая точка монтирования в RAM — не журнал
+    case "$hf" in /mnt/*|/extdisks/*) grep -q " $(echo "$hf" | cut -d/ -f1-3) " "${MITT_PROC:-/proc}/mounts" 2>/dev/null || hf="";; esac
+  fi
+  export MI_TT_HISTORY="${hf:+$R$hf}" MI_TT_HISTORY_MONTHS="$hm" MI_TT_UTC_OFFSET="${off:-0}"
   ${MITT_UBUS:-ubus} call trafficd ip >"$STATE/trafficd.json" 2>/dev/null || rm -f "$STATE/trafficd.json"
   # подключение устройств (Wi‑Fi, сигнал) для экрана «Устройства»
   ${MITT_UBUS:-ubus} call trafficd hw >"$STATE/trafficd-hw.json.t" 2>/dev/null && mv -f "$STATE/trafficd-hw.json.t" "$STATE/trafficd-hw.json"; rm -f "$STATE/trafficd-hw.json.t"

@@ -30,7 +30,7 @@ printf '#!/bin/sh\nexec %s %s "$@"\n' "$Q" "$CTL" >"$L/bin/mi-tt-ctl"; chmod +x 
 printf '1800000000 aa:bb:cc:dd:ee:01 192.168.31.10 tv *\n1800000000 aa:bb:cc:dd:ee:02 192.168.31.11 phone *\n' >"$W/leases"
 cnt() { echo "$2" >"$W/sys/class/net/$1/statistics/rx_bytes"; echo "$3" >"$W/sys/class/net/$1/statistics/tx_bytes"; }
 tdj() { printf '{"192.168.31.10":{"hw":"AA:BB:CC:DD:EE:01","rx_bytes":%s,"tx_bytes":0},"192.168.31.11":{"rx_bytes":%s,"tx_bytes":0},"192.168.31.99":{"rx_bytes":%s,"tx_bytes":0}}' "$1" "$2" "$3" >"$W/trafficd.json"; }
-sample() { timeout 120 env -i PATH="$SB" MITT_ROOT="$R" MITT_QUIET=1 MITT_SYS="$W/sys" MITT_STATS_EVERY=0 MITT_LEASES="$W/leases" \
+sample() { timeout 120 env -i PATH="$SB" MITT_ROOT="$R" MITT_QUIET=1 MITT_SYS="$W/sys" MITT_STATS_EVERY=0 MITT_LEASES="$W/leases" MITT_PROC="${MITT_PROC:-/proc}" \
   "$Q" -L "$F" "$F/bin/busybox" ash -c ". \"$L/scripts/mitt-lib.sh\"; stats_sample" >>"$W/out" 2>&1; }
 js() { python3 -I -c 'import json,sys
 s=json.load(open(sys.argv[1])); h=s["hours"]; print(eval(sys.argv[2]))' "$L/run/stats.json" "$1" 2>&1; }
@@ -55,5 +55,15 @@ chk "c: wan +1000, vpn без изменений" 'h[-1]["vpn"] == 1700 and h[-1
 echo "(г) после «перезагрузки» (RAM пуста) статистика берётся из копии в /data"
 rm -f "$L/run/stats.json" "$L/run/stats.last"; cnt eth4 17000 1000; sample
 chk "d: часы сохранились, wan +1000" 'h[-1]["wan"] == 8000'
+
+echo "(д) журнал трафика по дням на флешке: приращения — в день; флешку вынули — журнал не пишется"
+mkdir -p "$L/render" "$R/mnt/usb-lab" "$W/proc"; printf 'file=/mnt/usb-lab/mi-lumruri-history/traffic-days.json\nmonths=3\n' >"$L/render/history"
+echo "/dev/sda1 /mnt/usb-lab vfat rw 0 0" >"$W/proc/mounts"
+HJ="$R/mnt/usb-lab/mi-lumruri-history/traffic-days.json"
+cnt eth4 18000 1000; tdj 500 90 7; MITT_PROC="$W/proc" sample
+[ "$(python3 -I -c 'import json,sys;j=json.load(open(sys.argv[1]));print(len(j["days"])==1 and j["days"][0]["wan"]==1000)' "$HJ" 2>&1)" = True ] && ok "e: день с wan +1000 в журнале на флешке" || bad "e: $(cat "$HJ" 2>&1); $(tail -3 "$W/out")"
+: >"$W/proc/mounts"; cnt eth4 19000 1000; MITT_PROC="$W/proc" sample
+[ "$(python3 -I -c 'import json,sys;j=json.load(open(sys.argv[1]));print(j["days"][0]["wan"]==1000)' "$HJ" 2>&1)" = True ] && ok "e: флешки нет — журнал не тронут" || bad "e: $(cat "$HJ")"
+chk "e: недельная статистика идёт дальше" 'h[-1]["wan"] == 10000'
 
 [ $FAIL -eq 0 ] && echo "ИТОГ: ПРОЙДЕНО" || { echo "ИТОГ: ЕСТЬ ОШИБКИ"; exit 1; }

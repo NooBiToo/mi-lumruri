@@ -43,6 +43,9 @@ pub struct Config {
     /// страницы с них могут записывать настройки. Адрес по IP роутера и свои DNS-записи на роутер — без этого списка.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub panel_origins: Vec<String>,
+    /// Журнал трафика по дням (срок и накопитель); без него — только сутки и неделя.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history: Option<HistoryConfig>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
@@ -125,6 +128,14 @@ pub struct DnsConfig {
     /// профиль с наименьшим номером туннеля.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tunnel_profile: Option<String>,
+}
+
+/// Журнал трафика: срок 1–24 месяца, накопитель — путь из GET /storage (флешка или внутренняя память).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HistoryConfig {
+    pub months: u8,
+    pub target: String,
 }
 
 fn is_zero_u8(v: &u8) -> bool {

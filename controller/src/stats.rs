@@ -56,7 +56,8 @@ fn delta(cur: u64, prev: Option<u64>) -> u64 {
 }
 
 /// Новое показание: приращения с прошлого — в час `now`. Первое показание только запоминается.
-pub fn sample(st: &mut Stats, now: u64, vpn: Option<u64>, wan: Option<u64>, dev: BTreeMap<String, u64>) {
+pub fn sample(st: &mut Stats, now: u64, vpn: Option<u64>, wan: Option<u64>, dev: BTreeMap<String, u64>) -> Hour {
+    let mut out = Hour { t: now / 3600 * 3600, ..Default::default() };
     let first = st.last.at == 0;
     // показание старше прошлого (часы роутера ушли назад) или пауза больше суток — без приращений
     let stale = !first && (now < st.last.at || now - st.last.at > 86_400);
@@ -67,20 +68,25 @@ pub fn sample(st: &mut Stats, now: u64, vpn: Option<u64>, wan: Option<u64>, dev:
         }
         let h = st.hours.last_mut().expect("час добавлен выше");
         if let Some(v) = vpn {
-            h.vpn += delta(v, st.last.vpn);
+            out.vpn = delta(v, st.last.vpn);
+            h.vpn += out.vpn;
         }
         if let Some(w) = wan {
-            h.wan += delta(w, st.last.wan);
+            out.wan = delta(w, st.last.wan);
+            h.wan += out.wan;
         }
         for (k, v) in &dev {
             if h.dev.len() >= MAX_DEVICES && !h.dev.contains_key(k) {
                 continue;
             }
-            *h.dev.entry(k.clone()).or_default() += delta(*v, st.last.dev.get(k).copied());
+            let d = delta(*v, st.last.dev.get(k).copied());
+            *h.dev.entry(k.clone()).or_default() += d;
+            out.dev.insert(k.clone(), d);
         }
     }
     st.hours.retain(|h| h.t + KEEP_SECS > now);
     st.last = Raw { at: now, vpn, wan, dev };
+    out
 }
 
 /// Байты по устройствам из ответа trafficd: объекты с rx_bytes и tx_bytes; ключ — поле ip или ключ объекта (IPv4).
@@ -145,9 +151,22 @@ pub fn sample_cmd(path: &str, vpn: &str, wan: &str, trafficd: Option<&str>, now:
             *m.entry(k).or_default() += b;
             m
         });
-    sample(&mut st, now, n(vpn), n(wan), dev);
+    let d = sample(&mut st, now, n(vpn), n(wan), dev);
     let b = serde_json::to_vec(&st).map_err(|e| e.to_string())?;
-    crate::store::write_atomic(p, &b)
+    crate::store::write_atomic(p, &b)?;
+    // журнал трафика по дням (служба: MI_TT_HISTORY — файл, MI_TT_HISTORY_MONTHS, MI_TT_UTC_OFFSET — секунды)
+    if let Some(hf) = std::env::var("MI_TT_HISTORY").ok().filter(|s| !s.is_empty()) {
+        let months = std::env::var("MI_TT_HISTORY_MONTHS").ok().and_then(|s| s.parse::<u8>().ok()).unwrap_or(1);
+        let offset = std::env::var("MI_TT_UTC_OFFSET").ok().and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+        let hp = std::path::Path::new(&hf);
+        let mut j = crate::history::load(hp);
+        crate::history::add(&mut j, now, offset, &d, months);
+        if let Some(dir) = hp.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
+        crate::store::write_atomic(hp, &serde_json::to_vec(&j).map_err(|e| e.to_string())?)?;
+    }
+    Ok(())
 }
 
 fn sum(h: &[&Hour], f: impl Fn(&Hour) -> u64) -> u64 {
@@ -161,7 +180,25 @@ pub fn get(config_path: &str) -> Response {
     let day: Vec<&Hour> = st.hours.iter().filter(|h| h.t + 86_400 > now).collect();
     let week: Vec<&Hour> = st.hours.iter().collect();
     let cfg = read_config(config_path).ok();
-    let names: BTreeMap<String, String> = cfg.iter().flat_map(|c| c.devices.iter()).filter_map(|d| normalize_mac(&d.mac).ok().map(|m| (m, d.name.clone()))).collect();
+    // имя устройства — как на экране «Устройства»: ваше переименование, устройство из настроек, имя, найденное в сети
+    // (mDNS/SSDP), затем имя при подключении (DHCP) и производитель по MAC
+    let mut names: BTreeMap<String, String> = BTreeMap::new();
+    let extra = crate::devices::Extra::load();
+    for (mac, f) in &extra.names {
+        if !f.name.trim().is_empty() {
+            names.insert(mac.clone(), f.name.clone());
+        }
+    }
+    for d in cfg.iter().flat_map(|c| c.devices.iter()) {
+        if let Ok(m) = normalize_mac(&d.mac) {
+            names.insert(m, d.name.clone());
+        }
+    }
+    for (mac, n) in cfg.iter().flat_map(|c| c.device_names.iter()) {
+        if let Ok(m) = normalize_mac(mac) {
+            names.insert(m, n.clone());
+        }
+    }
     let leases = String::from_utf8_lossy(&read_limited(&leases_path().to_string_lossy(), 1024 * 1024).unwrap_or_default()).into_owned();
     let hosts: BTreeMap<String, String> = leases
         .lines()
@@ -180,10 +217,22 @@ pub fn get(config_path: &str) -> Response {
         .map(|k| {
             let d = sum(&day, |h| h.dev.get(k).copied().unwrap_or(0));
             let w = sum(&week, |h| h.dev.get(k).copied().unwrap_or(0));
-            json!({ "key": k, "name": names.get(k).or(hosts.get(k)), "known": names.contains_key(k), "day": d, "week": w })
+            let vendor = extra.oui.get(k.get(0..8).unwrap_or("")).map(|(v, _)| v.clone()).filter(|v| !v.is_empty());
+            json!({ "key": k, "name": names.get(k).or(hosts.get(k)), "vendor": vendor, "known": names.contains_key(k), "day": d, "week": w })
         })
         .collect();
     devices.sort_by(|a, b| b["week"].as_u64().cmp(&a["week"].as_u64()));
+    // журнал по дням, если включён: итоги по дням и по устройствам за 30, 90 и 365 дней
+    let history = cfg.as_ref().and_then(|c| c.history.as_ref()).map(|h| {
+        let j = crate::history::load(std::path::Path::new(&crate::history::file_for(&h.target)));
+        let (days, dev) = crate::history::view(&j, now);
+        let mut devs: Vec<Value> = dev.iter().map(|(k, v)| {
+            let vendor = extra.oui.get(k.get(0..8).unwrap_or("")).map(|(x, _)| x.clone()).filter(|x| !x.is_empty());
+            json!({ "key": k, "name": names.get(k).or(hosts.get(k)), "vendor": vendor, "month": v[0], "quarter": v[1], "year": v[2] })
+        }).collect();
+        devs.sort_by(|a, b| b["year"].as_u64().cmp(&a["year"].as_u64()));
+        json!({ "months": h.months, "target": h.target, "days": days.iter().map(|(t, v, w)| json!({ "t": t, "vpn": v, "wan": w })).collect::<Vec<_>>(), "devices": devs })
+    });
     Response {
         status: 200,
         body: json!({
@@ -192,7 +241,7 @@ pub fn get(config_path: &str) -> Response {
             "vpn": { "day": sum(&day, |h| h.vpn), "week": sum(&week, |h| h.vpn) },
             "wan": { "day": sum(&day, |h| h.wan), "week": sum(&week, |h| h.wan) },
             "hours": day.iter().map(|h| json!({ "t": h.t, "vpn": h.vpn, "wan": h.wan })).collect::<Vec<_>>(),
-            "devices": devices, "issues": [],
+            "devices": devices, "history": history, "issues": [],
         }),
     }
 }

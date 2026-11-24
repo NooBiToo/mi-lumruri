@@ -5,6 +5,7 @@ import Message from 'primevue/message'
 import { HardDrive, Package, Usb } from 'lucide-vue-next'
 import { manage, type ModuleInfo, type ModulesResponse, type StorageDrive, type StorageInfo } from '../api'
 import { notify } from '../store'
+import HistoryCard from '../components/HistoryCard.vue'
 import { t } from '../i18n'
 
 const info = ref<StorageInfo | null>(null)
@@ -131,6 +132,8 @@ const stateText = (m: ModuleInfo) => {
         <Button :label="t('Установить')" class="self-start" :disabled="busy || !chosen(m)" :loading="opFor(m)?.state === 'running'" @click="install(m, chosen(m))" />
       </template>
     </div>
+
+    <HistoryCard :storage="info" />
 
     <div class="card">
       <div>
