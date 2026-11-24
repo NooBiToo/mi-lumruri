@@ -25,7 +25,7 @@ use mi_tt::api::{MAX_CONFIG_BYTES, parse_json, read_limited};
 use mi_tt::caps::{self, Caps, Item, check_kernel, help_has, parse_kconfig};
 use mi_tt::model::Config;
 use mi_tt::plan::{
-    Act, Entry, Live, PolicySpec, SetKind, TABLE, build_plan, ipt_tables, needs_physdev, parse_ipsets, parse_ipt, parse_link, parse_routes, parse_rules, parse_v6_prefixes, reconcile,
+    Act, Entry, Live, MAX_TUN, PolicySpec, SetKind, TABLE, build_plan, choose_field, ipt_tables, needs_physdev, parse_ipsets, parse_ipt, parse_link, parse_routes, parse_rules, parse_v6_prefixes, reconcile,
 };
 use mi_tt::render::{self, Secrets, TUN_DEVICE};
 use mi_tt::store::{lock, revision, write_atomic};
@@ -62,6 +62,12 @@ struct State {
     pending: BTreeSet<Entry>,
     #[serde(default)]
     policy: Option<PolicySpec>,
+    /// Поле номера туннеля в метке (uu | wan), если туннелей больше одного.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mark_field: Option<String>,
+    /// Оба поля заняты прошивкой: работает только туннель с наименьшим номером.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    degraded: bool,
     updated_unix: u64,
     last_error: Option<String>,
 }
@@ -157,8 +163,8 @@ fn help(prog: &str, args: &[&str]) -> String {
         .unwrap_or_default()
 }
 
-fn table_routes(v6: bool) -> Result<String, String> {
-    let t = TABLE.to_string();
+fn table_routes(v6: bool, table: u32) -> Result<String, String> {
+    let t = table.to_string();
     let args: Vec<&str> = if v6 { vec!["-6", "route", "show", "table", &t] } else { vec!["route", "show", "table", &t] };
     match run_s("ip", &args) {
         Err(e) if table_missing(&e) => Ok(String::new()),
@@ -173,13 +179,24 @@ fn table_missing(err: &str) -> bool {
 }
 
 fn read_live(warnings: &mut Vec<String>) -> Result<Live, String> {
-    let mut l = Live { rules: parse_rules(&run_s("ip", &["rule", "show"])?, false), routes: parse_routes(&table_routes(false)?, false), ..Default::default() };
-    match (run_s("ip", &["-6", "rule", "show"]), table_routes(true)) {
-        (Ok(r), Ok(rt)) => {
-            l.rules.extend(parse_rules(&r, true));
-            l.routes.extend(parse_routes(&rt, true));
+    let mut l = Live { rules: parse_rules(&run_s("ip", &["rule", "show"])?, false), ..Default::default() };
+    let tables = TABLE..=TABLE + u32::from(MAX_TUN);
+    for t in tables.clone() {
+        l.routes.extend(parse_routes(&table_routes(false, t)?, false, t));
+    }
+    let v6 = run_s("ip", &["-6", "rule", "show"]).and_then(|r| {
+        let mut rt = Vec::new();
+        for t in tables {
+            rt.extend(parse_routes(&table_routes(true, t)?, true, t));
         }
-        (Err(e), _) | (_, Err(e)) => warnings.push(format!("IPv6 в ядре недоступен или не читается: {e}")),
+        Ok((r, rt))
+    });
+    match v6 {
+        Ok((r, rt)) => {
+            l.rules.extend(parse_rules(&r, true));
+            l.routes.extend(rt);
+        }
+        Err(e) => warnings.push(format!("IPv6 в ядре недоступен или не читается: {e}")),
     }
     for (v6, table) in ipt_tables() {
         let prog = if v6 { "ip6tables" } else { "iptables" };
@@ -456,9 +473,20 @@ fn change(a: &Args, target: Option<Desired>) -> ExitCode {
     };
     let owned: BTreeSet<Entry> = st.owned.union(&st.pending).cloned().collect();
     let reverting = target.is_none();
+    let live = match read_live(&mut warnings) {
+        Ok(l) => l,
+        Err(m) => return fail(2, "read_failed", m),
+    };
+    let (mut field, mut degraded) = (None, false);
     let (set, spec, rev) = match target {
-        Some(d) => {
+        Some(mut d) => {
             warnings.extend(d.warnings.clone());
+            let needs = d.spec.needs_field();
+            let (sp, f, why) = choose_field(&d.spec, &live);
+            warnings.extend(why);
+            d.spec = sp;
+            field = f.map(|x| x.name().to_string());
+            degraded = needs && f.is_none();
             let b = match build(a, &d) {
                 Ok(b) => b,
                 Err(code) => return code,
@@ -467,10 +495,6 @@ fn change(a: &Args, target: Option<Desired>) -> ExitCode {
             (b.set, Some(d.spec), Some(d.config_revision))
         }
         None => (BTreeSet::new(), st.policy.clone(), st.config_revision.clone()),
-    };
-    let live = match read_live(&mut warnings) {
-        Ok(l) => l,
-        Err(m) => return fail(2, "read_failed", m),
     };
     let d = reconcile(&set, &owned, &live);
     if reverting {
@@ -530,6 +554,8 @@ fn change(a: &Args, target: Option<Desired>) -> ExitCode {
     st.config_revision = rev;
     st.plan_sha256 = Some(revision(&serde_json::to_vec(&set).unwrap_or_default()));
     st.policy = if reverting { None } else { spec };
+    st.mark_field = field;
+    st.degraded = degraded;
     st.last_error = set_errors.first().cloned();
     if let Err(m) = save_state(&a.state_dir, &mut st) {
         return fail(2, "state_write", m);
@@ -543,7 +569,7 @@ fn change(a: &Args, target: Option<Desired>) -> ExitCode {
     out(
         if ok { 0 } else { 1 },
         json!({ "ok": ok, "noop": steps.is_empty(), "phase": st.phase,
-            "config_revision": st.config_revision, "plan_sha256": st.plan_sha256, "steps": done, "verified": verified.unwrap_or(false),
+            "config_revision": st.config_revision, "plan_sha256": st.plan_sha256, "mark_field": st.mark_field, "degraded": st.degraded, "steps": done, "verified": verified.unwrap_or(false),
             "set_errors": set_errors, "tun_present": tun_present(), "owned": st.owned.iter().map(Entry::label).collect::<Vec<_>>(), "warnings": warnings }),
     )
 }
@@ -579,7 +605,7 @@ fn status(a: &Args) -> ExitCode {
     out(
         if consistent { 0 } else { 1 },
         json!({ "ok": consistent, "phase": st.phase, "config_revision": st.config_revision, "plan_sha256": st.plan_sha256,
-            "protection": protection, "tun_present": tun,
+            "protection": protection, "tun_present": tun, "mark_field": st.mark_field, "degraded": st.degraded,
             "owned": st.owned.iter().map(Entry::label).collect::<Vec<_>>(),
             "missing": d.missing.iter().map(Entry::label).collect::<Vec<_>>(),
             "pending": st.pending.iter().map(Entry::label).collect::<Vec<_>>(),
@@ -595,13 +621,17 @@ fn plan(a: &Args) -> ExitCode {
     let mut warnings = dsr.warnings.clone();
     let st = load_state(&a.state_dir, &mut warnings).unwrap_or_default();
     let owned: BTreeSet<Entry> = st.owned.union(&st.pending).cloned().collect();
-    let b = match build(a, &dsr) {
-        Ok(b) => b,
-        Err(code) => return code,
-    };
     let live = match read_live(&mut warnings) {
         Ok(l) => l,
         Err(m) => return fail(2, "read_failed", m),
+    };
+    let mut dsr = dsr;
+    let (sp, _, why) = choose_field(&dsr.spec, &live);
+    warnings.extend(why);
+    dsr.spec = sp;
+    let b = match build(a, &dsr) {
+        Ok(b) => b,
+        Err(code) => return code,
     };
     let d = reconcile(&b.set, &owned, &live);
     out(

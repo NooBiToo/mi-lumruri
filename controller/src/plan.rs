@@ -34,6 +34,40 @@ pub const METRIC_GUARD: u32 = 4096;
 /// Биты skb mark стока заняты (по miqosd_init.sh: QoS 0xffff8000, mwan3 0x3f00, родконтроль 0xf, uu 0xf0) —
 /// свободен только 0x4000: им помечается трафик «через TrustTunnel». Коллизии проверяются при каждом применении.
 pub const NF_MARK: u32 = 0x4000;
+/// Туннели 0..=MAX_TUN: таблица `TABLE + n`, интерфейс `mitt<n>`, правило `PRIO_MARK + n`.
+pub const MAX_TUN: u8 = 15;
+
+/// Поле номера туннеля рядом с битом `NF_MARK`, когда туннелей больше одного (или единственный — не нулевой).
+/// Основное — резерв плагина UU (`0xf0`), запасное — младшая половина резерва mwan3 (`0x0f00`, нужен только при
+/// втором WAN). Занятое прошивкой поле не используется (см. `choose_field`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MarkField {
+    #[default]
+    Uu,
+    Wan,
+}
+
+impl MarkField {
+    pub fn mask(self) -> u32 {
+        match self {
+            MarkField::Uu => 0xf0,
+            MarkField::Wan => 0x0f00,
+        }
+    }
+    pub fn shift(self) -> u32 {
+        match self {
+            MarkField::Uu => 4,
+            MarkField::Wan => 8,
+        }
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            MarkField::Uu => "uu",
+            MarkField::Wan => "wan",
+        }
+    }
+}
 pub const NF_COMMENT: &str = "mi-lumruri";
 pub const CHAIN_PREFIX: &str = "MITT_";
 pub const SET_PREFIX: &str = "mitt";
@@ -108,6 +142,22 @@ pub struct PolicyRule {
     /// Набор назначения; None — любое назначение.
     pub set: Option<String>,
     pub act: Act,
+    /// Номер туннеля для `Act::Tunnel` (0 — прежний единственный).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub tun: u8,
+}
+
+fn is_zero(v: &u8) -> bool {
+    *v == 0
+}
+
+/// Туннель с номером n ≥ 1 (туннель 0 — поля `tun`/`fail_open` спецификации).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TunSpec {
+    pub index: u8,
+    pub dev: String,
+    pub fail_open: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -159,6 +209,29 @@ pub struct PolicySpec {
     /// Источники, весь IPv6 которых идёт в туннель (IPv6 через VPN при «всё через VPN»).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub v6_tunnel: Vec<SrcMatch>,
+    /// Туннели с номерами 1..=15 (несколько серверов одновременно).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra: Vec<TunSpec>,
+    /// Поле номера туннеля в метке (выбирает mi-tt-admin по живому состоянию).
+    #[serde(default, skip_serializing_if = "is_uu")]
+    pub field: MarkField,
+    /// Туннель DNS-вопросов роутера к `dns_resolver`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub dns_tun: u8,
+    /// Туннель IPv6 источников `v6_tunnel`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub v6_tun: u8,
+}
+
+fn default_table() -> u32 {
+    TABLE
+}
+fn is_default_table(t: &u32) -> bool {
+    *t == TABLE
+}
+
+fn is_uu(f: &MarkField) -> bool {
+    *f == MarkField::Uu
 }
 
 impl PolicySpec {
@@ -167,6 +240,64 @@ impl PolicySpec {
     }
     pub fn uses(&self, a: Act) -> bool {
         self.rules.iter().any(|r| r.act == a)
+    }
+    /// Все объявленные туннели: 0 (`tun`, если задан) и `extra`.
+    pub fn tunnels(&self) -> Vec<TunSpec> {
+        let mut v = Vec::new();
+        if !self.tun.is_empty() {
+            v.push(TunSpec { index: 0, dev: self.tun.clone(), fail_open: self.fail_open });
+        }
+        v.extend(self.extra.iter().cloned());
+        v
+    }
+    /// Туннели, которые нужны плану: на них ссылаются правила, DNS роутера или IPv6 через VPN; по возрастанию номера.
+    pub fn used_tunnels(&self) -> Vec<TunSpec> {
+        self.tunnels()
+            .into_iter()
+            .filter(|t| {
+                self.rules.iter().any(|r| r.act == Act::Tunnel && r.tun == t.index)
+                    || (self.dns_resolver.is_some() && self.dns_tun == t.index)
+                    || (!self.v6_tunnel.is_empty() && self.v6_tun == t.index && self.rules.iter().any(|r| r.act == Act::Tunnel))
+            })
+            .collect()
+    }
+    /// Нужно ли поле номера: туннелей больше одного (единственный туннель любого номера обходится битом 0x4000,
+    /// его таблица — `TABLE + n`).
+    pub fn needs_field(&self) -> bool {
+        self.used_tunnels().len() > 1
+    }
+    /// Метка туннеля n: (значение, маска). Без поля — прежняя `0x4000/0x4000`.
+    pub fn tun_mark(&self, n: u8) -> (u32, u32) {
+        if self.needs_field() {
+            (NF_MARK | (u32::from(n) << self.field.shift()), NF_MARK | self.field.mask())
+        } else {
+            (NF_MARK, NF_MARK)
+        }
+    }
+    /// Только туннель с наименьшим номером: правила остальных — «блокировать» (политика отказа «блок») или без
+    /// метки (политика «напрямую»). Так план не задевает поле номера, когда оба поля заняты прошивкой.
+    pub fn degrade(&self) -> PolicySpec {
+        let used = self.used_tunnels();
+        let Some(keep) = used.first().map(|t| t.index) else { return self.clone() };
+        let open: BTreeMap<u8, bool> = used.iter().map(|t| (t.index, t.fail_open)).collect();
+        let mut s = self.clone();
+        s.rules = self
+            .rules
+            .iter()
+            .filter_map(|r| {
+                if r.act != Act::Tunnel || r.tun == keep {
+                    return Some(r.clone());
+                }
+                if open.get(&r.tun).copied().unwrap_or(false) {
+                    None
+                } else {
+                    Some(PolicyRule { act: Act::Block, tun: 0, ..r.clone() })
+                }
+            })
+            .collect();
+        s.dns_tun = keep;
+        s.v6_tun = keep;
+        s
     }
     /// Мосты и порты, которые должны существовать до применения: (интерфейс, мост, если это порт).
     pub fn interfaces(&self) -> Vec<(String, Option<String>)> {
@@ -197,7 +328,13 @@ impl PolicySpec {
 #[serde(tag = "entry", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Entry {
     /// Маршрут по умолчанию в таблице 3100: через устройство (TUN) или unreachable (dev = None).
-    Route { v6: bool, dev: Option<String>, metric: u32 },
+    Route {
+        v6: bool,
+        #[serde(default = "default_table", skip_serializing_if = "is_default_table")]
+        table: u32,
+        dev: Option<String>,
+        metric: u32,
+    },
     /// Правило выбора таблицы; lookup = None — правило типа unreachable.
     Rule {
         v6: bool,
@@ -251,16 +388,10 @@ fn jump_spec(chain: &str) -> Vec<String> {
 
 impl Entry {
     pub fn guard_route() -> Self {
-        Entry::Route { v6: false, dev: None, metric: METRIC_GUARD }
-    }
-    pub fn tun_route(dev: &str) -> Self {
-        Entry::Route { v6: false, dev: Some(dev.into()), metric: METRIC_TUN }
+        Entry::Route { v6: false, table: TABLE, dev: None, metric: METRIC_GUARD }
     }
     pub fn lan_bypass(prefix: &str) -> Self {
         Entry::Rule { v6: false, prio: PRIO_LAN, from: None, to: Some(norm_prefix(prefix)), iif: None, fwmark: None, lookup: Some("main".into()) }
-    }
-    pub fn mark_rule() -> Self {
-        Entry::Rule { v6: false, prio: PRIO_MARK, from: None, to: None, iif: None, fwmark: Some(fmt_mark(NF_MARK, NF_MARK)), lookup: Some(TABLE.to_string()) }
     }
     pub fn is_tun_route(&self) -> bool {
         matches!(self, Entry::Route { dev: Some(_), .. })
@@ -286,7 +417,7 @@ impl Entry {
     pub fn cmds(&self, op: &str) -> Vec<(&'static str, Vec<String>)> {
         let s = |x: &str| x.to_string();
         match self {
-            Entry::Route { v6, dev, metric } => {
+            Entry::Route { v6, table, dev, metric } => {
                 let mut a = Vec::new();
                 if *v6 {
                     a.push(s("-6"));
@@ -296,7 +427,7 @@ impl Entry {
                     None => a.extend([s("unreachable"), s("default")]),
                     Some(d) => a.extend([s("default"), s("dev"), d.clone()]),
                 }
-                a.extend([s("metric"), metric.to_string(), s("table"), TABLE.to_string()]);
+                a.extend([s("metric"), metric.to_string(), s("table"), table.to_string()]);
                 vec![("ip", a)]
             }
             Entry::Rule { v6, prio, from, to, iif, fwmark, lookup } => {
@@ -412,13 +543,13 @@ pub fn needs_physdev(spec: &PolicySpec, bridge_ports: &BTreeMap<String, BTreeSet
 
 /// Классификация: правила по порядку, у каждого — цель в этой цепочке или RETURN (совпадение без действия здесь
 /// останавливает разбор: первое совпадение). Хвост из одних RETURN отбрасывается; нет действий — цепочки нет.
-fn classify(spec: &PolicySpec, bridge_ports: &BTreeMap<String, BTreeSet<String>>, target: impl Fn(Act) -> Option<Vec<String>>) -> Option<Vec<Vec<String>>> {
+fn classify(spec: &PolicySpec, bridge_ports: &BTreeMap<String, BTreeSet<String>>, target: impl Fn(&PolicyRule) -> Option<Vec<String>>) -> Option<Vec<Vec<String>>> {
     let mut rows: Vec<(Vec<String>, bool)> = Vec::new();
     for s in &spec.lan_subnets {
         rows.push((vec!["-d".into(), ipt_prefix(s), "-j".into(), "RETURN".into()], false));
     }
     for r in &spec.rules {
-        let t = target(r.act);
+        let t = target(r);
         for src in src_variants(&r.src, bridge_ports) {
             let mut row = src;
             if let Some(set) = &r.set {
@@ -448,22 +579,31 @@ pub fn build_plan(spec: &PolicySpec, v6_lan_prefixes: &[String], bridge_ports: &
         };
         p.insert(Entry::Ipset { name: set.name.clone(), kind: kind.into(), timeout });
     }
-    let tunnel = spec.uses(Act::Tunnel) || spec.dns_resolver.is_some();
+    let used = spec.used_tunnels();
+    let tunnel = !used.is_empty();
+    let mark = |n: u8| {
+        let (v, mk) = spec.tun_mark(n);
+        fmt_mark(v, mk)
+    };
     if tunnel {
-        if !spec.fail_open {
-            p.insert(Entry::guard_route());
-        }
-        if !guard_only {
-            p.insert(Entry::tun_route(&spec.tun));
-        }
         for sub in &spec.lan_subnets {
             p.insert(Entry::lan_bypass(sub));
         }
-        p.insert(Entry::mark_rule());
-        let leaf = chain(false, m, 'T', vec![vec![s("-j"), s("MARK"), s("--set-xmark"), fmt_mark(NF_MARK, NF_MARK)]]);
-        let tt = chain_name(&leaf);
-        p.insert(leaf);
-        if let Some(rows) = classify(spec, bridge_ports, |a| (a == Act::Tunnel).then(|| vec![s("-g"), tt.clone()])) {
+        let mut leaves: BTreeMap<u8, String> = BTreeMap::new();
+        for t in &used {
+            let table = TABLE + u32::from(t.index);
+            if !t.fail_open {
+                p.insert(Entry::Route { v6: false, table, dev: None, metric: METRIC_GUARD });
+            }
+            if !guard_only {
+                p.insert(Entry::Route { v6: false, table, dev: Some(t.dev.clone()), metric: METRIC_TUN });
+            }
+            p.insert(Entry::Rule { v6: false, prio: PRIO_MARK + u32::from(t.index), from: None, to: None, iif: None, fwmark: Some(mark(t.index)), lookup: Some(table.to_string()) });
+            let leaf = chain(false, m, 'T', vec![vec![s("-j"), s("MARK"), s("--set-xmark"), mark(t.index)]]);
+            leaves.insert(t.index, chain_name(&leaf));
+            p.insert(leaf);
+        }
+        if let Some(rows) = classify(spec, bridge_ports, |r| (r.act == Act::Tunnel).then(|| leaves.get(&r.tun).map(|tt| vec![s("-g"), tt.clone()])).flatten()) {
             let c = chain(false, m, 'C', rows);
             p.insert(Entry::Jump { v6: false, table: m.into(), from: "PREROUTING".into(), chain: chain_name(&c) });
             p.insert(c);
@@ -471,7 +611,7 @@ pub fn build_plan(spec: &PolicySpec, v6_lan_prefixes: &[String], bridge_ports: &
         if let Some(r) = &spec.dns_resolver {
             let rows = ["udp", "tcp"]
                 .iter()
-                .map(|proto| vec![s("-d"), ipt_prefix(r), s("-p"), s(proto), s("-m"), s(proto), s("--dport"), s("53"), s("-j"), s("MARK"), s("--set-xmark"), fmt_mark(NF_MARK, NF_MARK)])
+                .map(|proto| vec![s("-d"), ipt_prefix(r), s("-p"), s(proto), s("-m"), s(proto), s("--dport"), s("53"), s("-j"), s("MARK"), s("--set-xmark"), mark(spec.dns_tun)])
                 .collect();
             let c = chain(false, m, 'O', rows);
             p.insert(Entry::Jump { v6: false, table: m.into(), from: "OUTPUT".into(), chain: chain_name(&c) });
@@ -480,18 +620,20 @@ pub fn build_plan(spec: &PolicySpec, v6_lan_prefixes: &[String], bridge_ports: &
     }
     // IPv6 через VPN: весь IPv6 источников «всё через VPN» (кроме LAN, link-local и multicast) — метка в mangle
     // ip6tables, ip -6 rule в таблицу 3100, там маршрут через TUN (или unreachable при отказе туннеля)
-    if tunnel && !spec.v6_tunnel.is_empty() {
-        if !spec.fail_open {
-            p.insert(Entry::Route { v6: true, dev: None, metric: METRIC_GUARD });
+    let v6t = used.iter().find(|t| t.index == spec.v6_tun).cloned();
+    if let (Some(v6t), false) = (&v6t, spec.v6_tunnel.is_empty() || !spec.uses(Act::Tunnel)) {
+        let table = TABLE + u32::from(v6t.index);
+        if !v6t.fail_open {
+            p.insert(Entry::Route { v6: true, table, dev: None, metric: METRIC_GUARD });
         }
         if !guard_only {
-            p.insert(Entry::Route { v6: true, dev: Some(spec.tun.clone()), metric: METRIC_TUN });
+            p.insert(Entry::Route { v6: true, table, dev: Some(v6t.dev.clone()), metric: METRIC_TUN });
         }
         for x in v6_lan_prefixes {
             p.insert(Entry::Rule { v6: true, prio: PRIO_LAN, from: None, to: Some(norm_prefix(x)), iif: None, fwmark: None, lookup: Some("main".into()) });
         }
-        p.insert(Entry::Rule { v6: true, prio: PRIO_MARK, from: None, to: None, iif: None, fwmark: Some(fmt_mark(NF_MARK, NF_MARK)), lookup: Some(TABLE.to_string()) });
-        let leaf = chain(true, m, 'T', vec![vec![s("-j"), s("MARK"), s("--set-xmark"), fmt_mark(NF_MARK, NF_MARK)]]);
+        p.insert(Entry::Rule { v6: true, prio: PRIO_MARK + u32::from(v6t.index), from: None, to: None, iif: None, fwmark: Some(mark(v6t.index)), lookup: Some(table.to_string()) });
+        let leaf = chain(true, m, 'T', vec![vec![s("-j"), s("MARK"), s("--set-xmark"), mark(v6t.index)]]);
         let tt = chain_name(&leaf);
         p.insert(leaf);
         let local: Vec<String> = v6_lan_prefixes.iter().cloned().chain(["fe80::/10".to_string(), "ff00::/8".to_string()]).collect();
@@ -507,11 +649,11 @@ pub fn build_plan(spec: &PolicySpec, v6_lan_prefixes: &[String], bridge_ports: &
         p.insert(c);
     }
     // filter FORWARD: выход в TUN разрешён явно (fw3 стока отклоняет пересылку на интерфейс вне зон), затем запреты
-    let block = classify(spec, bridge_ports, |a| (a == Act::Block).then(|| vec![s("-j"), s("REJECT"), s("--reject-with"), s("icmp-port-unreachable")]));
+    let block = classify(spec, bridge_ports, |r| (r.act == Act::Block).then(|| vec![s("-j"), s("REJECT"), s("--reject-with"), s("icmp-port-unreachable")]));
     if tunnel || block.is_some() {
         let mut rows = Vec::new();
-        if tunnel {
-            rows.push(vec![s("-o"), spec.tun.clone(), s("-j"), s("ACCEPT")]);
+        for t in &used {
+            rows.push(vec![s("-o"), t.dev.clone(), s("-j"), s("ACCEPT")]);
         }
         rows.extend(block.unwrap_or_default());
         let c = chain(false, f, 'F', rows);
@@ -535,7 +677,7 @@ pub fn build_plan(spec: &PolicySpec, v6_lan_prefixes: &[String], bridge_ports: &
         if !rows.is_empty() {
             let leaf = chain(false, m, 'Q', rows);
             let q = chain_name(&leaf);
-            if let Some(rows) = classify(spec, bridge_ports, |a| (a == Act::Zapret).then(|| vec![s("-g"), q.clone()])) {
+            if let Some(rows) = classify(spec, bridge_ports, |r| (r.act == Act::Zapret).then(|| vec![s("-g"), q.clone()])) {
                 p.insert(leaf);
                 let c = chain(false, m, 'Z', rows);
                 p.insert(Entry::Jump { v6: false, table: m.into(), from: "FORWARD".into(), chain: chain_name(&c) });
@@ -553,8 +695,8 @@ pub fn build_plan(spec: &PolicySpec, v6_lan_prefixes: &[String], bridge_ports: &
     if !spec.v6_block.is_empty() {
         let mut rows: Vec<Vec<String>> = Vec::new();
         // IPv6 через VPN: помеченное уходит в TUN — пропустить до запрета (fw3 стока отклоняет пересылку вне зон)
-        if tunnel && !spec.v6_tunnel.is_empty() {
-            rows.push(vec![s("-o"), spec.tun.clone(), s("-j"), s("ACCEPT")]);
+        if let (Some(t), false) = (&v6t, spec.v6_tunnel.is_empty() || !spec.uses(Act::Tunnel)) {
+            rows.push(vec![s("-o"), t.dev.clone(), s("-j"), s("ACCEPT")]);
         }
         rows.extend(v6_lan_prefixes.iter().map(|x| vec![s("-d"), ipt_prefix(x), s("-j"), s("RETURN")]));
         for src in &spec.v6_block {
@@ -621,7 +763,7 @@ pub fn parse_rules(text: &str, v6: bool) -> Vec<(u32, Result<Entry, String>)> {
 }
 
 /// Разбор `ip [-6] route show table 3100`.
-pub fn parse_routes(text: &str, v6: bool) -> Vec<Result<Entry, String>> {
+pub fn parse_routes(text: &str, v6: bool, table: u32) -> Vec<Result<Entry, String>> {
     let mut out = Vec::new();
     for line in text.lines().filter(|l| !l.trim().is_empty()) {
         let t: Vec<&str> = line.split_whitespace().collect();
@@ -657,8 +799,8 @@ pub fn parse_routes(text: &str, v6: bool) -> Vec<Result<Entry, String>> {
             dev = None;
         }
         out.push(match (extra, default, metric) {
-            (false, true, Some(m)) if unreach && dev.is_none() => Ok(Entry::Route { v6, dev: None, metric: m }),
-            (false, true, Some(m)) if !unreach && dev.is_some() => Ok(Entry::Route { v6, dev, metric: m }),
+            (false, true, Some(m)) if unreach && dev.is_none() => Ok(Entry::Route { v6, table, dev: None, metric: m }),
+            (false, true, Some(m)) if !unreach && dev.is_some() => Ok(Entry::Route { v6, table, dev, metric: m }),
             _ => Err(line.trim().to_string()),
         });
     }
@@ -822,19 +964,64 @@ impl Diff {
     }
 }
 
+/// Чужие записи (правила iptables вне наших цепочек и `ip rule` вне нашей зоны), задевающие биты поля номера.
+pub fn field_users(live: &Live, field: MarkField) -> Vec<String> {
+    let mask = field.mask();
+    let hit = |m: Option<(u32, u32)>| m.is_some_and(|(_, mk)| mk & mask != 0);
+    let mut out = Vec::new();
+    for (prio, r) in &live.rules {
+        if (PRIO_MIN..=PRIO_MAX).contains(prio) {
+            continue;
+        }
+        match r {
+            Ok(Entry::Rule { fwmark, .. }) if hit(fwmark.as_deref().and_then(mark_parts)) => out.push(format!("ip rule {prio}: {}", r.as_ref().map(Entry::label).unwrap_or_default())),
+            Err(line) if hit(line.split_whitespace().skip_while(|w| *w != "fwmark").nth(1).and_then(mark_parts)) => out.push(format!("ip rule {line}")),
+            _ => {}
+        }
+    }
+    for t in &live.ipt {
+        for (chain, spec) in t.rules.iter().filter(|(ch, _)| !ch.starts_with(CHAIN_PREFIX)) {
+            if spec_mark_masks(spec).iter().any(|m| m & mask != 0) {
+                out.push(format!("{} -t {}: -A {chain} {}", ipt_prog(t.v6), t.table, spec.join(" ")));
+            }
+        }
+    }
+    out
+}
+
+/// Поле номера туннеля по живому состоянию: основное (`Uu`), если свободно, иначе запасное (`Wan`); оба заняты —
+/// план сужается до одного туннеля (`degrade`). Возвращает спецификацию для плана, выбранное поле (None — поле не
+/// нужно или не нашлось) и причины для журнала.
+pub fn choose_field(spec: &PolicySpec, live: &Live) -> (PolicySpec, Option<MarkField>, Vec<String>) {
+    if !spec.needs_field() {
+        return (spec.clone(), None, Vec::new());
+    }
+    let mut why = Vec::new();
+    for f in [MarkField::Uu, MarkField::Wan] {
+        let users = field_users(live, f);
+        if users.is_empty() {
+            return (PolicySpec { field: f, ..spec.clone() }, Some(f), why);
+        }
+        why.push(format!("биты {:#x} заняты прошивкой: {}", f.mask(), users.join("; ")));
+    }
+    why.push("несколько туннелей одновременно недоступны: работает только сервер с наименьшим номером".into());
+    (spec.degrade(), None, why)
+}
+
 pub fn reconcile(desired: &BTreeSet<Entry>, owned: &BTreeSet<Entry>, live: &Live) -> Diff {
     let known: BTreeSet<&Entry> = desired.iter().chain(owned.iter()).collect();
     let mut d = Diff::default();
     let mut live_set: BTreeSet<Entry> = BTreeSet::new();
-    let table = TABLE.to_string();
-    let ours_mask = our_mark_mask(known.iter().copied());
+    let our_table = |t: &str| t.parse::<u32>().is_ok_and(|n| (TABLE..=TABLE + u32::from(MAX_TUN)).contains(&n));
+    // биты меток — только желаемого плана: снимаемые записи прежнего поля не мешают уйти с занятого поля
+    let ours_mask = our_mark_mask(desired.iter());
     let mark_overlaps = |m: &Option<String>| m.as_deref().and_then(mark_parts).is_some_and(|(_, mask)| mask & ours_mask != 0);
     for (prio, r) in &live.rules {
         let in_zone = (PRIO_MIN..=PRIO_MAX).contains(prio);
         match r {
             Ok(e) => {
                 let (refs_table, uses_marks) = match e {
-                    Entry::Rule { lookup, fwmark, .. } => (lookup.as_deref() == Some(table.as_str()), mark_overlaps(fwmark)),
+                    Entry::Rule { lookup, fwmark, .. } => (lookup.as_deref().is_some_and(our_table), mark_overlaps(fwmark)),
                     _ => (false, false),
                 };
                 if in_zone || refs_table || uses_marks {
@@ -847,7 +1034,7 @@ pub fn reconcile(desired: &BTreeSet<Entry>, owned: &BTreeSet<Entry>, live: &Live
                     }
                 }
             }
-            Err(line) if in_zone || line.split_whitespace().any(|w| w == table) => d.conflicts.push(format!("чужое правило: {line}")),
+            Err(line) if in_zone || line.split_whitespace().any(our_table) => d.conflicts.push(format!("чужое правило: {line}")),
             Err(line)
                 if line.contains("fwmark")
                     && line.split_whitespace().skip_while(|w| *w != "fwmark").nth(1).and_then(mark_parts).is_some_and(|(_, m)| m & ours_mask != 0) =>
@@ -862,8 +1049,8 @@ pub fn reconcile(desired: &BTreeSet<Entry>, owned: &BTreeSet<Entry>, live: &Live
             Ok(e) if known.contains(e) => {
                 live_set.insert(e.clone());
             }
-            Ok(e) => d.conflicts.push(format!("чужой маршрут в таблице {TABLE}: {}", e.label())),
-            Err(line) => d.conflicts.push(format!("чужой маршрут в таблице {TABLE}: {line}")),
+            Ok(e) => d.conflicts.push(format!("чужой маршрут в таблицах Mi Lumruri: {}", e.label())),
+            Err(line) => d.conflicts.push(format!("чужой маршрут в таблицах Mi Lumruri: {line}")),
         }
     }
     for t in &live.ipt {
@@ -930,10 +1117,10 @@ mod tests {
     fn spec() -> PolicySpec {
         PolicySpec {
             rules: vec![
-                PolicyRule { from: "tv-video".into(), src: SrcMatch::Mac { bridge: "br-lan".into(), mac: "02:00:00:00:0a:02".into() }, set: Some("mitt0001d".into()), act: Act::Tunnel },
-                PolicyRule { from: "guest-block".into(), src: SrcMatch::Network { bridge: "br-guest".into(), ports: vec!["r-gst".into()] }, set: Some("mitt0002n".into()), act: Act::Block },
-                PolicyRule { from: "lan-zapret".into(), src: SrcMatch::Bridge { bridge: "br-lan".into() }, set: Some("mitt0003d".into()), act: Act::Zapret },
-                PolicyRule { from: "lan-direct".into(), src: SrcMatch::Bridge { bridge: "br-lan".into() }, set: Some("mitt0004d".into()), act: Act::Direct },
+                PolicyRule { from: "tv-video".into(), src: SrcMatch::Mac { bridge: "br-lan".into(), mac: "02:00:00:00:0a:02".into() }, set: Some("mitt0001d".into()), act: Act::Tunnel, tun: 0 },
+                PolicyRule { from: "guest-block".into(), src: SrcMatch::Network { bridge: "br-guest".into(), ports: vec!["r-gst".into()] }, set: Some("mitt0002n".into()), act: Act::Block, tun: 0 },
+                PolicyRule { from: "lan-zapret".into(), src: SrcMatch::Bridge { bridge: "br-lan".into() }, set: Some("mitt0003d".into()), act: Act::Zapret, tun: 0 },
+                PolicyRule { from: "lan-direct".into(), src: SrcMatch::Bridge { bridge: "br-lan".into() }, set: Some("mitt0004d".into()), act: Act::Direct, tun: 0 },
             ],
             sets: vec![
                 SetSpec { name: "mitt0001d".into(), kind: SetKind::Dns, entries: vec![] },
@@ -948,6 +1135,7 @@ mod tests {
             dns_resolver: Some("1.1.1.1".into()),
             v6_block: vec![SrcMatch::Mac { bridge: "br-lan".into(), mac: "02:00:00:00:0a:02".into() }],
             v6_tunnel: vec![],
+            ..Default::default()
         }
     }
 
@@ -1006,8 +1194,8 @@ mod tests {
         sp.v6_block.push(lan);
         let p = build_plan(&sp, &["fd00:1::/64".into()], &BTreeMap::new(), false);
         let has = |e: &Entry| p.contains(e);
-        assert!(has(&Entry::Route { v6: true, dev: Some("mitt0".into()), metric: METRIC_TUN }));
-        assert!(has(&Entry::Route { v6: true, dev: None, metric: METRIC_GUARD }));
+        assert!(has(&Entry::Route { v6: true, table: TABLE, dev: Some("mitt0".into()), metric: METRIC_TUN }));
+        assert!(has(&Entry::Route { v6: true, table: TABLE, dev: None, metric: METRIC_GUARD }));
         assert!(has(&Entry::Rule { v6: true, prio: PRIO_MARK, from: None, to: None, iif: None, fwmark: Some(fmt_mark(NF_MARK, NF_MARK)), lookup: Some(TABLE.to_string()) }));
         assert!(has(&Entry::Rule { v6: true, prio: PRIO_LAN, from: None, to: Some("fd00:1::/64".into()), iif: None, fwmark: None, lookup: Some("main".into()) }));
         // mangle ip6tables: LAN, link-local и multicast — мимо, источник — в туннель
@@ -1029,6 +1217,101 @@ mod tests {
         let p0 = build_plan(&spec(), &["fd00:1::/64".into()], &BTreeMap::new(), false);
         assert!(!p0.iter().any(|e| matches!(e, Entry::Route { v6: true, .. } | Entry::Rule { v6: true, .. })));
         assert!(!p0.iter().any(|e| matches!(e, Entry::Chain { v6: true, rows, .. } if rows.iter().any(|r| r.contains(&"ACCEPT".to_string())))));
+    }
+
+    fn two_tun() -> PolicySpec {
+        let mut s = spec();
+        s.extra = vec![TunSpec { index: 1, dev: "mitt1".into(), fail_open: false }];
+        s.rules.push(PolicyRule { from: "yt".into(), src: SrcMatch::Bridge { bridge: "br-lan".into() }, set: Some("mitt0004d".into()), act: Act::Tunnel, tun: 1 });
+        s
+    }
+
+    fn labels(p: &BTreeSet<Entry>) -> BTreeSet<String> {
+        p.iter().map(Entry::label).collect()
+    }
+
+    #[test]
+    fn single_tunnel_plan_unchanged() {
+        // extra без правил на него не меняет план одного туннеля
+        let mut s = spec();
+        s.extra = vec![TunSpec { index: 2, dev: "mitt2".into(), fail_open: false }];
+        assert_eq!(build_plan(&s, &[], &whole(), false), build_plan(&spec(), &[], &whole(), false));
+        assert!(!s.needs_field());
+        assert_eq!(s.tun_mark(0), (0x4000, 0x4000));
+    }
+
+    #[test]
+    fn two_tunnels_use_uu_field() {
+        let p = build_plan(&two_tun(), &[], &whole(), false);
+        let l = labels(&p);
+        for want in [
+            "ip rule priority 3005 fwmark 0x4000/0x40f0 lookup 3100",
+            "ip rule priority 3006 fwmark 0x4010/0x40f0 lookup 3101",
+            "ip route default dev mitt1 metric 1 table 3101",
+            "ip route unreachable default metric 4096 table 3101",
+            "ip route default dev mitt0 metric 1 table 3100",
+        ] {
+            assert!(l.contains(want), "нет {want}\n{l:#?}");
+        }
+        assert!(p.iter().any(|e| matches!(e, Entry::Chain { rows, .. } if rows == &vec![vec!["-j".to_string(), "MARK".into(), "--set-xmark".into(), "0x4010/0x40f0".into()]])));
+        let f = chain_rows(&p, "filter", 'F');
+        assert_eq!(f[0].join(" "), "-o mitt0 -j ACCEPT");
+        assert_eq!(f[1].join(" "), "-o mitt1 -j ACCEPT");
+        assert_eq!(our_mark_mask(&p), 0x40f0);
+    }
+
+    #[test]
+    fn wan_field() {
+        let mut s = two_tun();
+        s.field = MarkField::Wan;
+        let l = labels(&build_plan(&s, &[], &whole(), false));
+        assert!(l.contains("ip rule priority 3006 fwmark 0x4100/0x4f00 lookup 3101"), "{l:#?}");
+        assert!(l.contains("ip rule priority 3005 fwmark 0x4000/0x4f00 lookup 3100"), "{l:#?}");
+    }
+
+    #[test]
+    fn lone_nonzero_tunnel_uses_plain_bit_and_own_table() {
+        let mut s = spec();
+        s.tun = String::new();
+        s.extra = vec![TunSpec { index: 3, dev: "mitt3".into(), fail_open: false }];
+        for r in s.rules.iter_mut().filter(|r| r.act == Act::Tunnel) {
+            r.tun = 3;
+        }
+        s.dns_tun = 3;
+        let l = labels(&build_plan(&s, &[], &whole(), false));
+        assert!(l.contains("ip rule priority 3008 fwmark 0x4000/0x4000 lookup 3103"), "{l:#?}");
+        assert!(l.contains("ip route default dev mitt3 metric 1 table 3103"), "{l:#?}");
+        assert!(!l.iter().any(|x| x.contains("table 3100")), "{l:#?}");
+    }
+
+    #[test]
+    fn degrade_blocks_or_drops() {
+        let d = two_tun().degrade();
+        assert_eq!(d.used_tunnels().len(), 1);
+        let yt = d.rules.iter().find(|r| r.from == "yt").unwrap();
+        assert_eq!((yt.act, yt.tun), (Act::Block, 0));
+        let mut open = two_tun();
+        open.extra[0].fail_open = true;
+        assert!(!open.degrade().rules.iter().any(|r| r.from == "yt"));
+        assert_eq!(our_mark_mask(&build_plan(&d, &[], &whole(), false)), NF_MARK);
+    }
+
+    #[test]
+    fn old_state_policy_parses() {
+        let j = r#"{"rules":[{"from":"a","src":{"type":"bridge","bridge":"br-lan"},"set":null,"act":"tunnel"}],"sets":[],"lan_subnets":[],"tun":"mitt0","fail_open":false}"#;
+        let s: PolicySpec = serde_json::from_str(j).unwrap();
+        assert_eq!((s.rules[0].tun, s.field, s.dns_tun), (0, MarkField::Uu, 0));
+        let r: Entry = serde_json::from_str(r#"{"entry":"route","v6":false,"dev":"mitt0","metric":1}"#).unwrap();
+        assert_eq!(r, Entry::Route { v6: false, table: TABLE, dev: Some("mitt0".into()), metric: 1 });
+        // запись таблицы 3100 сериализуется как раньше (state.json не меняется при одном туннеле)
+        assert!(!serde_json::to_string(&r).unwrap().contains("table"));
+    }
+
+    #[test]
+    fn routes_parsed_with_table() {
+        let r = parse_routes("default dev mitt2 metric 1\nunreachable default metric 4096\n", false, 3102);
+        assert_eq!(r[0], Ok(Entry::Route { v6: false, table: 3102, dev: Some("mitt2".into()), metric: 1 }));
+        assert_eq!(r[1], Ok(Entry::Route { v6: false, table: 3102, dev: None, metric: 4096 }));
     }
 
     #[test]
@@ -1201,4 +1484,46 @@ mod tests {
         let br = "4: br-lan: <BROADCAST> mtu 1500\n    link/ether 02 brd ff\n    bridge forward_delay 1500 hello_time 200\n";
         assert_eq!(parse_link(br), (true, None));
     }
+    #[test]
+    fn choose_field_prefers_uu() {
+        let l = live_from(&BTreeSet::new());
+        let (s, f, why) = choose_field(&two_tun(), &l);
+        assert_eq!((f, s.field), (Some(MarkField::Uu), MarkField::Uu));
+        assert!(why.is_empty());
+        // один туннель — поле не нужно
+        assert_eq!(choose_field(&spec(), &l).1, None);
+    }
+
+    #[test]
+    fn choose_field_falls_back_to_wan() {
+        let mut l = live_from(&BTreeSet::new());
+        l.ipt[1] = parse_ipt("-N uu\n-A uu -j MARK --set-xmark 0x20/0xf0\n", false, "mangle");
+        let (s, f, why) = choose_field(&two_tun(), &l);
+        assert_eq!((f, s.field), (Some(MarkField::Wan), MarkField::Wan));
+        assert!(why[0].contains("0xf0"), "{why:?}");
+    }
+
+    #[test]
+    fn choose_field_degrades_when_both_busy() {
+        let mut l = live_from(&BTreeSet::new());
+        l.ipt[1] = parse_ipt("-N uu\n-A uu -j MARK --set-xmark 0x20/0xf0\n", false, "mangle");
+        l.rules.push((2001, Ok(Entry::Rule { v6: false, prio: 2001, from: None, to: None, iif: None, fwmark: Some("0x100/0x3f00".into()), lookup: Some("1".into()) })));
+        let (s, f, why) = choose_field(&two_tun(), &l);
+        assert_eq!(f, None);
+        assert_eq!(s.used_tunnels().len(), 1);
+        assert_eq!(why.len(), 3, "{why:?}");
+    }
+
+    #[test]
+    fn leaving_busy_field_is_not_a_conflict() {
+        // были на 0xf0, UU занял поле: переход на 0x0f00 не упирается в собственные снимаемые записи
+        let old = build_plan(&two_tun(), &[], &whole(), false);
+        let mut l = live_from(&old);
+        l.ipt[1].rules.push(("PREROUTING".into(), vec!["-j".into(), "MARK".into(), "--set-xmark".into(), "0x20/0xf0".into()]));
+        let (s, f, _) = choose_field(&two_tun(), &l);
+        assert_eq!(f, Some(MarkField::Wan));
+        let d = reconcile(&build_plan(&s, &[], &whole(), false), &old, &l);
+        assert!(d.conflicts.is_empty(), "{:#?}", d.conflicts);
+    }
+
 }

@@ -439,7 +439,7 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
         let mut add_rule = |name: String, kind: SetKind, entries: Vec<String>| {
             sets.entry(name.clone()).or_insert(SetSpec { name: name.clone(), kind, entries });
             for src in &srcs {
-                rules.push(PolicyRule { from: r.id.clone(), src: src.clone(), set: Some(name.clone()), act });
+                rules.push(PolicyRule { from: r.id.clone(), src: src.clone(), set: Some(name.clone()), act, tun: 0 });
             }
         };
         if !domains.is_empty() {
@@ -469,7 +469,7 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
                 Ok(b) => {
                     for bridge in b {
                         let src = SrcMatch::Bridge { bridge };
-                        rules.push(PolicyRule { from: "default_action".into(), src: src.clone(), set: None, act });
+                        rules.push(PolicyRule { from: "default_action".into(), src: src.clone(), set: None, act, tun: 0 });
                         if act == Act::Tunnel {
                             tunnel_all.insert(src.clone());
                         }
@@ -536,6 +536,7 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
         dns_resolver: (client.is_some() && !dns.tunnel_domains.is_empty()).then(|| dns.resolver.clone()),
         v6_block: v6_block.into_iter().collect(),
         v6_tunnel: if ipv6 { tunnel_all.iter().cloned().collect() } else { Vec::new() },
+        ..Default::default()
     };
     if cfg.ipv6_via_vpn && client.is_some() && tunnel_all.is_empty() {
         warnings.push("IPv6 через VPN действует только для «всё через VPN»: при выборе отдельных сайтов IPv6 устройств закрыт".into());
