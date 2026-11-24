@@ -391,6 +391,8 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
     }
     // профили, через которые идут правила: номер туннеля → профиль
     let mut used: BTreeMap<u8, &Profile> = BTreeMap::new();
+    // серверы sing-box с подпиской, которая ещё не скачана: их правила — по политике отказа, рендер не останавливается
+    let mut pending: BTreeSet<String> = BTreeSet::new();
     let mut act_of = |a: &Action, path: &str, issues: &mut Vec<Issue>| -> Option<(Act, u8)> {
         match a {
             Action::Direct => Some((Act::Direct, 0)),
@@ -398,6 +400,10 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
             Action::Block => Some((Act::Block, 0)),
             Action::Profile { id } => {
                 let p = idx.profiles[id.as_str()];
+                if p.kind.singbox() && secrets.profiles.get(id).is_some_and(|s| s.link.is_none() && s.subscription_url.is_some()) {
+                    pending.insert(p.name.clone());
+                    return Some((if p.on_failure == FailurePolicy::Direct { Act::Direct } else { Act::Block }, 0));
+                }
                 if p.endpoint.is_none() && !p.kind.singbox() {
                     issues.push(Issue::new(path, "no_endpoint", format!("у профиля «{id}» нет точки подключения")));
                     return None;
@@ -555,6 +561,9 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
     }
     if !issues.is_empty() {
         return Err(issues);
+    }
+    for n in &pending {
+        warnings.push(format!("сервер «{n}»: подписка ещё не скачана — его сайты пока по выбору «если сервер недоступен»"));
     }
     if exact_warned {
         warnings.push("точный домен сопоставляется через DNS вместе с поддоменами (так работает ipset в dnsmasq)".into());

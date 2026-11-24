@@ -470,3 +470,50 @@ fn render_singbox_profile_writes_config_not_client_toml() {
     assert_eq!(code, 1, "{v}");
     assert!(codes(&v).iter().any(|x| x.ends_with(":no_secret")), "{v}");
 }
+
+#[test]
+fn proxy_subscription_import_picks_and_keeps_choice() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("tt-sub-{}", rand_hex(6)));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut c = lab();
+    c["profiles"].as_array_mut().unwrap().push(json!({ "id": "vl", "name": "Подписка", "kind": "vless", "tunnel": 1 }));
+    c["rules"][0]["action"] = json!({ "type": "profile", "id": "vl" });
+    let cfg = dir.join("config.json");
+    std::fs::write(&cfg, c.to_string()).unwrap();
+    let sub_url = "https://user:pw@sub.example.com/list"; // secret-scan: allow тестовая подписка
+    std::fs::write(dir.join("secrets.json"), json!({ "version": 1, "profiles": { "tt-lab": { "password": secret() }, "vl": { "subscription_url": sub_url } } }).to_string()).unwrap();
+    // подписка ещё не скачана: рендер проходит, правило — по политике отказа (block)
+    let out = dir.join("render");
+    let (code, v) = run(&["render", cfg.to_str().unwrap(), dir.join("secrets.json").to_str().unwrap(), out.to_str().unwrap()]);
+    assert_eq!(code, 0, "{v}");
+    assert!(v["warnings"].to_string().contains("подписка ещё не скачана"), "{v}");
+    assert!(!out.join("tunnels.list").exists() || !std::fs::read_to_string(out.join("tunnels.list")).unwrap().contains("vl"));
+    let (code, v) = run(&["subscription-list", cfg.to_str().unwrap()]);
+    assert_eq!(code, 0, "{v}");
+    let list = "vless://bf000d23-0752-40b4-affe-68f7707a9661@a.example.com:443?security=tls#Амстердам\nhy2://pw2@b.example.com:443#Франкфурт\nvmess://zzz\n"; // secret-scan: allow тестовые ссылки
+    let body = dir.join("sub.txt");
+    std::fs::write(&body, data_encoding::BASE64.encode(list.as_bytes())).unwrap();
+    let (code, v) = run(&["proxy-sub-import", cfg.to_str().unwrap(), "vl", body.to_str().unwrap()]);
+    assert_eq!(code, 0, "{v}");
+    assert_eq!((v["changed"].as_bool(), v["count"].as_u64(), v["skipped"].as_u64(), v["picked"].as_str()), (Some(true), Some(2), Some(1), Some("Амстердам")));
+    let secrets: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("secrets.json")).unwrap()).unwrap();
+    assert!(secrets["profiles"]["vl"]["link"].as_str().unwrap().contains("a.example.com"));
+    let c2: Value = serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
+    assert_eq!(c2["profiles"][1]["proxy"]["server"], "a.example.com");
+    assert!(dir.join("sub/vl.json").exists());
+    // повтор без изменений — ничего не пишется
+    let (_, v) = run(&["proxy-sub-import", cfg.to_str().unwrap(), "vl", body.to_str().unwrap()]);
+    assert_eq!(v["changed"], false, "{v}");
+    // выбор другого сервера (как POST /subscription/pick): вид профиля меняется на hysteria2 и сохраняется при обновлении
+    let mut c3 = c2.clone();
+    c3["profiles"][1]["sub_pick"] = json!("Франкфурт");
+    std::fs::write(&cfg, c3.to_string()).unwrap();
+    let (_, v) = run(&["proxy-sub-import", cfg.to_str().unwrap(), "vl", body.to_str().unwrap()]);
+    assert_eq!((v["changed"].as_bool(), v["picked"].as_str()), (Some(true), Some("Франкфурт")), "{v}");
+    let c4: Value = serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
+    assert_eq!(c4["profiles"][1]["kind"], "hysteria2");
+    // пустой или чужой ответ — отказ, прежнее не тронуто
+    std::fs::write(&body, "<html>").unwrap();
+    let (code, v) = run(&["proxy-sub-import", cfg.to_str().unwrap(), "vl", body.to_str().unwrap()]);
+    assert_eq!((code, v["error"]["code"].as_str()), (1, Some("subscription_empty")), "{v}");
+}

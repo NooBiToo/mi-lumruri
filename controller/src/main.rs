@@ -59,6 +59,13 @@ pub fn main() -> ExitCode {
             None => ExitCode::from(1),
         },
         ["subscription-import", cfg, profile, json] => cli(mi_tt::manage::subscription_import(cfg, profile, json)),
+        // подписка сервера модуля sing-box: список ссылок
+        ["proxy-sub-import", cfg, profile, file] => cli(mi_tt::proxysub::import(cfg, profile, file)),
+        // серверы с подпиской: строки «id вид»
+        ["subscription-list", cfg] => match mi_tt::manage::subscription_list(cfg) {
+            Ok(v) => lines(v),
+            Err(m) => { eprintln!("mi-tt-ctl: {m}"); ExitCode::from(2) }
+        },
         ["zapret-list", kind] => match zapret_kind(kind) {
             Some(k) => lines(zapret::candidates(k).into_iter().map(str::to_string)),
             None => usage(),

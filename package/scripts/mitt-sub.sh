@@ -1,40 +1,57 @@
 #!/bin/sh
-# mi-lumruri: подписка TrustTunnel 1.3. По ссылке из secrets.json (https://user:pass@host/path, секрет) скачивает
-# JSON с параметрами подключения и переносит его в настройки профиля (mi-tt-ctl subscription-import): адрес, имя
-# сервера, логин, пароль, HTTP/3, anti-DPI, сертификат, префикс client_random. Изменилось — заявка на применение.
-# Запускает служба: по расписанию списков сайтов и по кнопке панели (sub-update.request). Итог — $STATE/subscription.json.
+# mi-lumruri: подписки серверов. Для каждого сервера со ссылкой-подпиской в secrets.json (секрет: в ней логин и пароль):
+#  - TrustTunnel 1.3 — JSON с параметрами подключения → mi-tt-ctl subscription-import (адрес, имя сервера, логин,
+#    пароль, HTTP/3, anti-DPI, сертификат, префикс client_random);
+#  - модуль sing-box — список ссылок vless://, hysteria2://, trojan://, ss:// (обычно base64) → mi-tt-ctl proxy-sub-import
+#    (список в etc/sub/<id>.json, выбранный сервер — в настройки и секрет link).
+# Изменилось — заявка на применение (её ставит mi-tt-ctl). Запускает служба: по расписанию списков сайтов и по кнопке
+# панели (sub-update.request). Итог по серверу — $STATE/sub/<id>.json; серверов с подпиской нет — каталог очищается.
 D="$(cd "$(dirname "$0")" && pwd)"
 . "$D/mitt-lib.sh"
 CURL="${MITT_CURL:-curl}"
-P="${MITT_SUB_PROFILE:-tt}"
-OUT="$STATE/subscription.json"
-mkdir -p "$STATE" "$LOG"
+mkdir -p "$STATE/sub" "$LOG"
 rm -f "$STATE/sub-update.request.run"
-url="$(ctl subscription-url "$ETC/config.json" "$P" 2>/dev/null)" || { rm -f "$OUT"; exit 0; }
-tmp="$R/tmp/mitt-sub.$$.json"
-now=$(date +%s)
-prev_upd="$(sed -n 's/.*"updated":\([0-9]*\).*/\1/p' "$OUT" 2>/dev/null)"
-# сбой подписки — уведомление один раз, пока она снова не обновится
-prev_ok="$(sed -n 's/^{"ok":\([a-z]*\),.*/\1/p' "$OUT" 2>/dev/null)"
-sub_fail() { [ "$prev_ok" = false ] || notify subscription sub_failed "$1"; }
+LIST="$R/tmp/mitt-sub.$$.list"
+ctl subscription-list "$ETC/config.json" >"$LIST" 2>/dev/null || : >"$LIST"
+# состояние серверов, у которых подписки больше нет
+for f in "$STATE"/sub/*.json; do
+  [ -f "$f" ] || continue; id="$(basename "$f" .json)"
+  grep -q "^$id " "$LIST" || rm -f "$f"
+done
 js() { printf '%s' "$1" | tr -d '"\\' | tr '\n\r\t' '   ' | cut -c1-300; }
-put() { # put <ok true|false> <updated|null> [ошибка]
-  printf '{"ok":%s,"checked":%s,"updated":%s,"error":%s}\n' "$1" "$now" "$2" "$([ -n "${3:-}" ] && printf '"%s"' "$(js "$3")" || echo null)" >"$OUT.t" && mv -f "$OUT.t" "$OUT"
-}
-# ошибки curl без ссылки: в ней логин и пароль подписки
-if ! "$CURL" -sSfL --proto '=https' --max-time 30 --max-filesize 262144 -o "$tmp" "$url" 2>"$LOG/sub-curl.log"; then
-  e="$(tail -n 1 "$LOG/sub-curl.log" | sed 's#https://[^ ]*#<ссылка>#g')"
-  rm -f "$tmp"; put false "${prev_upd:-null}" "сервер подписки не ответил: $e"; mlog "подписка: не скачана ($e)"; sub_fail "$e"; exit 1
-fi
-r="$(ctl subscription-import "$ETC/config.json" "$P" "$tmp" 2>&1)"; rc=$?
-rm -f "$tmp"
-if [ $rc -ne 0 ]; then
-  e="$(printf '%s' "$r" | sed -n 's/.*"message": *"\([^"]*\)".*/\1/p' | head -n 1)"
-  put false "${prev_upd:-null}" "ответ подписки не принят: ${e:-код $rc}"; mlog "подписка: не принята (${e:-код $rc})"; sub_fail "${e:-код $rc}"; exit 1
-fi
-if printf '%s' "$r" | grep -q '"changed": *true'; then
-  put true "$now"; mlog "подписка: параметры сервера обновлены, применяю"; notify subscription sub_changed
-else
-  put true "${prev_upd:-null}"
-fi
-exit 0
+rc_all=0
+while read -r id kind; do
+  [ -n "$id" ] || continue
+  OUT="$STATE/sub/$id.json"; now=$(date +%s)
+  prev_upd="$(sed -n 's/.*"updated":\([0-9]*\).*/\1/p' "$OUT" 2>/dev/null)"
+  # сбой подписки — уведомление один раз, пока она снова не обновится
+  prev_ok="$(sed -n 's/^{"ok":\([a-z]*\),.*/\1/p' "$OUT" 2>/dev/null)"
+  put() { # put <ok true|false> <updated|null> [ошибка] [count]
+    printf '{"ok":%s,"checked":%s,"updated":%s,"error":%s,"count":%s}\n' "$1" "$now" "$2" \
+      "$([ -n "${3:-}" ] && printf '"%s"' "$(js "$3")" || echo null)" "${4:-null}" >"$OUT.t" && mv -f "$OUT.t" "$OUT"
+  }
+  url="$(ctl subscription-url "$ETC/config.json" "$id" 2>/dev/null)" || continue
+  tmp="$R/tmp/mitt-sub.$$.body"
+  # ошибки curl без ссылки: в ней логин и пароль подписки
+  if ! "$CURL" -sSfL --proto '=https' --max-time 30 --max-filesize 1048576 -o "$tmp" "$url" 2>"$LOG/sub-curl.log"; then
+    e="$(tail -n 1 "$LOG/sub-curl.log" | sed 's#https://[^ ]*#<ссылка>#g')"
+    rm -f "$tmp"; put false "${prev_upd:-null}" "сервер подписки не ответил: $e"; mlog "подписка $id: не скачана ($e)"
+    [ "$prev_ok" = false ] || notify subscription sub_failed "$e"; rc_all=1; continue
+  fi
+  if [ "$kind" = trusttunnel ]; then r="$(ctl subscription-import "$ETC/config.json" "$id" "$tmp" 2>&1)"; rc=$?
+  else r="$(ctl proxy-sub-import "$ETC/config.json" "$id" "$tmp" 2>&1)"; rc=$?; fi
+  rm -f "$tmp"
+  cnt="$(printf '%s' "$r" | sed -n 's/.*"count": *\([0-9]*\).*/\1/p' | head -n 1)"
+  if [ $rc -ne 0 ]; then
+    e="$(printf '%s' "$r" | sed -n 's/.*"message": *"\([^"]*\)".*/\1/p' | head -n 1)"
+    put false "${prev_upd:-null}" "ответ подписки не принят: ${e:-код $rc}"; mlog "подписка $id: не принята (${e:-код $rc})"
+    [ "$prev_ok" = false ] || notify subscription sub_failed "${e:-код $rc}"; rc_all=1; continue
+  fi
+  if printf '%s' "$r" | grep -q '"changed": *true'; then
+    put true "$now" "" "$cnt"; mlog "подписка $id: параметры сервера обновлены, применяю"; notify subscription sub_changed
+  else
+    put true "${prev_upd:-null}" "" "$cnt"
+  fi
+done <"$LIST"
+rm -f "$LIST"
+exit "$rc_all"

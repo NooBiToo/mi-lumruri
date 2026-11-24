@@ -21,7 +21,7 @@ pub const MAX_LIST_BODY: usize = 8 * 1024 * 1024;
 
 pub const PATHS: &[&str] = &["/rules/delete", "/rules/move", "/profiles", "/profiles/delete", "/groups", "/groups/delete", "/categories",
     "/categories/delete", "/networks", "/networks/delete", "/devices", "/devices/delete", "/leases", "/dns", "/zapret", "/adblock/list",
-    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update", "/router", "/diag", "/service/restart", "/update", "/subscription", "/subscription/update", "/backup/export", "/backup/restore", "/notify", "/notify/test", "/stats", "/speed", "/device-name", "/discover", "/panel-origins", "/storage", "/modules", "/modules/install", "/modules/remove"];
+    "/categories/list", "/secrets", "/apply-request", "/status", "/zapret/test", "/lists", "/lists/update", "/router", "/diag", "/service/restart", "/update", "/subscription", "/subscription/update", "/backup/export", "/backup/restore", "/notify", "/notify/test", "/stats", "/speed", "/device-name", "/discover", "/panel-origins", "/storage", "/modules", "/modules/install", "/modules/remove", "/subscription/pick"];
 
 pub fn is_manage_path(path: &str) -> bool {
     PATHS.contains(&path.trim_end_matches('/'))
@@ -304,6 +304,10 @@ pub(crate) fn read_config(config_path: &str) -> Result<Config, Response> {
     parse_json(&b, "config").map_err(|i| Response { status: 409, body: json!({ "ok": false, "error": { "code": "config_invalid", "message": "настройки не разобраны" }, "issues": i }) })
 }
 
+pub(crate) fn load_secrets_pub(p: &Path) -> Result<Secrets, Response> {
+    load_secrets(p)
+}
+
 fn load_secrets(p: &Path) -> Result<Secrets, Response> {
     if !p.exists() {
         return Ok(Secrets { version: 1, profiles: BTreeMap::new(), notify: None });
@@ -376,6 +380,14 @@ struct Replace {
 
 /// `POST /config`: замена настроек целиком (полная проверка, атомарная запись) и сразу заявка на применение.
 /// Ссылка-подписка профиля (для mitt-sub.sh): только из secrets.json, наружу через API не отдаётся.
+/// Серверы, у которых задана ссылка-подписка: «id вид» (вид — как в настройках).
+pub fn subscription_list(config_path: &str) -> Result<Vec<String>, String> {
+    let cfg = read_config(config_path).map_err(|_| "настройки не читаются".to_string())?;
+    let s = load_secrets(&secrets_path(config_path)).map_err(|_| "secrets.json не читается".to_string())?;
+    Ok(cfg.profiles.iter().filter(|p| s.profiles.get(&p.id).is_some_and(|x| x.subscription_url.is_some()))
+        .map(|p| format!("{} {}", p.id, serde_json::to_value(p.kind).ok().and_then(|v| v.as_str().map(String::from)).unwrap_or_default())).collect())
+}
+
 pub fn subscription_url(config_path: &str, profile_id: &str) -> Option<String> {
     let s = load_secrets(&secrets_path(config_path)).ok()?;
     s.profiles.get(profile_id)?.subscription_url.clone()
@@ -874,12 +886,18 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
             Err(i) => bad(i),
         },
         ("GET", "/subscription") => {
-            // итог последнего обновления по подписке (mitt-sub.sh); подписки нет или ещё не обновлялась — null
+            // итоги последнего обновления подписок по серверам (mitt-sub.sh, run/sub/<id>.json) и списки серверов подписок
+            // sing-box (без ссылок); подписки нет или ещё не обновлялась — null
             let d = run_dir();
-            let st = std::fs::read(d.join("subscription.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
             let running = d.join("sub-update.request").exists() || d.join("sub-update.request.run").exists();
-            Response { status: 200, body: json!({ "ok": true, "running": running, "subscription": st, "issues": [] }) }
+            let cfg = read_config(config_path).ok();
+            let profiles: serde_json::Map<String, Value> = cfg.iter().flat_map(|c| c.profiles.iter()).map(|p| {
+                let st = std::fs::read(d.join("sub").join(format!("{}.json", p.id))).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
+                (p.id.clone(), json!({ "status": st, "entries": if p.kind.singbox() { crate::proxysub::entries_view(config_path, &p.id) } else { json!([]) } }))
+            }).collect();
+            Response { status: 200, body: json!({ "ok": true, "running": running, "profiles": profiles, "issues": [] }) }
         }
+        ("POST", "/subscription/pick") => crate::proxysub::pick(b, config_path),
         ("POST", "/subscription/update") => {
             let d = run_dir();
             let req = json!({ "requested_unix": crate::auth::now() });

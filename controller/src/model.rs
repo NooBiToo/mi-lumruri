@@ -369,6 +369,9 @@ pub struct Profile {
     /// Сводка сервера модуля sing-box (для панели); сам сервер — ссылка в secrets.json.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy: Option<crate::proxy::ProxyInfo>,
+    /// Сервер из подписки sing-box (имя из списка); без него — прежняя ссылка или первая в списке.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sub_pick: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
