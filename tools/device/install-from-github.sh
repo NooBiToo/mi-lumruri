@@ -10,14 +10,14 @@ grep -q "option HARDWARE 'RC06'" "$version_file" &&
 stage=$(mktemp -d /tmp/mitt-install.XXXXXX)
 trap 'rm -rf "$stage"' EXIT
 cd "$stage"
-url=https://github.com/NooBiToo/mi-lumruri/releases/download/v0.14.1/mi-lumruri-ci-214125dcaaf4.tar
+url=https://github.com/NooBiToo/mi-lumruri/releases/download/v0.14.2/mi-lumruri-ci-fe03e87258f2.tar
 if command -v curl >/dev/null; then
   curl -fL --retry 2 -o package.tar "$url"
 else
   wget -O package.tar "$url"
 fi
 digest=$(openssl dgst -sha256 package.tar)
-[ "${digest##* }" = 331a7d15ff6389e3b86fcb1091b5873abd27b4d662f3036fbfbd28d7c6bebe04 ] ||
+[ "${digest##* }" = 1a15cb1f44018ee68edd7369baf554eca29155049b68af9065ece8642161d595 ] ||
   { echo 'Package SHA-256 mismatch' >&2; exit 1; }
 tar xf package.tar
 rm package.tar
