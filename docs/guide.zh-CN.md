@@ -2,7 +2,7 @@
 
 [Русский](guide.md) · [English](guide.en.md) · **简体中文**
 
-本说明适用于 Mi Lumruri 0.14.1 版本。安装包文件名为 `mi-lumruri-*.tar`，在路由器上安装包位于 `/data/mi-lumruri` 和 `/tmp/mi-lumruri`。0.5.0 之前项目名为 mi-trusttunnel：在旧版本之上安装 0.5.0 时，会自动把 `/data/mi-trusttunnel` 连同全部设置移动到 `/data/mi-lumruri`，并在原位置留下链接。发布版中除主安装包外还有一份名为 `mi-trusttunnel-*.tar` 的副本，供 0.4 版本面板中的更新功能查找。
+本说明适用于 Mi Lumruri 0.14.2 版本。安装包文件名为 `mi-lumruri-*.tar`，在路由器上安装包位于 `/data/mi-lumruri` 和 `/tmp/mi-lumruri`。0.5.0 之前项目名为 mi-trusttunnel：在旧版本之上安装 0.5.0 时，会自动把 `/data/mi-trusttunnel` 连同全部设置移动到 `/data/mi-lumruri`，并在原位置留下链接。发布版中除主安装包外还有一份名为 `mi-trusttunnel-*.tar` 的副本，供 0.4 版本面板中的更新功能查找。
 
 你需要：固件版本为 1.1.38 的 BE7000（RC06）、可从家庭网络通过 SSH 获得的 root 权限、安装用 TAR 包，以及你的 TrustTunnel 服务器参数。官方发布的原厂固件通常默认关闭 SSH。
 
@@ -179,9 +179,9 @@ trusttunnel_endpoint vpn.toml hosts.toml -c <用户名> -a <IP:端口>
 
 这些服务器通过 [sing-box 模块](#模块) 工作：请先在「模块」页面安装它。然后在「服务器」页面点击「添加服务器」，粘贴 `vless://…`、`hysteria2://…`（或 `hy2://…`）、`trojan://…` 或 `ss://…` 链接并点击「识别」。面板会显示协议、地址、加密和传输方式；检查「名称」后点击「保存」。链接中包含密钥或密码，因此只保存在路由器上：设置中只保留摘要，面板不会显示链接本身。要更换服务器，请在「服务器链接」字段粘贴新链接。
 
-支持：VLESS（TCP、WebSocket、gRPC、HTTP、HTTPUpgrade；无加密、TLS 或 Reality，包括 `flow=xtls-rprx-vision`；uTLS 指纹）、带 salamander 混淆的 Hysteria2、使用 TLS 及相同传输方式的 Trojan、使用 AEAD 和 2022 加密的 Shadowsocks。不支持 VMess、Shadowsocks 插件和 Hysteria2 端口跳跃：此类链接不会被保存，面板会跳过未知参数并给出提示。备用服务器和按延迟选择仅适用于 TrustTunnel 服务器。
+支持：VLESS（TCP、WebSocket、gRPC、HTTP、HTTPUpgrade；无加密、TLS 或 Reality，包括 `flow=xtls-rprx-vision` 和 `xtls-rprx-vision-udp443`；uTLS 指纹）、带 salamander 混淆的 Hysteria2、使用 TLS 及相同传输方式的 Trojan、使用 AEAD 和 2022 加密的 Shadowsocks。不支持 VMess、XHTTP 传输（`type=xhttp`）、Shadowsocks 插件和 Hysteria2 端口跳跃：此类链接不会被保存，面板会跳过未知参数并给出提示。备用服务器和按延迟选择仅适用于 TrustTunnel 服务器。
 
-**订阅。** 如果 VPN 服务商提供 `https://…` 订阅链接（服务器列表，通常为 base64），请将其粘贴到新服务器的「快速设置」字段或现有服务器的「订阅链接」字段并保存。路由器按网站列表的计划或点击「通过订阅更新」时下载列表，从中选取支持的服务器（VLESS、Hysteria2、Trojan、Shadowsocks，其余跳过），并连接到所选服务器。在「订阅中的服务器」列表中选择；默认是第一个，更新时只要所选服务器仍在列表中，路由器就保持使用它。服务器协议可能随选择而改变。列表下载之前，该服务器的网站按「服务器不可用时」的选择处理。含密钥的列表只保存在路由器上。订阅对每个服务器分别生效，包括多个 TrustTunnel 服务器。
+**订阅。** 如果 VPN 服务商提供 `https://…` 订阅链接（服务器列表，通常为 base64），请将其粘贴到新服务器的「快速设置」字段或现有服务器的「订阅链接」字段并保存。路由器按网站列表的计划或点击「通过订阅更新」时下载列表，从中选取支持的服务器（VLESS、Hysteria2、Trojan、Shadowsocks，其余跳过），并连接到所选服务器。在「订阅中的服务器」列表中选择；默认是第一个，更新时只要所选服务器仍在列表中，路由器就保持使用它。服务器协议可能随选择而改变。列表下载之前，该服务器的网站按「服务器不可用时」的选择处理。路由器以 v2rayN 客户端的身份请求列表，因此服务商面板（Remnawave、Marzban、3x-ui）返回的是链接，而不是浏览器页面。如果列表中没有可用的服务器，订阅字段下方的错误会按行列出原因，例如不支持 xhttp 传输。含密钥的列表只保存在路由器上。订阅对每个服务器分别生效，包括多个 TrustTunnel 服务器。
 
 #### AmneziaWG 服务器
 

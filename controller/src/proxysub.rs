@@ -29,6 +29,16 @@ pub struct Stored {
     pub entries: Vec<Entry>,
     #[serde(default)]
     pub skipped: usize,
+    /// Почему строки пропущены: до трёх разных причин с номером первой такой строки.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reasons: Vec<String>,
+}
+
+/// Строка — ссылка на сервер: начинается со схемы (`vless://…`), а не просто содержит `://` (адреса в HTML-странице).
+fn is_link(l: &str) -> bool {
+    l.split_once("://").is_some_and(|(s, _)| {
+        !s.is_empty() && s.len() <= 16 && s.starts_with(|c: char| c.is_ascii_alphabetic()) && s.chars().all(|c| c.is_ascii_alphanumeric() || "+.-".contains(c))
+    })
 }
 
 /// Тело ответа подписки → строки-ссылки: открытый текст (есть `://`) или base64 (обычный и URL-safe, с переводами строк).
@@ -44,7 +54,7 @@ pub fn decode_list(body: &[u8]) -> Vec<String> {
             Err(_) => String::new(),
         }
     };
-    plain.lines().map(str::trim).filter(|l| l.contains("://")).map(String::from).collect()
+    plain.lines().map(|l| l.trim().trim_start_matches('\u{feff}')).filter(|l| is_link(l)).map(String::from).collect()
 }
 
 /// Разобранный список: поддерживаемые серверы и число пропущенных строк. Имя — из `#фрагмента`, иначе «сервер:порт»;
@@ -67,7 +77,14 @@ pub fn parse_list(lines: &[String]) -> Stored {
                 }
                 st.entries.push(Entry { name, kind: p.kind, info: p.info, link: l.clone() });
             }
-            Err(_) => st.skipped += 1,
+            Err(e) => {
+                st.skipped += 1;
+                let scheme = l.split_once("://").map_or("", |(s, _)| s).to_ascii_lowercase();
+                let r = format!("{scheme}: {e}").replace('"', "'");
+                if st.reasons.len() < 3 && !st.reasons.iter().any(|x| x.ends_with(&r)) {
+                    st.reasons.push(format!("строка {}: {r}", st.entries.len() + st.skipped));
+                }
+            }
         }
     }
     st
@@ -169,9 +186,13 @@ pub fn import(config_path: &str, id: &str, file: &str) -> Response {
         Ok(b) => b,
         Err(m) => return Response::error(500, "unreadable", m),
     };
-    let st = parse_list(&decode_list(&body));
+    let lines = decode_list(&body);
+    if lines.is_empty() {
+        return Response::error(422, "subscription_empty", "в ответе подписки нет ссылок на серверы: похоже, сервер отдал страницу для браузера или настройки для другой программы");
+    }
+    let st = parse_list(&lines);
     if st.entries.is_empty() {
-        return Response::error(422, "subscription_empty", format!("в ответе подписки нет поддерживаемых серверов (пропущено строк: {})", st.skipped));
+        return Response::error(422, "subscription_empty", format!("в ответе подписки нет поддерживаемых серверов (пропущено строк: {}; {})", st.skipped, st.reasons.join("; ")));
     }
     if let Err(m) = save(config_path, id, &st) {
         return Response::error(500, "write_failed", m);
@@ -237,6 +258,20 @@ mod tests {
         assert_eq!((st.entries.len(), st.skipped), (2, 1));
         assert_eq!(st.entries[1].kind, ProfileKind::Hysteria2);
         assert!(decode_list(b"<html>not a list</html>").is_empty());
+        // страница для браузера: адреса внутри разметки — не ссылки на серверы
+        assert!(decode_list(b"<html>\n<link href=\"https://cdn.example.com/a.css\">\n<a href=\"vless://x\">x</a></html>").is_empty());
+    }
+
+    #[test]
+    fn real_world_links_and_reasons() {
+        // название с пробелами, флагом и «%», Vision udp443, отпечаток chrome_auto — как у панелей Remnawave и 3x-ui
+        let l = "vless://bf000d23-0752-40b4-affe-68f7707a9661@a.example.com:443?security=reality&pbk=k&sid=ab&fp=chrome_auto&flow=xtls-rprx-vision-udp443&type=tcp#\u{1F1F3}\u{1F1F1} Нидерланды -50% 1";
+        let x = "vless://bf000d23-0752-40b4-affe-68f7707a9661@b.example.com:443?type=xhttp#X";
+        let st = parse_list(&[l.to_string(), x.to_string()]);
+        assert_eq!(st.entries.len(), 1, "{:?}", st.reasons);
+        assert_eq!(st.entries[0].name, "\u{1F1F3}\u{1F1F1} Нидерланды -50% 1");
+        assert_eq!(st.skipped, 1);
+        assert!(st.reasons[0].starts_with("строка 2: vless:") && st.reasons[0].contains("xhttp"), "{:?}", st.reasons);
     }
 
     #[test]

@@ -104,7 +104,8 @@ fn split(rest: &str) -> Result<Parts, String> {
         let (k, v) = kv.split_once('=').unwrap_or((kv, ""));
         query.push((pct_decode(k)?, pct_decode(&v.replace('+', "%20"))?));
     }
-    let name = frag.map(pct_decode).transpose()?.map(|n| n.chars().filter(|c| !c.is_control()).take(64).collect::<String>()).filter(|n| !n.trim().is_empty());
+    // название (#фрагмент) не мешает разбору: «%» без кода и пробелы оставляем как есть
+    let name = frag.map(|f| pct_decode(f).unwrap_or_else(|_| f.to_string())).map(|n| n.chars().filter(|c| !c.is_control()).take(64).collect::<String>().trim().to_string()).filter(|n| !n.is_empty());
     Ok(Parts { user: pct_decode(user)?, host, port, query, name })
 }
 
@@ -164,13 +165,9 @@ fn tls(q: &Q, host: &str, default_on: bool, alpn_default: Option<&[&str]>) -> Re
             }
         }
     }
-    let fp = q.get("fp").map(str::to_ascii_lowercase);
-    if let Some(fp) = &fp {
-        const FPS: &[&str] = &["chrome", "firefox", "edge", "safari", "360", "qq", "ios", "android", "random", "randomized"];
-        if !FPS.contains(&fp.as_str()) {
-            return Err(format!("отпечаток TLS «{fp}» не поддерживается"));
-        }
-    }
+    // отпечаток, которого нет в sing-box (chrome_auto, randomizednoalpn…), — как браузер Chrome
+    const FPS: &[&str] = &["chrome", "firefox", "edge", "safari", "360", "qq", "ios", "android", "random", "randomized"];
+    let fp = q.get("fp").map(str::to_ascii_lowercase).map(|f| if FPS.contains(&f.as_str()) { f } else { "chrome".into() });
     if sec == "reality" {
         let pbk = q.get("pbk").ok_or("в ссылке Reality нет открытого ключа (pbk)")?;
         let mut r = Map::new();
@@ -234,6 +231,8 @@ fn vless(p: Parts) -> Result<Proxy, String> {
     let (tr, transport) = transport(&q)?;
     let mut o = json!({ "type": "vless", "server": p.host, "server_port": p.port, "uuid": p.user, "packet_encoding": "xudp" });
     if let Some(flow) = q.get("flow") {
+        // xtls-rprx-vision-udp443 — тот же Vision; sing-box и так пропускает UDP 443 через сервер
+        let flow = if flow == "xtls-rprx-vision-udp443" { "xtls-rprx-vision" } else { flow };
         if flow != "xtls-rprx-vision" {
             return Err(format!("flow «{flow}» не поддерживается (только xtls-rprx-vision)"));
         }
@@ -312,7 +311,8 @@ fn shadowsocks(rest: &str) -> Result<Proxy, String> {
     if !q.is_empty() {
         warnings.push(format!("параметры ss:// пропущены: {q}"));
     }
-    let name = frag.map(pct_decode).transpose()?.map(|n| n.chars().filter(|c| !c.is_control()).take(64).collect::<String>()).filter(|n| !n.trim().is_empty());
+    // название (#фрагмент) не мешает разбору: «%» без кода и пробелы оставляем как есть
+    let name = frag.map(|f| pct_decode(f).unwrap_or_else(|_| f.to_string())).map(|n| n.chars().filter(|c| !c.is_control()).take(64).collect::<String>().trim().to_string()).filter(|n| !n.is_empty());
     let o = json!({ "type": "shadowsocks", "server": host, "server_port": port, "method": method, "password": clean(password, "пароль Shadowsocks")? });
     Ok(Proxy { kind: ProfileKind::Shadowsocks, info: ProxyInfo { server: host, port, security: None, transport: None }, name, outbound: o, warnings })
 }
@@ -333,7 +333,9 @@ fn uuid_ok(u: &str) -> Result<(), ()> {
 /// Ссылка сервера модуля sing-box.
 pub fn parse_link(link: &str) -> Result<Proxy, String> {
     let link = link.trim();
-    if link.len() > MAX_LINK || link.chars().any(|c| c.is_control() || c == ' ') {
+    // пробелы допустимы только в названии (после #)
+    let main = link.split_once('#').map_or(link, |(m, _)| m);
+    if link.len() > MAX_LINK || link.chars().any(char::is_control) || main.contains(' ') {
         return Err("ссылка слишком длинная или содержит пробелы и управляющие символы".into());
     }
     let (scheme, rest) = link.split_once("://").ok_or("это не ссылка на сервер (нет схемы://)")?;

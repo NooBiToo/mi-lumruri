@@ -89,8 +89,21 @@ echo ok >"$LT/mode"; rm -f "$S/apply.request"; sub
 [ "$(j "$E/secrets.json" '"a.example.com" in s["profiles"]["vl"]["link"]')" = True ] && ok "f: ссылка первого сервера — в секрете" || bad "f: secrets"
 [ "$(j "$E/config.json" 's["profiles"][1]["proxy"]["server"]=="a.example.com"')" = True ] && ok "f: сводка в настройках" || bad "f: config"
 [ "$(j "$S/sub/tt.json" 's["ok"]')" = True ] && ok "f: подписка TrustTunnel тоже обновлена" || bad "f: tt: $(cat "$S/sub/tt.json" 2>&1)"
+grep "sub.example.com/list" "$LT/curl.log" | grep -q -- "-A v2rayN/" && grep "vpn.example.com" "$LT/curl.log" | tail -n 1 | grep -q -- "-A mi-lumruri"   && ok "f: User-Agent v2rayN для списка ссылок, mi-lumruri для TrustTunnel" || bad "f: UA: $(tail -2 "$LT/curl.log")"
 python3 -I -c 'import json,sys;p=sys.argv[1];c=json.load(open(p));c["profiles"][1]["sub_pick"]="B";json.dump(c,open(p,"w"))' "$E/config.json"
 sub
 [ "$(j "$E/config.json" 's["profiles"][1]["kind"]=="hysteria2" and s["profiles"][1]["proxy"]["server"]=="b.example.com"')" = True ] && ok "f: выбранный сервер B (Hysteria2)" || bad "f: pick: $(cat "$E/config.json")"
+
+# страница для браузера вместо списка — понятная ошибка, прежний сервер остаётся
+printf '<html>
+<link href="https://cdn.example.com/a.css">
+</html>
+' >"$LT/list.b64"; sub
+[ "$(j "$S/sub/vl.json" '(not s["ok"]) and "страницу для браузера" in s["error"]')" = True ] && ok "g: страница вместо списка — ошибка с причиной" || bad "g: $(cat "$S/sub/vl.json" 2>&1)"
+[ "$(j "$E/config.json" 's["profiles"][1]["proxy"]["server"]=="b.example.com"')" = True ] && ok "g: прежний сервер действует" || bad "g: config"
+# ссылки, которые разбор не берёт, — причина в ошибке
+printf 'vless://bf000d23-0752-40b4-affe-68f7707a9661@c.example.com:443?type=xhttp#C
+' | base64 >"$LT/list.b64"; sub # secret-scan: allow тестовые ссылки
+[ "$(j "$S/sub/vl.json" '"xhttp" in s["error"]')" = True ] && ok "g: причина пропуска строки в ошибке" || bad "g: $(cat "$S/sub/vl.json" 2>&1)"
 
 [ $FAIL -eq 0 ] && echo "ИТОГ: ПРОЙДЕНО" || { echo "ИТОГ: ЕСТЬ ОШИБКИ"; exit 1; }

@@ -33,7 +33,10 @@ while read -r id kind; do
   url="$(ctl subscription-url "$ETC/config.json" "$id" 2>/dev/null)" || continue
   tmp="$R/tmp/mitt-sub.$$.body"
   # ошибки curl без ссылки: в ней логин и пароль подписки
-  if ! "$CURL" -sSfL --proto '=https' --max-time 30 --max-filesize 1048576 -o "$tmp" "$url" 2>"$LOG/sub-curl.log"; then
+  # панели VPN-провайдеров (Remnawave, Marzban, 3x-ui) выбирают формат подписки по User-Agent: для v2rayN — список
+  # ссылок в base64; на «curl» часть из них отвечает страницей для браузера или настройками другой программы
+  ua="mi-lumruri"; [ "$kind" = trusttunnel ] || ua="v2rayN/7.13.2"
+  if ! "$CURL" -sSfL --proto '=https' --max-time 30 --max-filesize 1048576 -A "$ua" -o "$tmp" "$url" 2>"$LOG/sub-curl.log"; then
     e="$(tail -n 1 "$LOG/sub-curl.log" | sed 's#https://[^ ]*#<ссылка>#g')"
     rm -f "$tmp"; put false "${prev_upd:-null}" "сервер подписки не ответил: $e"; mlog "подписка $id: не скачана ($e)"
     [ "$prev_ok" = false ] || notify subscription sub_failed "$e"; rc_all=1; continue
