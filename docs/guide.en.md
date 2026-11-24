@@ -2,7 +2,7 @@
 
 [Русский](guide.md) · **English** · [简体中文](guide.zh-CN.md)
 
-This guide covers Mi Lumruri version 0.13.1. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
+This guide covers Mi Lumruri version 0.14.0. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
 
 You need a BE7000 (RC06) with firmware 1.1.38, working root access over SSH from the home network, the installation TAR, and the parameters of your TrustTunnel server. The stock release firmware usually ships with SSH turned off.
 
@@ -256,25 +256,21 @@ The icon shows the type when it is known: TV, phone, tablet, computer, printer, 
 
 ### Overview
 
-The screen is a grid: Routes and Traffic on the left, Router and Speed and latency on the right (one column on a narrow screen).
+Until the server is configured, Overview shows the Connect a server card with the Set up server button. A card at the top also appears when something is wrong, and it explains what to do.
 
-**Router** shows the router status, refreshed every 5 seconds: CPU load (overall and per core, load average), used and free memory, temperature (with many sensors, as on the BE7000, the maximum and average, with the full list under All sensors), time since the last restart, the number of connections, and the current internet (WAN port) and VPN speed. A short version is in the header on every screen: CPU, memory and the hottest sensor (CPU and temperature on a phone); clicking it opens Overview. High values are highlighted: CPU from 70 %, memory from 80 %, temperature from 75 °C.
+The screen has three sections of the same width: Now, Routes and Traffic.
 
-**Speed in Routes:** the Through VPN branch shows the channel speed from the last speed test through the VPN and the current tunnel traffic; the direct and DPI-bypass branches show the direct speed test result and the current traffic outside the VPN. With no speed test yet there is a Measure speed button.
+**Now** is six identical tiles refreshed every 5 seconds: internet (download on the WAN port, a 2-minute chart, upload and the port name below), through VPN (the same inside the tunnels), latency to the server from the last speed test (and to the backup server, if there is one), CPU (a bar per core, load average), memory (how much is free) and temperature (the hottest sensor, a bar per sensor, 13 on the BE7000, and the average). Hover over the bars to see the values. High values are highlighted: CPU from 70 %, memory from 80 %, temperature from 75 °C, latency from 150 ms. Next to the heading: time since the last restart and the number of connections. On other screens a short version is in the header: CPU, memory and the hottest sensor; clicking it opens Overview.
 
-**Traffic** names devices the same way as the Devices screen: your name, the name found on the network, the DHCP name or the maker. With the [traffic log](#modules), Month, 3 months and Year periods appear, by day.
-
-Until the server is configured, Overview shows the Connect a server card with the Set up server button.
-
-After that, the main element is the **Routes** diagram: devices → router → routes (through the VPN, with DPI bypass, directly) with the services on each. Dots run along active routes, and disabled routes are drawn dashed. The VPN state is an indicator on the router. The Change link leads to Sites. The card above the diagram appears only when something is wrong, and it explains what to do.
+**Routes** is cards of the same size: through VPN, with DPI bypass, direct (or Exceptions when all internet goes through the VPN). Each shows the channel speed from the last speed test (through the VPN or direct), the service icons and the number of your own addresses, and the current traffic on the route at the bottom. DPI-bypass traffic is not counted separately; it is part of Direct. A route that is off has a dashed frame. The section heading shows which devices are used and how many are online (opens Devices), the time of the last speed test, the **Measure speed** button and the Change link to Sites.
 
 The **VPN** switch at the top of the panel turns the VPN off: all traffic goes directly, while the selection of sites and devices is kept and starts working again when the VPN is turned back on. While the VPN is off, sites with DPI bypass still open with Zapret. If Zapret is on only for all other sites, it turns off together with the VPN.
 
 If the router could not apply the latest settings, the top shows "Settings not applied" and a short reason. The router then runs on the previous settings. If applying the rules itself failed, it keeps the protection on: sites from the VPN list do not open until the settings apply. This usually happens when the tunnel is not up yet: the router retries once a minute and applies the settings as soon as the tunnel is ready.
 
-At the bottom: when the site lists were updated and the **Configure** link to the Sites screen, where you manage them. See [Site lists](#site-lists).
+Below the routes: when the site lists were updated. See [Site lists](#site-lists).
 
-Below is the **Traffic** card for a day or a week: how much went through the router WAN port (all internet, including encrypted VPN traffic), how much of it was inside the tunnel, an hourly chart and the devices that use the most. Per-device accounting comes from the firmware's own trafficd service. The router takes readings every 5 minutes and keeps the last 7 days; the copy in `/data` is refreshed every hour, so a reboot loses at most an hour.
+**Traffic** for a day or a week (with the [traffic log](#modules), also Month, 3 months and Year, by day): on the left a chart of how much went through the router WAN port (all internet, including encrypted VPN traffic) and how much of it was inside the tunnel; on the right the devices that use the most. Devices are named the same way as on the Devices screen: your name, the name found on the network, the DHCP name or the maker. Per-device accounting comes from the firmware's own trafficd service. The router takes readings every 5 minutes and keeps the last 7 days; the copy in `/data` is refreshed every hour, so a reboot loses at most an hour.
 
 ### Custom DNS records
 

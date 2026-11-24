@@ -203,7 +203,7 @@ onBeforeUnmount(() => { removeEventListener('hashchange', onHash); clearInterval
           <span class="save__text" :title="saveText">{{ saveText }}</span>
           <button v-if="saveStatus.action" type="button" class="save__act" @click="saveStatus.action.run()">{{ saveStatus.action.label }}</button>
         </div>
-        <HealthChips v-if="config" class="top__health" @open="go('status')" />
+        <HealthChips v-if="config && tab !== 'status'" class="top__health" @open="go('status')" />
         <div class="top__end">
           <label v-if="vpnAvailable && simple" class="master" :title="simple.enabled ? t('Выключить VPN') : t('Включить VPN')">
             <span class="master__label">VPN</span>

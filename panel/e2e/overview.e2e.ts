@@ -91,23 +91,31 @@ async function simplify(page: Page) {
 }
 const config = () => JSON.parse(readFileSync(stand.opts.config, 'utf8'))
 
-test('шапка и «Обзор»: состояние роутера, скорость маршрутов, имена в «Трафике»', async ({ page }) => {
+test('«Обзор»: плитки «Сейчас», карточки маршрутов со скоростью, имена в «Трафике»; значки в шапке — на других страницах', async ({ page }) => {
   await login(page)
   await simplify(page)
-  await nav(page, /Обзор/).click()
   const chips = page.getByRole('button', { name: /Состояние роутера/ })
-  await expect(chips).toContainText('40%')
   await expect(chips).toContainText('61°')
-  const card = page.getByRole('group', { name: 'Роутер' })
-  await expect(card.getByText('Температура, максимум')).toBeVisible()
-  await expect(card.locator('.hl__row', { hasText: 'Температура, в среднем' })).toContainText('56 °C')
-  await card.getByText('Все датчики (4)').click()
-  await expect(card.locator('.sensors__item', { hasText: 'Датчик 4' })).toContainText('61 °C')
-  await expect(card.getByText('3 дня 4 ч')).toBeVisible()
-  await expect(card.getByText('412')).toBeVisible()
-  await expect(page.locator('.tspeed__cap--vpn')).toHaveText('199 Мбит/с')
-  await expect(page.locator('.tspeed__cap').last()).toHaveText('100 Мбит/с')
+  await nav(page, /Обзор/).click()
+  await expect(chips).toHaveCount(0)
+  const tile = (name: string) => page.getByRole('region', { name, exact: true })
+  await expect(tile('Процессор')).toContainText('0,42')
+  await expect(tile('Температура')).toContainText('61°C')
+  await expect(tile('Температура')).toContainText('среднее 56 °C')
+  await expect(tile('Задержка')).toContainText('40мс')
+  await expect(tile('Память')).toContainText('40%')
+  await expect(page.getByText('без перезагрузки 3 дня 4 ч · 412 соединений')).toBeVisible()
+  await expect(page.locator('.rcard__cap--vpn')).toHaveText('199 Мбит/с')
+  await expect(page.locator('.rcard__cap--direct')).toHaveText('100 Мбит/с')
   await expect(page.locator('.stats__name', { hasText: 'Телевизор в зале' })).toBeVisible()
+  if (process.env.SHOT) {
+    await page.emulateMedia({ colorScheme: 'dark' })
+    await page.setViewportSize({ width: 1440, height: 1100 })
+    await page.waitForTimeout(6000)
+    await page.screenshot({ path: process.env.SHOT, fullPage: true })
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.screenshot({ path: process.env.SHOT.replace('.png', '-phone.png'), fullPage: true })
+  }
   expect(consoleErrors).toEqual([])
 })
 

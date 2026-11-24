@@ -4,14 +4,12 @@ import Button from 'primevue/button'
 import Message from 'primevue/message'
 import { ArrowRight } from 'lucide-vue-next'
 import { api, manage, type SpeedResponse, type ZapretTestState } from '../api'
-import { bitrate, rates, useHealth } from '../health'
-import HealthCard from '../components/HealthCard.vue'
-import SpeedCard from '../components/SpeedCard.vue'
-import { catalog, config, leases, lists, loadLeases, loadLists, loadStatus, profile, service, serverReady, simple, simpleState, tunnel } from '../store'
-import { AUTO, deviceRows, plural, when, zapretIdle } from '../status'
+import { bitrate, health, rates, useHealth } from '../health'
+import HealthTiles from '../components/HealthTiles.vue'
+import RouteCards, { type RouteCard, type Tone } from '../components/RouteCards.vue'
+import { catalog, config, leases, lists, loadLeases, loadLists, loadStatus, notify, profile, service, serverReady, simple, simpleState, tunnel } from '../store'
+import { AUTO, plural, when, zapretIdle } from '../status'
 import { dateTag, t } from '../i18n'
-import { avatarHue, initials } from '../ui'
-import TopoMap, { type TopoBranch, type Tone } from '../components/TopoMap.vue'
 import StatsCard from '../components/StatsCard.vue'
 
 const emit = defineEmits<{ navigate: [tab: 'server' | 'sites' | 'devices' | 'more'] }>()
@@ -22,9 +20,7 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
 const named = (ids: string[]) => ids.map((id) => ({ id, name: t(catalog.value?.services.find((x) => x.id === id)?.name ?? id) }))
 const services = computed(() => named(simple.value?.services ?? []))
 const zapretServices = computed(() => named(simple.value?.zapretServices ?? []))
-const MAX_DOMAINS = 6
-
-// ---- схема маршрутов: устройства → роутер → ветки ----
+// ---- маршруты: карточки веток ----
 const devKpi = computed(() => {
   const s = simple.value
   const online = leases.value.length
@@ -48,66 +44,70 @@ async function loadSpeed() {
 }
 async function measure() {
   const r = await manage.startSpeed()
-  if (r.status === 202) speedTimer = window.setTimeout(() => void loadSpeed(), 2000)
+  if (r.status !== 202) { notify.show('error', t('Не получилось'), r.body.error?.message); return }
+  speedSt.value = { ...(speedSt.value ?? { ok: true, speed: null, issues: [] }), running: true }
+  speedTimer = window.setTimeout(() => void loadSpeed(), 2000)
 }
 const stopHealth = useHealth()
 onBeforeUnmount(() => { stopHealth(); clearTimeout(speedTimer) })
 const tag = dateTag()
-const mbps = (p: unknown) => (p && typeof p === 'object' && 'mbps' in p ? bitrate((p as { mbps: number }).mbps * 1e6, tag) : null)
-function speedOf(kind: 'vpn' | 'zapret' | 'direct') {
+const speedRunning = computed(() => !!speedSt.value?.running || speedSt.value?.speed?.state === 'running')
+const mbps = (p: unknown) => (p && typeof p === 'object' && 'mbps' in p ? bitrate((p as { mbps: number }).mbps * 1e6, tag) : p && typeof p === 'object' && 'error' in p ? t('нет связи') : null)
+function speedOf(kind: 'vpn' | 'zapret' | 'direct'): Pick<RouteCard, 'cap' | 'now' | 'title'> {
   const s = speedSt.value?.speed
-  const running = !!speedSt.value?.running || s?.state === 'running'
-  const cap = running ? t('замеряю…') : s ? mbps(kind === 'vpn' ? s.tunnel : s.direct) : null
+  const cap = speedRunning.value ? 'measuring' as const : s ? mbps(kind === 'vpn' ? s.tunnel : s.direct) : null
   const r = rates.value
-  const now = kind === 'vpn'
-    ? (r.vpn ? t('сейчас ↓{d} ↑{u}', { d: bitrate(r.vpn.rx, tag), u: bitrate(r.vpn.tx, tag) }) : null)
-    : (r.wan ? t('сейчас ↓{d}', { d: bitrate(Math.max(0, r.wan.rx - (r.vpn?.rx ?? 0)), tag) }) : null)
+  const pos = (v: number) => Math.max(0, v)
+  const now = kind === 'zapret' ? 'shared' as const
+    : kind === 'vpn' ? (r.vpn ? { d: bitrate(r.vpn.rx, tag), u: bitrate(r.vpn.tx, tag) } : null)
+      : (r.wan ? { d: bitrate(pos(r.wan.rx - (r.vpn?.rx ?? 0)), tag), u: bitrate(pos(r.wan.tx - (r.vpn?.tx ?? 0)), tag) } : null)
   const title = s?.at ? t('Канал — замер {d} с роутера; «сейчас» — текущий трафик', { d: when(s.at) }) : t('Замера скорости ещё не было')
-  return { cap: cap ?? (running ? t('замеряю…') : null), now, title }
+  return { cap, now, title }
 }
-const cut = (ids: { id: string; name: string }[], domains: string[]) => {
-  const d = domains.slice(0, MAX_DOMAINS)
-  return { items: ids, domains: d, more: domains.length - d.length }
-}
-const branches = computed<TopoBranch[]>(() => {
+const cards = computed<RouteCard[]>(() => {
   const s = simple.value
   if (!s) return []
-  const out: TopoBranch[] = []
+  const out: RouteCard[] = []
   const vpnTone: Tone = !s.enabled ? 'idle' : tunnel.value.tone === 'ok' ? 'vpn' : (tunnel.value.tone as Tone)
+  const all = s.mode === 'all'
   out.push({
-    key: 'vpn', kind: 'vpn', tone: vpnTone, live: s.enabled && vpnTone === 'vpn', speed: s.enabled ? speedOf('vpn') : undefined,
-    name: s.mode === 'all' ? t('Весь интернет через VPN') : t('Через VPN'),
+    key: 'vpn', kind: 'vpn', tone: vpnTone, live: s.enabled && vpnTone === 'vpn',
+    ...(s.enabled ? speedOf('vpn') : { cap: null, now: null, title: t('VPN выключен') }),
+    name: all ? t('Весь интернет через VPN') : t('Через VPN'),
     meta: s.enabled ? (host.value ?? t('сервер не настроен')) : t('VPN выключен'),
-    ...(s.mode === 'all' ? cut([], []) : cut(services.value, s.customDomains)),
-    note: s.mode === 'all' ? (s.exceptions.length ? t('Кроме {n}', { n: plural(s.exceptions.length, 'исключения', 'исключений', 'исключений') }) : t('Без исключений'))
-      : !services.value.length && !s.customDomains.length ? t('Сайты не выбраны') : undefined,
+    items: all ? [] : services.value, domains: all ? 0 : s.customDomains.length,
+    note: all ? (s.exceptions.length ? t('Весь интернет, кроме {n}', { n: plural(s.exceptions.length, 'исключения', 'исключений', 'исключений') }) : t('Весь интернет без исключений'))
+      : t('Сайты не выбраны'),
   })
   if (zapretServices.value.length || s.zapretDomains.length) {
-    out.push({ key: 'zapret', kind: 'zapret', tone: nfqwsUp.value ? 'zapret' : 'bad', live: nfqwsUp.value, speed: { ...speedOf('direct'), now: null },
-      name: t('С обходом блокировок'), meta: zapretWay.value, ...cut(zapretServices.value, s.zapretDomains) })
+    out.push({ key: 'zapret', kind: 'zapret', tone: nfqwsUp.value ? 'zapret' : 'bad', live: nfqwsUp.value, ...speedOf('zapret'),
+      name: t('С обходом блокировок'), meta: zapretWay.value, items: zapretServices.value, domains: s.zapretDomains.length })
   }
   if (s.mode === 'selected') {
     // при выключенном VPN остальные сайты идут напрямую без обработки (default_action — direct)
     const z = s.enabled && s.rest === 'zapret' && zapretUsed.value
-    out.push({ key: 'rest', kind: z ? 'zapret' : 'direct', tone: z ? (nfqwsUp.value ? 'zapret' : 'bad') : 'ok', live: z ? nfqwsUp.value : true, speed: speedOf('direct'),
-      name: t('Остальные сайты'), meta: z ? t('напрямую с обходом, {way}', { way: zapretWay.value }) : t('напрямую'), ...cut([], []) })
+    out.push({ key: 'rest', kind: z ? 'zapret' : 'direct', tone: z ? (nfqwsUp.value ? 'zapret' : 'bad') : 'ok', live: z ? nfqwsUp.value : true, ...speedOf('direct'),
+      name: z ? t('Остальные сайты') : t('Напрямую'), meta: z ? t('напрямую с обходом, {way}', { way: zapretWay.value }) : t('остальные сайты'),
+      items: [], domains: 0, note: t('Всё, что не попало в списки выше') })
   } else if (s.exceptions.length) {
-    out.push({ key: 'except', kind: 'direct', tone: 'ok', live: true, name: t('Исключения'),
-      meta: t('напрямую · {n}', { n: plural(s.exceptions.length, 'сайт', 'сайта', 'сайтов') }), ...cut([], []) })
+    out.push({ key: 'except', kind: 'direct', tone: 'ok', live: true, ...speedOf('direct'), name: t('Исключения'),
+      meta: t('напрямую · {n}', { n: plural(s.exceptions.length, 'сайт', 'сайта', 'сайтов') }), items: [], domains: 0, note: t('Эти сайты идут мимо VPN') })
   }
   return out
 })
-const devTopo = computed(() => {
-  const rows = config.value ? deviceRows(leases.value, config.value, {}, []).filter((d) => d.online) : []
-  const shown = rows.slice(0, 4)
-  return {
-    title: t('Устройства'),
-    meta: `${devKpi.value.value.toLowerCase()} · ${devKpi.value.note}`,
-    avatars: shown.map((d) => ({ mac: d.mac, name: d.name, initials: initials(d.name) || '•', hue: avatarHue(d.mac) })),
-    extra: rows.length - shown.length,
-  }
+const devicesNote = computed(() => `${devKpi.value.value} · ${devKpi.value.note}`)
+const speedAt = computed(() => (speedSt.value?.speed?.state === 'done' ? t('замер {d}', { d: when(speedSt.value.speed.at) }) : null))
+const ping = computed(() => (speedSt.value?.speed?.state === 'done' ? speedSt.value.speed.ping : null))
+function uptimeText(u: number) {
+  const d = Math.floor(u / 86400), hh = Math.floor((u % 86400) / 3600), m = Math.floor((u % 3600) / 60)
+  return d ? t('{d} {h} ч', { d: plural(d, 'день', 'дня', 'дней'), h: hh }) : hh ? t('{h} ч {m} мин', { h: hh, m }) : t('{m} мин', { m })
+}
+const routerNote = computed(() => {
+  const h = health.value
+  if (!h) return null
+  return [h.uptime != null ? t('без перезагрузки {u}', { u: uptimeText(h.uptime) }) : null,
+    h.conntrack ? plural(h.conntrack.count, 'соединение', 'соединения', 'соединений') : null].filter(Boolean).join(' · ')
 })
-const hubTopo = computed(() => ({ tone: tunnel.value.tone as Tone, meta: tunnel.value.title }))
 const zapretAuto = computed(() => (config.value?.zapret?.strategy ?? AUTO) === AUTO && (config.value?.zapret?.youtube ?? AUTO) === AUTO)
 
 // ---- списки сайтов ----
@@ -159,31 +159,38 @@ onMounted(async () => {
       {{ t('Настройки изменены вручную, поэтому здесь их не показать. Подробнее — на экране «Сайты».') }}
     </Message>
 
-    <div class="ov-grid">
-    <div class="ov-main">
-    <div v-if="simple" class="card routes">
-      <div class="card__head">
-        <h2 id="routes-title" class="card__title">{{ t('Маршруты') }}</h2>
-        <button type="button" class="link-btn" @click="emit('navigate', 'sites')">{{ t('Изменить') }}</button>
-      </div>
+    <div class="ov">
+      <section class="ov-sec" aria-labelledby="now-title">
+        <div class="ov-head">
+          <h2 id="now-title" class="ov-head__title">{{ t('Сейчас') }}</h2>
+          <span v-if="routerNote" class="meta">{{ routerNote }}</span>
+        </div>
+        <HealthTiles :ping="ping" :host="host" />
+      </section>
 
-      <TopoMap :branches="branches" :devices="devTopo" :hub="hubTopo" @devices="emit('navigate', 'devices')" @measure="measure" />
+      <section v-if="simple" class="ov-sec" aria-labelledby="routes-title">
+        <div class="ov-head">
+          <div class="ov-head__lead">
+            <h2 id="routes-title" class="ov-head__title">{{ t('Маршруты') }}</h2>
+            <button type="button" class="link-btn ov-head__note" :title="t('Устройства')" @click="emit('navigate', 'devices')">{{ devicesNote }}</button>
+          </div>
+          <div class="ov-head__acts">
+            <span v-if="speedAt" class="meta">{{ speedAt }}</span>
+            <Button v-if="serverReady" :label="speedRunning ? t('Замеряю…') : t('Замерить скорость')" :loading="speedRunning" :disabled="speedRunning"
+              severity="secondary" variant="outlined" size="small" @click="measure" />
+            <button type="button" class="link-btn" @click="emit('navigate', 'sites')">{{ t('Изменить') }}</button>
+          </div>
+        </div>
+        <RouteCards :cards="cards" @measure="measure" />
+        <div class="ov-foot">
+          <span :class="['meta', { 'warn-text': listsStatus && !listsStatus.ok }]">
+            {{ listsStatus?.updated ? t('Списки сайтов обновлены {d}', { d: when(listsStatus.updated) }) : snapshot ? t('Списки сайтов от {d}, из установки', { d: snapshot }) : t('Списки сайтов') }}{{ listsStatus && !listsStatus.ok ? ` · ${t('проверка не удалась')}` : '' }}
+          </span>
+          <span v-if="!simple.enabled" class="meta">{{ t('VPN выключен: выбор сохранён и заработает, когда вы включите VPN') }}</span>
+        </div>
+      </section>
 
-      <div class="routes__foot">
-        <span :class="['meta', { 'warn-text': listsStatus && !listsStatus.ok }]">
-          {{ listsStatus?.updated ? t('Списки сайтов обновлены {d}', { d: when(listsStatus.updated) }) : snapshot ? t('Списки сайтов от {d}, из установки', { d: snapshot }) : t('Списки сайтов') }}{{ listsStatus && !listsStatus.ok ? ` · ${t('проверка не удалась')}` : '' }}
-        </span>
-        <button type="button" class="link-btn" @click="emit('navigate', 'sites')">{{ t('Настроить') }}</button>
-      </div>
-      <p v-if="!simple.enabled" class="hint">{{ t('VPN выключен: выбор сохранён и заработает, когда вы включите VPN') }}</p>
-    </div>
-
-    <StatsCard v-if="serverReady" />
-    </div>
-    <aside class="ov-side" :aria-label="t('Состояние роутера')">
-      <HealthCard />
-      <SpeedCard v-if="serverReady" />
-    </aside>
+      <StatsCard v-if="serverReady" />
     </div>
   </section>
 </template>
