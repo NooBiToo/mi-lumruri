@@ -8,7 +8,8 @@ import Textarea from 'primevue/textarea'
 import ToggleSwitch from 'primevue/toggleswitch'
 import { Check, ChevronDown, ClipboardPaste, Minus, Plus, Trash2 } from 'lucide-vue-next'
 import Select from 'primevue/select'
-import { api, manage, type Config, type Endpoint, type Profile, type SubscriptionResponse, type TlsProfile } from '../api'
+import { api, manage, type Config, type Endpoint, type ModuleInfo, type Profile, type SubscriptionResponse, type TlsProfile } from '../api'
+import { isProxyLink, parseProxyLink, PROTOCOL_LABEL } from '../proxyLink'
 import { emptyProfileForm, formToProfile, formToSecret, profileToForm, type ProfileForm } from '../manage'
 import { parseServer, TLS_PROFILES } from '../serverConfig'
 import { build, config, freeTunnel, hasPassword, hasSubscription, knownDevicesNow, loadSecrets, notify, profile, profiles, save, selectedServer, simple, tunnel, withProfile } from '../store'
@@ -18,7 +19,7 @@ import Segmented from '../components/Segmented.vue'
 import BackupServer from '../components/BackupServer.vue'
 import SpeedCard from '../components/SpeedCard.vue'
 
-const emit = defineEmits<{ navigate: [tab: 'sites'] }>()
+const emit = defineEmits<{ navigate: [tab: 'sites' | 'modules'] }>()
 
 const PROFILE_ID = 'tt'
 /** Добавление нового сервера (форма пустая, сохранение добавляет профиль со свободным номером туннеля). */
@@ -82,7 +83,23 @@ watch(pasted, (t) => { if (!t.trim()) parsed.value = null })
 function recognize() {
   const text = pasted.value
   if (!text.trim()) { parsed.value = null; return }
+  // серверы модуля sing-box: ссылка целиком — секрет, в настройках — сводка
+  if (isProxyLink(text)) {
+    const x = parseProxyLink(text)
+    if ('error' in x) { parsed.value = { error: x.error }; return }
+    const f = form.value
+    f.kind = x.kind; f.proxy = x.info; f.link = text.trim()
+    if (x.name && (!profile.value || adding.value)) f.name = x.name
+    parsed.value = { rows: [
+      { label: t('Протокол'), value: PROTOCOL_LABEL[x.kind] },
+      { label: t('Сервер'), value: `${x.info.server}:${x.info.port}` },
+      ...(x.info.security ? [{ label: t('Шифрование'), value: x.info.security === 'none' ? t('нет') : x.info.security.toUpperCase() }] : []),
+      ...(x.info.transport ? [{ label: t('Транспорт'), value: x.info.transport }] : []),
+    ], warnings: [] }
+    return
+  }
   const r = parseServer(text)
+  form.value.kind = 'trusttunnel'; form.value.proxy = null; form.value.link = ''
   if ('error' in r) { parsed.value = { error: r.error }; return }
   const e: Partial<Endpoint> = r.endpoint
   const f = form.value
@@ -128,8 +145,27 @@ const done = ref(false)
 const subscribed = computed(() => !!form.value.subscriptionUrl.trim() || hasSubscription.value)
 const subscriptionOnly = computed(() => subscribed.value && !form.value.server.trim() && !form.value.username.trim())
 const needPassword = computed(() => !hasPassword.value && !form.value.password && !subscribed.value)
+const isProxy = computed(() => form.value.kind !== 'trusttunnel')
+const protoLabel = computed(() => (form.value.kind === 'trusttunnel' ? 'TrustTunnel' : PROTOCOL_LABEL[form.value.kind]))
+// ---- модуль sing-box для серверов VLESS, Hysteria2, Trojan, Shadowsocks ----
+const modules = ref<ModuleInfo[] | null>(null)
+async function loadModules() { try { const r = await manage.modules(); if (r.status === 200) modules.value = r.body.modules } catch { /* панель недоступна */ } }
+const moduleFor = computed(() => (isProxy.value ? modules.value?.find((m) => m.kinds.includes(form.value.kind)) ?? null : null))
+const moduleMissing = computed(() => isProxy.value && modules.value !== null && moduleFor.value?.installed?.state !== 'ok')
+// новая ссылка в поле «Ссылка» — обновить сводку
+watch(() => form.value.link, (l) => {
+  if (!isProxy.value || !l.trim()) return
+  const x = parseProxyLink(l)
+  if (!('error' in x) && x.kind === form.value.kind) form.value.proxy = x.info
+})
 const blocker = computed(() => {
   const f = form.value
+  if (isProxy.value) {
+    if (!f.proxy) return t('Вставьте ссылку на сервер.')
+    if (!f.link.trim() && !hasPassword.value) return t('Вставьте ссылку на сервер.')
+    if (f.link.trim() && isProxyLink(f.link)) { const x = parseProxyLink(f.link); if ('error' in x) return x.error; if (x.kind !== f.kind) return t('Ссылка другого протокола: добавьте её отдельным сервером.') }
+    return null
+  }
   if (subscriptionOnly.value) return null
   if (!f.server.trim() || !f.username.trim()) return t('Укажите адрес сервера и логин — или вставьте ссылку.')
   if (needPassword.value) return t('Укажите пароль.')
@@ -172,6 +208,7 @@ async function submit() {
     if (secret?.subscription_url) void refreshSubscription(true)
     form.value.password = ''
     form.value.subscriptionUrl = ''
+    form.value.link = ''
     pristine.value = JSON.stringify(form.value)
     pasted.value = ''
     done.value = true
@@ -212,7 +249,7 @@ const subText = computed(() => {
     ? t('Проверено {when}, параметры менялись {changed}', { when: when(s.checked), changed: when(s.updated) })
     : t('Проверено {when}, изменений нет', { when: when(s.checked) })
 })
-onMounted(() => void loadSubscription())
+onMounted(() => { void loadSubscription(); void loadModules() })
 onBeforeUnmount(() => clearTimeout(subTimer))
 const nothingSelected = computed(() => !!simple.value && simple.value.mode === 'selected' && !simple.value.services.length && !simple.value.customDomains.length)
 </script>
@@ -259,7 +296,7 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
         <div class="card">
           <div>
             <h2 class="card__title">{{ firstTime ? t('Быстрая настройка') : t('Сменить сервер') }}</h2>
-            <p class="card__sub">{{ t('Вставьте ссылку') }} <span class="num">tt://</span> {{ t('или файл конфигурации клиента — поля заполнятся сами') }}</p>
+            <p class="card__sub">{{ t('Вставьте ссылку') }} <span class="num">tt://</span> {{ t('или файл конфигурации клиента — поля заполнятся сами') }} {{ t('Серверы VLESS, Hysteria2, Trojan и Shadowsocks — ссылкой') }} <span class="num">vless://</span>, <span class="num">hy2://</span>, <span class="num">trojan://</span>, <span class="num">ss://</span>.</p>
           </div>
           <div class="field">
             <label for="paste" class="sr-only">{{ t('Ссылка или конфигурация сервера') }}</label>
@@ -288,7 +325,7 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
           <div :class="['pill', `pill--${tunnel.tone}`, 'pill--lg']"><span class="pill__dot" aria-hidden="true" /><span class="pill__text">{{ tunnel.title }}</span></div>
           <p v-if="tunnel.detail" class="hint">{{ tunnel.detail }}</p>
         </div>
-        <BackupServer v-if="!firstTime" />
+        <BackupServer v-if="!firstTime && !isProxy" />
         <SpeedCard v-if="!firstTime" />
       </div>
 
@@ -298,6 +335,27 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
           <label for="srv-name" class="field__label">{{ t('Название') }}</label>
           <InputText id="srv-name" v-model="form.name" maxlength="64" />
         </div>
+        <template v-if="isProxy">
+          <Message v-if="moduleMissing" severity="warn" :closable="false">
+            <div class="next">
+              <span>{{ moduleFor?.installed ? t('Модуль sing-box сейчас недоступен (флешка не подключена?) — сервер не работает.') : t('Для серверов {p} нужен модуль sing-box. Установите его на странице «Модули» — без него сервер сохранится, но работать не будет.', { p: protoLabel }) }}</span>
+              <Button :label="t('Открыть «Модули»')" size="small" @click="emit('navigate', 'modules')" />
+            </div>
+          </Message>
+          <dl v-if="form.proxy" class="preview__list proxy-sum">
+            <div class="preview__row"><dt>{{ t('Протокол') }}</dt><dd>{{ protoLabel }}</dd></div>
+            <div class="preview__row"><dt>{{ t('Сервер') }}</dt><dd class="num">{{ form.proxy.server }}:{{ form.proxy.port }}</dd></div>
+            <div v-if="form.proxy.security" class="preview__row"><dt>{{ t('Шифрование') }}</dt><dd>{{ form.proxy.security === 'none' ? t('нет') : form.proxy.security.toUpperCase() }}</dd></div>
+            <div v-if="form.proxy.transport" class="preview__row"><dt>{{ t('Транспорт') }}</dt><dd class="num">{{ form.proxy.transport }}</dd></div>
+          </dl>
+          <div class="field">
+            <label for="srv-link" class="field__label">{{ t('Ссылка на сервер') }}</label>
+            <Password v-model="form.link" input-id="srv-link" :feedback="false" toggle-mask fluid autocomplete="off"
+              :placeholder="hasPassword ? t('Сохранена. Оставьте пустым') : 'vless://…'" />
+            <span class="field__hint">{{ t('В ссылке есть ключ или пароль, поэтому она хранится только на роутере и сюда не возвращается. Вставьте новую, чтобы сменить сервер.') }}</span>
+          </div>
+        </template>
+        <template v-else>
         <div class="row2">
           <div class="field">
             <label for="srv-host" class="field__label">{{ t('Адрес сервера') }}</label>
@@ -326,17 +384,18 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
           </div>
         </div>
 
+        </template>
         <div class="field">
           <span id="srv-fail-label" class="field__label">{{ t('Если сервер недоступен, сайты из списка') }}</span>
           <Segmented v-model="form.onFailure" :options="FAILURE" :label="t('Если сервер недоступен')" name="onfail" />
           <span class="field__hint">{{ form.onFailure === 'block' ? t('Рекомендуется. Сайты подождут, пока сервер снова заработает.') : t('Сайты откроются без VPN, если смогут.') }}</span>
         </div>
 
-        <button type="button" class="disclose" :aria-expanded="advanced" aria-controls="srv-adv" @click="advanced = !advanced">
+        <button v-if="!isProxy" type="button" class="disclose" :aria-expanded="advanced" aria-controls="srv-adv" @click="advanced = !advanced">
           <ChevronDown :size="16" :class="['disclose__icon', { 'disclose__icon--open': advanced }]" aria-hidden="true" />
           {{ t('Дополнительные параметры') }}
         </button>
-        <div v-show="advanced" id="srv-adv" class="adv">
+        <div v-show="advanced && !isProxy" id="srv-adv" class="adv">
           <label class="setrow">
             <span class="setrow__text"><span class="setrow__title">HTTP/3</span><span class="setrow__desc">{{ t('Включайте, только если так сказано в настройках сервера') }}</span></span>
             <ToggleSwitch v-model="form.quic" input-id="srv-quic" />
@@ -404,4 +463,5 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
 .server-chip--new { cursor: default; font-style: italic; }
 .server-chip__tag { font-size: 0.75rem; opacity: 0.7; font-weight: 400; }
 .servers__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.proxy-sum { margin: 0; }
 </style>

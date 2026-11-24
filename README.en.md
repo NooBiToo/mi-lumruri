@@ -68,7 +68,7 @@ The package runs on the BE7000 with firmware 1.1.38: tunnel, selective routing, 
 - Listed sites are matched by IPv4 only: devices with VPN or Zapret rules have no outbound IPv6. The exception is devices whose whole internet goes through the VPN, with "IPv6 via VPN" turned on: their IPv6 goes through the tunnel, and the VPN server needs IPv6. Preset DNS servers have IPv6 addresses, but they are used only as a fallback.
 - Sites are matched by DNS: a device must use the router as its DNS server. "Secure DNS" (DoH) in a browser bypasses the lists.
 - Several servers at once use the mark bits of the UU plugin (a game booster) or, if it is on, of the backup WAN. If both are on, one server works. The backup server replaces the main one, and switching takes up to 2 minutes.
-- The Modules page shows only storage for now; the VLESS, Hysteria2 and AmneziaWG modules arrive in the next versions.
+- VLESS, Hysteria2, Trojan and Shadowsocks servers work through the sing-box module on a USB drive or in internal memory; the AmneziaWG module arrives in the next version.
 - DoT does not work everywhere: many ISPs block port 853.
 
 The full list is in the [guide](docs/guide.en.md#limitations).

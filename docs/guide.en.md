@@ -2,7 +2,7 @@
 
 [Русский](guide.md) · **English** · [简体中文](guide.zh-CN.md)
 
-This guide covers Mi Lumruri version 0.10.0. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
+This guide covers Mi Lumruri version 0.11.0. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
 
 You need a BE7000 (RC06) with firmware 1.1.38, working root access over SSH from the home network, the installation TAR, and the parameters of your TrustTunnel server. The stock release firmware usually ships with SSH turned off.
 
@@ -175,6 +175,12 @@ The **If the server is unavailable, sites from the list** switch: Don't open (re
 
 The package includes TrustTunnel client v1.3.0, which works with TrustTunnel server 1.3.1.
 
+#### VLESS, Hysteria2, Trojan and Shadowsocks servers
+
+These servers work through the [sing-box module](#modules): install it on the Modules page first. Then on the Server screen click Add server, paste a `vless://…`, `hysteria2://…` (or `hy2://…`), `trojan://…` or `ss://…` link and click Recognize. The panel shows the protocol, address, encryption and transport; check the Name and click Save. The link contains a key or password, so it is stored only on the router: the settings keep a summary, and the panel never shows the link itself. To change the server, paste a new link into the Server link field.
+
+Supported: VLESS over TCP, WebSocket, gRPC, HTTP and HTTPUpgrade, with no encryption, TLS or Reality (including `flow=xtls-rprx-vision`) and a uTLS fingerprint; Hysteria2 with salamander obfuscation; Trojan with TLS and the same transports; Shadowsocks with AEAD and 2022 ciphers. VMess, Shadowsocks plugins and Hysteria2 port hopping are not supported: such a link is not saved, and the panel skips unknown parameters with a warning. The backup server and latency-based choice exist only for TrustTunnel servers.
+
 #### Several servers
 
 You can have up to 16 servers, and they work **at the same time**: each has its own tunnel. The **Servers** card at the top of the screen lists them; click a server to open and edit it. **Add server** opens an empty form: paste the link, check the **Name** field and click Save. The first server in the list is the **default server**: everything without another server chosen goes through it. **Remove server** (click twice) removes a server; its sites and devices move to the default server.
@@ -266,7 +272,9 @@ Settings → **Network and DNS** tab, at the bottom. Enter a domain and an IP ad
 
 Modules add new VPN protocols to the package: VLESS, Hysteria2, AmneziaWG and others. They are large and do not fit in the router memory, so they go on a USB drive plugged into the router, or into internal memory if it has room. The **Storage** card shows the internal memory and connected USB drives: maker and model, free space, path and file system. The router checks drives once a minute, so a newly plugged drive shows up by itself.
 
-In version 0.10.0 the page shows storage only. The first modules (VLESS and Hysteria2, then AmneziaWG) and one-button installation arrive in the next versions. Then the router will also watch the drive with a module and send a notification if it disappears.
+**The sing-box module** provides VLESS, Hysteria2, Trojan and Shadowsocks servers (the package carries sing-box 1.14.4). It is about a 20 MB download and takes about 85 MB of RAM while running. In the module card choose where to install it, a USB drive or internal memory (unavailable options show why: not enough space, read-only), and click **Install**. The router downloads the module from GitHub, checks its SHA-256 against the signed package and its signature with the release key, puts it on the drive and unpacks it into RAM. The card shows the progress. A newer module version is installed with Update to …; Remove module is available when no server uses it.
+
+**If the USB drive is removed.** Running module servers keep working: the program is already in RAM. The router sends a "USB drive with the module is unavailable" notification (the "Tunnel went down or came back" event), and the module card says the drive is not connected. After a router restart without the drive, the module servers do not start, and their sites follow the If the server is unavailable choice. When the drive is plugged in again, the router unpacks the module, starts the servers and sends a notification. It is best to keep the drive plugged in permanently.
 
 ### Diagnostics
 

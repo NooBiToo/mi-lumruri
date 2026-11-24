@@ -4,7 +4,9 @@
 # настоящий сервер TrustTunnel. Пакет — out/package/mi-lumruri (node tools/package.mjs).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-PKG="${1:-$ROOT/out/package/mi-lumruri}"
+# пакет с модулем sing-box x86_64 (tools/lab/install-packages.sh: --singbox-bin) — серверы модуля запускаются в лаборатории
+PKG="${1:-$ROOT/out/package/boot/mi-lumruri}"
+MODTAR="$(ls "$(dirname "$PKG")"/mitt-mod-sing-box-*.tar 2>/dev/null | head -n 1)"
 "$ROOT/tools/fw/prepare.sh" >/dev/null
 "$ROOT/tools/lab/fetch-iptables.sh" >/dev/null
 "$ROOT/tools/lab/fetch-ipset.sh" >/dev/null
@@ -12,11 +14,12 @@ PKG="${1:-$ROOT/out/package/mi-lumruri}"
 "$ROOT/tools/lab/fetch-dnsmasq.sh" >/dev/null
 "$ROOT/tools/lab/fetch.sh" >/dev/null
 "$ROOT/tools/lab/fetch-zapret.sh" >/dev/null
+"$ROOT/tools/lab/fetch-singbox.sh" >/dev/null
 B="$ROOT/.tools/lab/bin"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"; OUT="$ROOT/out/lab/$STAMP-boot"; W="$(mktemp -d /tmp/mitt-boot.XXXXXX)"
 mkdir -p "$OUT" "$W/bin"; cp "$B/trusttunnel_client" "$B/trusttunnel_endpoint" "$W/bin/"; chmod +x "$W/bin/"*
 set +e
-ROOT="$ROOT" W="$W" OUT="$OUT" PKG="$PKG" TTCLIENT="$W/bin/trusttunnel_client" TTBIN="$W/bin/trusttunnel_endpoint" \
+ROOT="$ROOT" W="$W" OUT="$OUT" PKG="$PKG" MODTAR="$MODTAR" SBBIN="$ROOT/.tools/lab/bin/sing-box" TTCLIENT="$W/bin/trusttunnel_client" TTBIN="$W/bin/trusttunnel_endpoint" \
   unshare --user --map-root-user --net --mount --propagation private --pid --fork --mount-proc bash "$ROOT/tools/lab/lab-boot-inner.sh"
 RC=$?
 set -e

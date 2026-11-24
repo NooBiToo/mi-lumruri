@@ -1,11 +1,15 @@
 // Формы без DOM: профиль TrustTunnel ↔ Profile (экран «Сервер»), DNS (экран «Дополнительно»).
 
-import type { AdblockSource, DnsConfig, Endpoint, HostRecord, SecureDns, SecureServer, Profile, ProfileSecret, TlsProfile } from './api'
+import type { AdblockSource, DnsConfig, Endpoint, HostRecord, SecureDns, SecureServer, Profile, ProfileKind, ProfileSecret, ProxyInfo, TlsProfile } from './api'
 import { t } from './i18n'
 
 export interface ProfileForm {
   id: string
   name: string
+  /** Вид сервера: TrustTunnel или протокол модуля sing-box (тогда сервер — ссылка `link`). */
+  kind: ProfileKind
+  link: string
+  proxy: ProxyInfo | null
   onFailure: 'block' | 'direct'
   server: string
   port: string
@@ -24,14 +28,14 @@ export interface ProfileForm {
 
 export function emptyProfileForm(): ProfileForm {
   return {
-    id: '', name: '', onFailure: 'block', server: '', port: '443', sni: '', username: '', quic: false, antiDpi: false, certificate: '',
+    id: '', name: '', kind: 'trusttunnel', link: '', proxy: null, onFailure: 'block', server: '', port: '443', sni: '', username: '', quic: false, antiDpi: false, certificate: '',
     tlsProfile: 'chrome', clientRandom: '', clientRandomAuthKey: '', password: '', subscriptionUrl: '',
   }
 }
 
 export function profileToForm(p: Profile): ProfileForm {
   const f = emptyProfileForm()
-  Object.assign(f, { id: p.id, name: p.name, onFailure: p.on_failure })
+  Object.assign(f, { id: p.id, name: p.name, onFailure: p.on_failure, kind: p.kind, proxy: p.proxy ?? null })
   const e = p.endpoint
   if (!e) return f
   Object.assign(f, {
@@ -43,6 +47,11 @@ export function profileToForm(p: Profile): ProfileForm {
 
 /** Профиль TrustTunnel из формы. Здесь только сборка JSON и проверка порта; адрес, SNI, имя и сертификат проверяет контроллер. */
 export function formToProfile(f: ProfileForm, subscription = false): Profile | string {
+  // сервер модуля sing-box: в настройках — только сводка, ссылка уходит в секреты
+  if (f.kind !== 'trusttunnel') {
+    if (!f.proxy) return t('Вставьте ссылку на сервер.')
+    return { id: f.id.trim(), name: f.name.trim(), kind: f.kind, on_failure: f.onFailure, proxy: f.proxy }
+  }
   // только подписка: адрес и логин сервер пришлёт сам — профиль без точки подключения
   if (subscription && !f.server.trim() && !f.username.trim()) return { id: f.id.trim(), name: f.name.trim(), kind: 'trusttunnel', on_failure: f.onFailure }
   const port = Number(f.port.trim())
@@ -64,6 +73,10 @@ export function formToProfile(f: ProfileForm, subscription = false): Profile | s
 /** Секреты для записи; пустое поле — значение не меняется. Пробелы в пароле не обрезаются: они могут быть его частью. */
 export function formToSecret(f: ProfileForm): ProfileSecret | null {
   const s: ProfileSecret = {}
+  if (f.kind !== 'trusttunnel') {
+    if (f.link.trim()) s.link = f.link.trim()
+    return Object.keys(s).length ? s : null
+  }
   if (f.password) s.password = f.password
   if (f.subscriptionUrl.trim()) s.subscription_url = f.subscriptionUrl.trim()
   return Object.keys(s).length ? s : null

@@ -5,7 +5,7 @@
 # сервер TrustTunnel (trusttunnel_endpoint) — настоящий.
 #   tv 10.10.1.2 ─ br-lan 10.10.1.1 [router] 10.20.0.2 ─ [inet] ─ 10.30.0.2 [trusttunnel server]
 set -uo pipefail
-: "${ROOT:?}" "${W:?}" "${OUT:?}" "${PKG:?}" "${TTCLIENT:?}" "${TTBIN:?}"
+: "${ROOT:?}" "${W:?}" "${OUT:?}" "${PKG:?}" "${TTCLIENT:?}" "${TTBIN:?}" "${MODTAR:?}" "${SBBIN:?}"
 F=/tmp/mitt-fw/rootfs; Q="$ROOT/.tools/qemu/root/usr/bin/qemu-aarch64"
 PY=(python3 -I -X utf8)
 log() { printf '[boot] %s\n' "$*" | tee -a "$OUT/lab.log"; }
@@ -16,7 +16,7 @@ now() { "${PY[@]}" -c 'import time;print(round(time.time(),3))'; }
 mount -t tmpfs tmpfs /run || die "tmpfs /run"
 # --- программы «роутера»: апплеты BusyBox стока, uci/nginx/uhttpd/openssl стока (qemu), ip, iptables и ipset хоста
 SB="$W/stockbin"; mkdir -p "$SB"
-for a in sh ash cat cp mv ln rm mkdir chmod readlink sed awk grep head tail wc tr cut sort cmp df uname date sleep kill sync basename dirname unxz xzcat zcat gzip mktemp touch printf echo test expr id ls md5sum cksum pwd logger; do
+for a in sh ash cat cp mv ln rm rmdir mkdir chmod readlink sed awk grep head tail wc tr cut sort cmp df uname date sleep kill sync basename dirname unxz xzcat zcat gzip tar mktemp touch printf echo test expr id ls md5sum cksum pwd logger; do
   # только апплеты, которые действительно есть в образе 1.1.38: недостающий — ошибка «not found» в сценарии, как на роутере
   if [ -e "$F/bin/$a" ] || [ -e "$F/sbin/$a" ] || [ -e "$F/usr/bin/$a" ] || [ -e "$F/usr/sbin/$a" ]; then
   printf '#!/bin/sh\nexec %s -L %s %s/bin/busybox %s "$@"\n' "$Q" "$F" "$F" "$a" >"$SB/$a"
@@ -69,7 +69,10 @@ exec env LD_LIBRARY_PATH="$DMQ/usr/lib/x86_64-linux-gnu" python3 -I "$ROOT/tools
   --pid-file="$W/dnsmasq.pid" --log-queries --log-facility="$OUT/dnsmasq.log"
 EOF
 chmod +x "$W/dnsmasq-restart"
-ENVR=(PATH="$SB:$NFBIN" MITT_ROOT="$RR" MITT_LAB_BIN="$LB" MITT_UCI_CONF="$RR/etc/config" MITT_INTERVAL=2 MITT_AUTOSTART_CHECK=4 MITT_LEASES="$RR/tmp/dhcp.leases"
+# флешка: подставные /proc/mounts и df (точка монтирования — /mnt/usb-lab в корне эмуляции)
+mkdir -p "$W/proc" "$RR/mnt/usb-lab"; : >"$W/proc/mounts"
+printf '#!/bin/sh\necho "Filesystem 1K-blocks Used Available Use%% Mounted on"\necho "ubi0_1 40000 22000 18000 55%% /data"\ngrep -q usb-lab %s && echo "/dev/sda1 15000000 1000000 14000000 7%% /mnt/usb-lab"\nexit 0\n' "$W/proc/mounts" >"$SB/df-lab"; chmod +x "$SB/df-lab"
+ENVR=(PATH="$SB:$NFBIN" MITT_ROOT="$RR" MITT_LAB_BIN="$LB" MITT_PROC="$W/proc" MITT_DF="$SB/df-lab" MITT_STORAGE_EVERY=2 MITT_MODULE_WATCH=2 MITT_MODULE_SRC="$MODTAR" MITT_UCI_CONF="$RR/etc/config" MITT_INTERVAL=2 MITT_AUTOSTART_CHECK=4 MITT_LEASES="$RR/tmp/dhcp.leases"
   MITT_DNSMASQ_RESTART="$W/dnsmasq-restart" MITT_LISTS_URL="http://10.99.0.20:8080" MITT_ZAPRET_TARGETS="$W/zapret-targets.txt" MI_TT_IPTABLES="$NFBIN/iptables" MI_TT_IP6TABLES="$NFBIN/ip6tables" MI_TT_IPTABLES_SAVE="$NFBIN/iptables-save" MI_TT_IPSET="$NFBIN/ipset")
 
 # --- топология ---
@@ -393,10 +396,73 @@ for i in $(seq 60); do [ "$(at_of)" -gt "${A0:-0}" ] 2>/dev/null && grep -q '"pa
 { nsx router ip rule show | awk -F: '$1>=3000 && $1<=3199'; ls "$RN" | grep -E '^trusttunnel[0-9]*\.pid$'; nsx router ip link show mitt1 2>&1 | head -1; } >"$OUT/zone.multi-off.txt" 2>&1
 wait_tunnel
 
+# 6е) модуль sing-box: флешка подключена — она видна в «Модулях», модуль ставится на неё из панели (проверка SHA-256 по
+# каталогу пакета и подписи), серверы VLESS и Hysteria2 (настоящий sing-box в «VPN») — через модуль: видео ТВ идёт через
+# VLESS, затем через Hysteria2. Флешка пропала — уведомление, сервер работает из RAM; вернулась — уведомление.
+phase singbox_module
+SBUUID="$("${PY[@]}" -c 'import uuid;print(uuid.uuid4())')"; HYPW="$("${PY[@]}" -c 'import secrets;print(secrets.token_urlsafe(16))')"
+"${PY[@]}" -c 'import json,sys
+json.dump({"log":{"level":"warn"},"inbounds":[
+  {"type":"vless","listen":"10.30.0.2","listen_port":8443,"users":[{"uuid":sys.argv[2]}]},
+  {"type":"hysteria2","listen":"10.30.0.2","listen_port":8444,"users":[{"password":sys.argv[3]}],"tls":{"enabled":True,"certificate_path":sys.argv[4],"key_path":sys.argv[5]}}],
+ "outbounds":[{"type":"direct"}]},open(sys.argv[1],"w"))' "$W/sb-server.json" "$SBUUID" "$HYPW" "$W/tls/cert.pem" "$W/tls/key.pem"
+nsx vpn "$SBBIN" run -c "$W/sb-server.json" >>"$OUT/singbox-server.log" 2>&1 &
+echo "/dev/sda1 /mnt/usb-lab vfat rw,relatime 0 0" >"$W/proc/mounts"
+for i in $(seq 30); do grep -q usb-lab "$RN/storage.json" 2>/dev/null && break; sleep 1; done
+cu -w '\n%{http_code}' https://10.10.1.1:8443/cgi-bin/api/storage >"$OUT/storage.out"
+post modules/install '{"name":"sing-box","target":"/mnt/usb-lab"}' >"$OUT/module-install.out"
+for i in $(seq 180); do grep -q '"state":"\(done\|failed\)"' "$RN/module.json" 2>/dev/null && break; sleep 1; done
+cp "$RN/module.json" "$OUT/module.json" 2>/dev/null
+cu -w '\n%{http_code}' https://10.10.1.1:8443/cgi-bin/api/modules >"$OUT/modules.out"
+cp "$E/config.json" "$W/config.before-sb.json"; cp "$E/secrets.json" "$W/secrets.before-sb.json"
+"${PY[@]}" -c 'import json,sys
+p=sys.argv[1]; c=json.load(open(p))
+c["profiles"]+=[{"id":"vl","name":"VLESS стенд","kind":"vless","tunnel":2,"on_failure":"block","proxy":{"server":"10.30.0.2","port":8443,"security":"none","transport":"tcp"}},
+                {"id":"hy","name":"Hysteria2 стенд","kind":"hysteria2","tunnel":3,"on_failure":"block","proxy":{"server":"10.30.0.2","port":8444,"security":"tls","transport":"quic"}}]
+for r in c["rules"]:
+    if r["id"]=="r-tv-video": r["action"]={"type":"profile","id":"vl"}
+    if r["id"]=="r-tv-dns": r["action"]={"type":"profile","id":"hy"}
+json.dump(c,open(p,"w"),ensure_ascii=False,indent=2)
+s=json.load(open(sys.argv[2]))
+s["profiles"]["vl"]={"link":"vless://%s@10.30.0.2:8443?type=tcp&security=none#lab" % sys.argv[3]}
+s["profiles"]["hy"]={"link":"hysteria2://%s@10.30.0.2:8444?sni=vpn.lab.test&insecure=1#hy" % sys.argv[4]}
+json.dump(s,open(sys.argv[2],"w"))' "$E/config.json" "$E/secrets.json" "$SBUUID" "$HYPW"
+A0="$(at_of)"; post apply-request '{}' >/dev/null
+for i in $(seq 90); do [ "$(at_of)" -gt "${A0:-0}" ] 2>/dev/null && grep -q '"\(panel-request\|module\)' "$RN/last-apply.json" && break; sleep 1; done
+for i in $(seq 30); do nsx router ip link show mitt2 >/dev/null 2>&1 && nsx router ip link show mitt3 >/dev/null 2>&1 && break; sleep 1; done
+cp "$RN/last-apply.json" "$OUT/last-apply.sb.json"; cp "$RR/tmp/mi-lumruri/render/tunnels.list" "$OUT/tunnels.sb.list" 2>/dev/null
+tx() { nsx router ip -s link show "$1" 2>/dev/null | awk '/TX:/{getline; print $1; exit}'; }
+B1="$(tx mitt2)"; wait_tunnel; probe S-tv-video-vless tv; B2="$(tx mitt2)"
+{ ls "$RN" | grep -E '^singbox[0-9]+\.pid$'; echo "--- mitt2 tx $B1 -> $B2"; nsx router ip rule show | awk -F: '$1>=3000 && $1<=3199'; } >"$OUT/zone.sb.txt" 2>&1
+# видео — через Hysteria2
+"${PY[@]}" -c 'import json,sys
+p=sys.argv[1]; c=json.load(open(p))
+for r in c["rules"]:
+    if r["id"]=="r-tv-video": r["action"]={"type":"profile","id":"hy"}
+    if r["id"]=="r-tv-dns": r["action"]={"type":"profile","id":"vl"}
+json.dump(c,open(p,"w"),ensure_ascii=False,indent=2)' "$E/config.json"
+A0="$(at_of)"; post apply-request '{}' >/dev/null
+for i in $(seq 90); do [ "$(at_of)" -gt "${A0:-0}" ] 2>/dev/null && grep -q '"panel-request' "$RN/last-apply.json" && break; sleep 1; done
+for i in $(seq 30); do nsx router ip link show mitt3 >/dev/null 2>&1 && break; sleep 1; done
+B1="$(tx mitt3)"; wait_tunnel; probe S-tv-video-hy2 tv; B2="$(tx mitt3)"
+echo "--- mitt3 tx $B1 -> $B2" >>"$OUT/zone.sb.txt"
+# флешка пропала: уведомление (сервер работает из RAM); вернулась — уведомление
+: >"$W/proc/mounts"; mv "$RR/mnt/usb-lab" "$W/usb-away"
+for i in $(seq 30); do grep -q "накопитель .* недоступен" "$RR/tmp/mi-lumruri/log/mitt.log" 2>/dev/null && break; sleep 1; done
+probe S-tv-video-usb-away tv
+cp "$RN/modules-state.json" "$OUT/modules-state.away.json" 2>/dev/null
+mv "$W/usb-away" "$RR/mnt/usb-lab"; echo "/dev/sda1 /mnt/usb-lab vfat rw,relatime 0 0" >"$W/proc/mounts"
+for i in $(seq 30); do grep -q "накопитель снова доступен" "$RR/tmp/mi-lumruri/log/mitt.log" 2>/dev/null && break; sleep 1; done
+grep "модуль sing-box" "$RR/tmp/mi-lumruri/log/mitt.log" >"$OUT/module-log.sb.txt" 2>/dev/null
+cp "$W/config.before-sb.json" "$E/config.json"; cp "$W/secrets.before-sb.json" "$E/secrets.json"
+A0="$(at_of)"; post apply-request '{}' >/dev/null
+for i in $(seq 60); do [ "$(at_of)" -gt "${A0:-0}" ] 2>/dev/null && grep -q '"panel-request' "$RN/last-apply.json" && break; sleep 1; done
+wait_tunnel
+
 # 7) «перезагрузка роутера»: RAM очищена, правила ядра сняты; снова холодный старт без WAN
 phase reboot
 boot stop >"$OUT/stop.out" 2>&1
-pkill -f "$TTCLIENT" 2>/dev/null; pkill -f "usr/sbin/nginx" 2>/dev/null; pkill -f "usr/sbin/uhttpd" 2>/dev/null; sleep 1
+pkill -f "$TTCLIENT" 2>/dev/null; pkill -f "mod/sing-box/sing-box" 2>/dev/null; pkill -f "usr/sbin/nginx" 2>/dev/null; pkill -f "usr/sbin/uhttpd" 2>/dev/null; sleep 1
 rm -rf "$RR/tmp/mi-lumruri"; ip -n router link set r-wan down
 snapz after-reboot
 boot >"$OUT/boot2.out" 2>&1; echo "exit=$?" >>"$OUT/boot2.out"

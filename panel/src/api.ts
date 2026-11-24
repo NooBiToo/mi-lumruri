@@ -2,7 +2,9 @@
 import { t } from './i18n'
 
 /** Единственный вид VPN — TrustTunnel (официальный клиент). Профиль может быть только один. */
-export type ProfileKind = 'trusttunnel'
+export type ProfileKind = 'trusttunnel' | 'vless' | 'hysteria2' | 'trojan' | 'shadowsocks'
+/** Сводка сервера модуля sing-box (сам сервер — ссылка в секретах). */
+export interface ProxyInfo { server: string; port: number; security?: string; transport?: string }
 
 export interface Endpoint {
   /** IP-адрес или доменное имя сервера (домен разрешает клиент TrustTunnel на роутере). */
@@ -26,7 +28,7 @@ export interface Endpoint {
 }
 export type TlsProfile = 'chrome' | 'chrome_canary' | 'safari' | 'firefox' | 'okhttp' | 'openssl' | 'boringssl'
 /** Профиль TrustTunnel; backup — запасной сервер (пароль — backup_password в секретах). */
-export interface Profile { id: string; name: string; kind: ProfileKind; on_failure: 'block' | 'direct'; tunnel?: number; endpoint?: Endpoint; backup?: Endpoint; prefer_fastest?: boolean }
+export interface Profile { id: string; name: string; kind: ProfileKind; on_failure: 'block' | 'direct'; tunnel?: number; endpoint?: Endpoint; backup?: Endpoint; prefer_fastest?: boolean; proxy?: ProxyInfo }
 export interface Network { id: string; name: string; ssid: string; segment?: string; subnet?: string; bridge?: string; ports?: string[] }
 export interface Device { id: string; name: string; mac: string; network: string }
 
@@ -68,7 +70,7 @@ export interface DnsConfig {
 /** Выбор стратегий Zapret (controller/src/model.rs): `auto` — круговой режим, иначе id стратегии каталога. */
 export interface ZapretConfig { strategy: string; youtube: string }
 /** Секреты профиля: поля без значения не меняются; пустая ссылка-подписка — удалить её. */
-export interface ProfileSecret { password?: string; subscription_url?: string; backup_password?: string }
+export interface ProfileSecret { password?: string; subscription_url?: string; backup_password?: string; link?: string }
 
 export interface Group { id: string; name: string; destinations: Destination[] }
 
@@ -289,6 +291,18 @@ export interface StorageDrive { path: string; device: string; fs: string; total:
 export interface StorageInfo { at: number | null; data: StorageDrive | null; usb: StorageDrive[] }
 export interface StorageResponse { ok: boolean; issues: Issue[]; error?: ApiError; storage: StorageInfo }
 
+/** Модуль (GET /modules): каталог пакета и установленная копия. */
+export interface ModuleInfo {
+  name: string; title: string; version: string; protocols: string[]; kinds: ProfileKind[]
+  download_bytes: number; need_bytes: number; ram_bytes: number
+  installed: null | { version: string; path: string; installed: number; state: 'ok' | 'missing' | 'bad' | 'unknown'; update: boolean }
+  used_by: string[]
+}
+export interface ModulesResponse {
+  ok: boolean; issues: Issue[]; error?: ApiError; modules: ModuleInfo[]; running: boolean
+  op: null | { state: 'running' | 'done' | 'failed'; action: string; name: string; at: number; message: string | null }
+}
+
 export interface StatsResponse {
   ok: boolean; since: number | null; sampled: number | null; per_device: boolean
   vpn: { day: number; week: number }; wan: { day: number; week: number }
@@ -324,6 +338,9 @@ export const manage = {
   notifyState: () => call<NotifyResponse>('/notify'),
   stats: () => call<StatsResponse>('/stats'),
   storage: () => call<StorageResponse>('/storage'),
+  modules: () => call<ModulesResponse>('/modules'),
+  installModule: (name: string, target: string) => call<ManageResponse>('/modules/install', json({ name, target })),
+  removeModule: (name: string) => call<ManageResponse>('/modules/remove', json({ name })),
   speed: () => call<SpeedResponse>('/speed'),
   startSpeed: () => call<SpeedResponse>('/speed', json({})),
   setNotify: (b: NotifySet) => call<ManageResponse>('/notify', json(b)),

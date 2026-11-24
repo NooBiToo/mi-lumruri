@@ -215,6 +215,24 @@ check("второй сервер недоступен: полное примен
       [js("last-apply.multi-down.json"), seen("M-tv-video-tt1-while-tt2-down"), text("zone.multi-down.txt"), text("apply.multi-down.json")[:500]])
 check("второй сервер снова доступен: маршрут 3101 через mitt1",
       "dev mitt1" in text("zone.multi-up.txt"), [text("zone.multi-down.txt"), text("zone.multi-up.txt")])
+zs = text("zone.sb.txt")
+def txd(dev):
+    try:
+        a, b = zs.split(f"--- {dev} tx ")[1].split("\n")[0].split(" -> ")
+        return int(b) > int(a)
+    except Exception:
+        return False
+check("модуль sing-box: флешка видна в «Модулях», модуль установлен из панели на неё (SHA-256 и подпись)",
+      '"usb-lab"' in text("storage.out") and '"state":"done"' in text("module.json") and '"state":"ok"' in text("modules.out"),
+      [text("storage.out")[:300], text("module.json"), text("modules.out")[:600]])
+check("серверы модуля: VLESS и Hysteria2 на настоящем sing-box, видео ТВ через mitt2 (VLESS), затем через mitt3 (Hysteria2)",
+      js("last-apply.sb.json").get("exit") == 0 and "2 mitt2 vl sing-box" in text("tunnels.sb.list") and "3 mitt3 hy sing-box" in text("tunnels.sb.list")
+      and seen("S-tv-video-vless") == (0, VPN) and seen("S-tv-video-hy2") == (0, VPN) and txd("mitt2") and txd("mitt3"),
+      [js("last-apply.sb.json"), text("tunnels.sb.list"), zs[:600], seen("S-tv-video-vless"), seen("S-tv-video-hy2"), text("singbox-server.log")[-400:]])
+check("флешка с модулем пропала: уведомление, сервер работает из RAM; вернулась — уведомление",
+      "недоступен" in text("module-log.sb.txt") and "снова доступен" in text("module-log.sb.txt") and seen("S-tv-video-usb-away") == (0, VPN)
+      and '"state":"missing","ram":true' in text("modules-state.away.json"),
+      [text("module-log.sb.txt"), seen("S-tv-video-usb-away"), text("modules-state.away.json")])
 zo = text("zone.multi-off.txt")
 check("возврат к одному серверу: метка снова 0x4000/0x4000, второго клиента и mitt1 нет",
       "fwmark 0x4000/0x4000 lookup 3100" in zo and "trusttunnel1.pid" not in zo and "3101" not in zo, zo)

@@ -7,6 +7,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; cd "$ROOT"
 L=out/package/lab; rm -rf "$L"; mkdir -p "$L"
 node tools/package.mjs --version 0.1.0-stage12 >/dev/null
 cp -r out/package/mi-lumruri "$L/v1"
+# пакет лаборатории загрузки: модуль sing-box с x86_64-программой (серверы модуля запускаются в namespace)
+node tools/package.mjs --version 0.1.0-stage12 --singbox-bin .tools/lab/bin/sing-box --out out/package/boot >/dev/null
 K=.tools/keys/release-ed25519.pem
 node tools/lab/resign.mjs "$L/v1" "$L/v2" 0.1.1-stage12 "$K" >/dev/null
 node tools/lab/resign.mjs "$L/v1" "$L/v5" 0.1.2-stage12 "$K" >/dev/null

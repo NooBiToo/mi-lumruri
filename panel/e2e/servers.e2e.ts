@@ -38,6 +38,8 @@ test.beforeAll(async () => {
     data: { path: '/data/mi-lumruri', device: '', fs: '', total: 40960000, free: 18432000, writable: true, exec: true },
     usb: [{ path: '/mnt/usb-5f2a', device: '/dev/sda1', fs: 'vfat', total: 15360000000, free: 14336000000, writable: true, exec: true, vendor: 'SanDisk', model: 'Ultra Fit' }],
   }))
+  writeFileSync(join(run, 'modules-catalog.json'), JSON.stringify({ modules: [{ name: 'sing-box', version: '1.14.4', title: 'sing-box', protocols: ['VLESS', 'Hysteria2', 'Trojan', 'Shadowsocks'],
+    kinds: ['vless', 'hysteria2', 'trojan', 'shadowsocks'], asset: 'mitt-mod-sing-box-1.14.4.tar', tar_sha256: 'ab'.repeat(32), tar_bytes: 19906560, unpacked_bytes: 86155608 }] }))
   const port = await stand.listen(0)
   origin = `https://127.0.0.1:${port}`
   password = 'pw-' + randomBytes(18).toString('base64url')
@@ -122,8 +124,44 @@ test('«Модули»: внутренняя память и флешка из �
   await login(page)
   await nav(page, /Модули/).click()
   await expect(page.getByRole('heading', { name: 'Накопители' })).toBeVisible()
-  await expect(page.getByText('Внутренняя память')).toBeVisible()
-  await expect(page.getByText('SanDisk Ultra Fit')).toBeVisible()
+  const drives = page.locator('ul.drives')
+  await expect(drives.getByText('Внутренняя память')).toBeVisible()
+  await expect(drives.getByText('SanDisk Ultra Fit')).toBeVisible()
   await expect(page.getByText('/mnt/usb-5f2a · vfat')).toBeVisible()
+  expect(consoleErrors).toEqual([])
+})
+
+test('сервер VLESS по ссылке: сводка в настройках, ссылка — только в секретах; без модуля — предупреждение', async ({ page }) => {
+  await login(page)
+  await simplify(page)
+  await nav(page, /Сервер/).click()
+  await page.getByRole('button', { name: 'Добавить сервер' }).click()
+  const link = 'vless://bf000d23-0752-40b4-affe-68f7707a9661@203.0.113.5:443?type=tcp&security=reality&sni=www.example.com&pbk=jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0&sid=01ab#VLESS%20дом' // secret-scan: allow тестовая ссылка
+  await page.locator('#paste').fill(link)
+  await page.getByRole('button', { name: 'Распознать' }).click()
+  await expect(page.getByText('Для серверов VLESS нужен модуль sing-box', { exact: false })).toBeVisible()
+  await expect(page.locator('#srv-name')).toHaveValue('VLESS дом')
+  await page.getByRole('button', { name: 'Сохранить' }).click()
+  await expect.poll(() => config().profiles.find((p: { kind: string }) => p.kind === 'vless')?.proxy, { timeout: 10_000 })
+    .toEqual({ server: '203.0.113.5', port: 443, security: 'reality', transport: 'tcp' })
+  expect(JSON.stringify(config())).not.toContain('bf000d23')
+  const secrets = readFileSync(join(dirname(stand.opts.config), 'secrets.json'), 'utf8')
+  await expect.poll(() => readFileSync(join(dirname(stand.opts.config), 'secrets.json'), 'utf8'), { timeout: 10_000 }).toContain('bf000d23')
+  void secrets
+  expect(consoleErrors).toEqual([])
+})
+
+test('«Модули»: установка на флешку ставит заявку службе', async ({ page }) => {
+  await login(page)
+  await nav(page, /Модули/).click()
+  await expect(page.getByRole('heading', { name: /sing-box/ })).toBeVisible()
+  await expect(page.getByText('Протоколы: VLESS, Hysteria2, Trojan, Shadowsocks')).toBeVisible()
+  // внутренняя память мала (18 МБ свободно) — недоступна, флешка выбрана сама
+  await expect(page.getByRole('radio', { name: /Внутренняя память/ })).toBeDisabled()
+  await expect(page.getByRole('radio', { name: /SanDisk Ultra Fit/ })).toBeChecked()
+  await page.getByRole('button', { name: 'Установить' }).click()
+  const req = join(stand.opts.stateDir, 'run', 'module.request')
+  await expect.poll(() => { try { return JSON.parse(readFileSync(req, 'utf8')) } catch { return null } }, { timeout: 10_000 })
+    .toMatchObject({ action: 'install', name: 'sing-box', dir: '/mnt/usb-5f2a/mi-lumruri-modules/sing-box' })
   expect(consoleErrors).toEqual([])
 })

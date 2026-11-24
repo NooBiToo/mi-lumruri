@@ -417,7 +417,7 @@ storage_scan() {
   local now last; now=$(date +%s); last="$(cat "$STATE/storage.last" 2>/dev/null || echo 0)"
   [ $((now - last)) -ge "${MITT_STORAGE_EVERY:-60}" ] || [ "$now" -lt "$last" ] || return 0
   echo "$now" >"$STATE/storage.last"
-  df -k >"$STATE/df.txt" 2>/dev/null
+  ${MITT_DF:-df} -k >"$STATE/df.txt" 2>/dev/null
   MI_TT_DATA="$DATA" ctl storage-scan "${MITT_PROC:-/proc}/mounts" "$STATE/df.txt" "$STATE/storage.json" 2>>"$LOG/service.log"
   rm -f "$STATE/df.txt"
 }
