@@ -91,6 +91,11 @@ pub fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(m) => { eprintln!("{m}"); ExitCode::from(2) }
         },
+        // модули: каталог и установленные (служба, mitt-module.sh)
+        ["module-info" | "module-list" | "module-record", ..] => match mi_tt::modules::cli(&a, auth::now()) {
+            Ok(t) => { print!("{t}"); ExitCode::SUCCESS }
+            Err(m) => { eprintln!("{m}"); ExitCode::from(2) }
+        },
         // накопители: /proc/mounts и df -k от службы → storage.json для панели
         ["storage-scan", mounts, df, out] => match mi_tt::storage::scan_cmd(mounts, df, out, auth::now()) {
             Ok(()) => ExitCode::SUCCESS,

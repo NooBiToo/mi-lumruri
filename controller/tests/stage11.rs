@@ -123,7 +123,6 @@ fn profiles_and_write_only_secrets() {
     assert_eq!(p.get("/secrets").body["profiles"]["hy"].as_bool(), Some(true));
     assert!(!p.get("/secrets").body.to_string().contains(&hy_link));
     assert_eq!(p.post("/profiles/delete", json!({ "base_revision": p.rev(), "id": "hy" })).status, 200);
-    let before = std::fs::read(p.dir.join("config.json")).unwrap();
     // секрет: только запись; GET отдаёт признак наличия, но не значение
     let o = p.get("/secrets");
     assert_eq!(o.body["profiles"]["tt-lab"].as_bool(), Some(false));
