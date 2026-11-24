@@ -2,9 +2,9 @@
 
 [Русский](README.md) · **English** · [简体中文](README.zh-CN.md)
 
-Selective VPN and DPI bypass for the Xiaomi BE7000 on stock firmware. Paste a link to your [TrustTunnel](https://github.com/TrustTunnel) server and pick services: YouTube, Instagram and ChatGPT go through the VPN, Discord goes direct with Zapret DPI bypass, everything else works as usual.
+Selective VPN and DPI bypass for the Xiaomi BE7000 on stock firmware. Paste a server link and pick services: YouTube, Instagram and ChatGPT go through the VPN, Discord goes direct with Zapret DPI bypass, everything else works as usual. [TrustTunnel](https://github.com/TrustTunnel) is built in; VLESS, Hysteria2, Trojan, Shadowsocks and AmneziaWG come as modules on a USB drive. Several servers run at the same time.
 
-![Panel overview: VPN is up; route map from devices through the router — services via VPN, services with DPI bypass, all other sites](docs/img/overview.png)
+![Overview: router status tiles, route cards with channel speed, and traffic for the day by hour and by device](docs/img/overview.png)
 
 **Router:** Xiaomi BE7000 (RC06), firmware 1.1.38. No reflashing: the package is installed over SSH into internal storage (about 4.5 MB) and runs on the stock iptables, ipset and dnsmasq.
 
@@ -26,35 +26,40 @@ The router's internal storage is small: about 20 MB, of which the firmware uses 
 
 | | |
 | --- | --- |
-| **Server** | Paste a `tt://` link or a `client.toml` file and the fields fill in. The server address can be an IP or a domain. Uses the official `trusttunnel_client` v1.3.0: HTTP/2 or HTTP/3, anti-DPI, custom certificate, TLS profile, client_random prefix or key. TrustTunnel 1.3 subscription link: the router fetches new server parameters on its own. Backup server: if the main server does not connect for 2 minutes, the router switches to the backup and returns when the main one responds again. If the server is down, listed sites either wait or open directly — your choice. Up to 16 servers at once: a service on Sites and a device can each use their own server. |
-| **Sites** | Each service is set to **VPN**, **Zapret** or **Off**. Ready-made lists from [itdoginfo/allow-domains](https://github.com/itdoginfo/allow-domains), including service subnets, ship with the package and update automatically: from every 6 hours to weekly, or manually only. Your own VPN sites, your own DPI-bypass sites and exceptions are separate lists, one site per line. There is also an "Everything via VPN except exceptions" mode. Optionally, IPv6 also goes through the VPN for devices whose whole internet goes through the VPN. |
-| **Zapret** | nfqws2 from zapret2 with built-in strategies works out of the box. "Find a method" tests strategies on the router and applies the best one only if sites open better with it than without Zapret. You can also pick a method manually, with a separate one for YouTube. Scheduled re-check of the method. |
-| **Devices** | All home devices, or only the ones you select from the list of connected devices. A single device can have "Whole internet" through the VPN while the others send only the selected sites through the VPN. |
-| **DNS** | Secure DNS (DoH or DoT) for all other sites: Cloudflare, Google, AdGuard, NextDNS, Quad9 (DoT) or your own server. If the server is unreachable, queries temporarily go through your ISP. VPN sites use their own DNS server; queries to it go through the tunnel and can be additionally encrypted (DoH or DoT). A separate page for your own DNS records: a domain and all its subdomains point to an address on your home network, for example a server running Traefik. Ad blocking via the router's DNS: HaGeZi Light, Normal or your own list, updated automatically. |
-| **Status** | CPU, memory and temperature in the header; details on Overview with the current internet and VPN speed, and the measured channel speed on each route. A daily traffic log for 1–24 months on a USB drive. |
-| **Diagnostics** | One-click check of the service, server connection and client version, internet access through the tunnel, the tunnel watchdog, routes, DNS, Zapret and programs stuck in a restart loop. Check a single site: which way it goes and whether it opens. Logs and a report in one click, service restart. |
-| **Sign-in** | HTTPS and a password, with an optional second step: an authenticator app code (TOTP). |
-| **Panel** | In Russian, English and Simplified Chinese. The language follows the browser, and you can change it in Settings and on the sign-in screen. Updates from the panel: the router downloads the new release from GitHub, checks the SHA-256 and the signature and installs it, keeping your settings. |
-
-Changes are saved automatically. The panel also works well on a phone.
+| **Servers** | Paste a link and the fields fill in. **TrustTunnel** is built in: the official `trusttunnel_client` v1.3.0, HTTP/2 or HTTP/3, anti-DPI, TLS profile, client_random, subscription link. **VLESS** (TCP, WebSocket, gRPC, Reality, xtls-rprx-vision), **Hysteria2**, **Trojan** and **Shadowsocks** through the sing-box module, with `https://` subscriptions that list servers to pick from. **AmneziaWG** 1.x and 2.0 through the amneziawg module, from a `.conf` file. Up to 16 servers **at the same time**: a service on Sites and a device can each use their own. A TrustTunnel backup server with failover and return, and switching to the server with lower latency. If a server is down, listed sites either wait or open directly, your choice. |
+| **Sites** | Each service is **VPN**, **Zapret** or **Off**. Ready-made [itdoginfo/allow-domains](https://github.com/itdoginfo/allow-domains) lists with service subnets ship with the package and update themselves: from every 6 hours to once a week, or manually only. Your own VPN sites, DPI-bypass sites and exceptions are separate lists. There is an "Everything through VPN except exceptions" mode and IPv6 through the VPN. |
+| **Zapret** | nfqws2 from zapret2 with ready strategies works out of the box. "Find a method" tests strategies on the router and applies the best one only if sites open better than without Zapret. The method can also be picked manually, separately for YouTube. Scheduled method re-checks. |
+| **Devices** | All home devices or only selected ones. Names: yours, announced on the network (iPhone, Chromecast, TVs, speakers), from DHCP, or the maker by MAC. A "hidden MAC" mark, details with connection type and traffic. A single device can get "All internet" through the VPN and its own server. |
+| **DNS** | Secure DNS (DoH or DoT) for all other sites: Cloudflare, Google, AdGuard, NextDNS, Quad9 or your own server. For VPN sites, DNS inside the tunnel, optionally encrypted. Custom DNS records: a domain with all subdomains points to an address on the home network. Ad blocking: HaGeZi Light, Normal or your own list. |
+| **Overview** | Now tiles refreshed every 5 seconds: internet and VPN speed with a chart, latency to the server, CPU per core, memory, temperature per sensor. Route cards with the measured channel speed and current traffic. Traffic for a day and a week by hour and by device; with the log on a USB drive also for a month, 3 months and a year (the log keeps 1 to 24 months). Speed and latency test from the router. |
+| **Modules** | Large programs go to a USB drive, or to internal storage when there is room: sing-box and AmneziaWG. The router downloads a module from GitHub and checks SHA-256 and the signature. The Drives card shows storage and USB drives; if the drive is removed you get a notification, and the module starts again by itself when it is back. |
+| **Notifications** | Telegram: tunnel down or back up, the watchdog restarted the client, switch to the backup server, a new version, an update installed or rolled back, a subscription failed to update, the router booted. Messages wait in a queue while there is no connection. |
+| **Diagnostics** | One-button check: service, autostart, firmware, server connection and client version, internet through the tunnel, tunnel watchdog, routes, DNS, Zapret and programs stuck in a restart loop. Single-site check: which path it takes and whether it opens. Logs and a report in one click, service restart. |
+| **Updates** | From the panel: the router downloads a new release from GitHub, checks SHA-256 and the signature, installs it and watches for 5 minutes that everything works; if not, it rolls back by itself. New version check once a day or a week. Settings backup to a file, server passwords optional and encrypted with the backup password. |
+| **Panel** | HTTPS and a password, optionally a second step with an app code (TOTP). Russian, English and Simplified Chinese. Works on your own domain and behind a reverse proxy. Changes save themselves, and the panel is easy to use from a phone. |
 
 <p>
   <img src="docs/img/sites.png" alt="Sites screen: service tiles with VPN, Zapret or Off" width="68%">
-  <img src="docs/img/mobile.png" alt="Overview on a phone in the light theme" width="27%">
+  <img src="docs/img/mobile.png" alt="Overview on a phone in the light theme: router status tiles" width="27%">
 </p>
 
-![Diagnostics screen: check results, site check and logs](docs/img/diag.png)
+<p>
+  <img src="docs/img/devices.png" alt="Devices screen: home devices with names, maker, hidden MAC mark and the All internet switch" width="49%">
+  <img src="docs/img/modules.png" alt="Modules screen: sing-box and AmneziaWG modules with drive choice, traffic log and drives" width="49%">
+</p>
+
+![Diagnostics screen: all checks passed, service log](docs/img/diag.png)
 
 <p>
   <img src="docs/img/zapret.png" alt="Zapret screen: status, method for all sites and for YouTube, method search and scheduled re-check" width="49%">
-  <img src="docs/img/server.png" alt="Server screen: link paste, server data and advanced parameters with TLS profile and client_random" width="49%">
+  <img src="docs/img/server.png" alt="Server screen: server list, link paste, server details, backup server, speed and latency" width="49%">
 </p>
 
 ## How it works
 
 1. dnsmasq adds the addresses of listed domains to ipset sets.
 2. Using these sets, iptables marks traffic from the selected devices:
-   - marked traffic goes to the TrustTunnel client's TUN interface;
+   - marked traffic goes to the TUN interface of its server's client (TrustTunnel, sing-box or amneziawg-go; each server has its own tunnel and mark);
    - sites with DPI bypass pass through nfqws2;
    - everything else goes direct.
 3. The router resolves VPN-site domains with a DNS server inside the tunnel, so the ISP cannot see or tamper with the answers. Other domains go through the secure DNS of the `mi-tt-dns` program, if enabled.
@@ -64,7 +69,7 @@ Details are in the [architecture document](ARCHITECTURE.md) (in Russian).
 
 ## Status
 
-The package runs on the BE7000 with firmware 1.1.38: tunnel, selective routing, Zapret, secure DNS and the panel. On-device testing continues. Please report problems in [Issues](https://github.com/NooBiToo/mi-lumruri/issues).
+The package runs on the BE7000 with firmware 1.1.38: tunnel, selective routing, Zapret, secure DNS, several servers at once, the sing-box module and the panel. New features are tested first in a network lab with the stock firmware components, then on the router. Please report problems in [Issues](https://github.com/NooBiToo/mi-lumruri/issues).
 
 - Listed sites are matched by IPv4 only: devices with VPN or Zapret rules have no outbound IPv6. The exception is devices whose whole internet goes through the VPN, with "IPv6 via VPN" turned on: their IPv6 goes through the tunnel, and the VPN server needs IPv6. Preset DNS servers have IPv6 addresses, but they are used only as a fallback.
 - Sites are matched by DNS: a device must use the router as its DNS server. "Secure DNS" (DoH) in a browser bypasses the lists.

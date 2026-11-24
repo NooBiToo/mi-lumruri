@@ -105,8 +105,8 @@ test('«Обзор»: плитки «Сейчас», карточки маршр
   await expect(tile('Задержка')).toContainText('40мс')
   await expect(tile('Память')).toContainText('40%')
   await expect(page.getByText('без перезагрузки 3 дня 4 ч · 412 соединений')).toBeVisible()
-  await expect(page.locator('.rcard__cap--vpn')).toHaveText('199 Мбит/с')
-  await expect(page.locator('.rcard__cap--direct')).toHaveText('100 Мбит/с')
+  await expect(page.locator('.rcard__cap--vpn')).toHaveText('199Мбит/с')
+  await expect(page.locator('.rcard__cap--direct')).toHaveText('100Мбит/с')
   await expect(page.locator('.stats__name', { hasText: 'Телевизор в зале' })).toBeVisible()
   if (process.env.SHOT) {
     await page.emulateMedia({ colorScheme: 'dark' })

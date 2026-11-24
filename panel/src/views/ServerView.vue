@@ -334,7 +334,7 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
         <div class="card">
           <div>
             <h2 class="card__title">{{ firstTime ? t('Быстрая настройка') : t('Сменить сервер') }}</h2>
-            <p class="card__sub">{{ t('Вставьте ссылку') }} <span class="num">tt://</span> {{ t('или файл конфигурации клиента — поля заполнятся сами') }} {{ t('Серверы VLESS, Hysteria2, Trojan и Shadowsocks — ссылкой') }} <span class="num">vless://</span>, <span class="num">hy2://</span>, <span class="num">trojan://</span>, <span class="num">ss://</span>. {{ t('AmneziaWG — содержимым файла конфигурации .conf.') }}</p>
+            <p class="card__sub">{{ t('Вставьте ссылку') }} <span class="num">tt://</span> {{ t('или файл конфигурации клиента — поля заполнятся сами') }}. {{ t('Серверы VLESS, Hysteria2, Trojan и Shadowsocks — ссылкой') }} <span class="num">vless://</span>, <span class="num">hy2://</span>, <span class="num">trojan://</span>, <span class="num">ss://</span>. {{ t('AmneziaWG — содержимым файла конфигурации .conf.') }}</p>
           </div>
           <div class="field">
             <label for="paste" class="sr-only">{{ t('Ссылка или конфигурация сервера') }}</label>

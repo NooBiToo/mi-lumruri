@@ -20,8 +20,8 @@ export interface RouteCard {
   domains: number
   /** Пояснение вместо значков: «Всё, что не попало в списки», «Сайты не выбраны»… */
   note?: string
-  /** Канал по последнему замеру; 'measuring' — идёт замер; null — замера не было. */
-  cap: string | 'measuring' | null
+  /** Канал по последнему замеру (число и единица); 'measuring' — идёт замер; 'failed' — замер не прошёл; null — замера не было. */
+  cap: { n: string; unit: string } | 'measuring' | 'failed' | null
   /** Сейчас: приём и передача; 'shared' — отдельно не считается (входит в «напрямую»). */
   now: { d: string; u: string } | 'shared' | null
   title: string
@@ -45,10 +45,11 @@ function more(c: RouteCard): string | null {
       <div class="rcard__head">
         <span class="rcard__name"><span :class="['led', `led--${c.tone}`]" aria-hidden="true" />{{ c.name }}</span>
         <span v-if="c.cap === 'measuring'" class="rcard__cap rcard__cap--wait">{{ t('замеряю…') }}</span>
-        <span v-else-if="c.cap" :class="['rcard__cap', `rcard__cap--${c.kind}`]">{{ c.cap }}</span>
+        <span v-else-if="c.cap === 'failed'" class="rcard__cap rcard__cap--wait">{{ t('нет связи') }}</span>
+        <span v-else-if="c.cap" :class="['rcard__cap', `rcard__cap--${c.kind}`]">{{ c.cap.n }}<small>{{ c.cap.unit }}</small></span>
         <button v-else type="button" class="link-btn rcard__measure" @click="emit('measure')">{{ t('Замерить') }}</button>
         <span class="meta rcard__meta">{{ c.meta }}</span>
-        <span v-if="c.cap && c.cap !== 'measuring'" class="meta rcard__capnote">{{ t('канал') }}</span>
+        <span v-if="c.cap && typeof c.cap === 'object'" class="meta rcard__capnote">{{ t('канал') }}</span>
       </div>
       <div class="rcard__body">
         <ul v-if="c.items.length || c.domains" class="rcard__icons">
@@ -75,6 +76,7 @@ function more(c: RouteCard): string | null {
 .rcard__name { display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; line-height: 1.75rem; font-weight: 600; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rcard--off .rcard__name { color: var(--muted); }
 .rcard__cap { font-size: 1.25rem; line-height: 1.75rem; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.rcard__cap small { font-size: 0.75rem; font-weight: 500; margin-left: 0.2rem; color: var(--faint); }
 .rcard__cap--vpn { color: var(--accent); }
 .rcard__cap--zapret { color: var(--zap-ink, var(--zap)); }
 .rcard__cap--wait { font-size: 0.875rem; font-weight: 500; color: var(--muted); }

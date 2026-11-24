@@ -2,7 +2,7 @@
 
 [Русский](guide.md) · [English](guide.en.md) · **简体中文**
 
-本说明适用于 Mi Lumruri 0.14.0 版本。安装包文件名为 `mi-lumruri-*.tar`，在路由器上安装包位于 `/data/mi-lumruri` 和 `/tmp/mi-lumruri`。0.5.0 之前项目名为 mi-trusttunnel：在旧版本之上安装 0.5.0 时，会自动把 `/data/mi-trusttunnel` 连同全部设置移动到 `/data/mi-lumruri`，并在原位置留下链接。发布版中除主安装包外还有一份名为 `mi-trusttunnel-*.tar` 的副本，供 0.4 版本面板中的更新功能查找。
+本说明适用于 Mi Lumruri 0.14.1 版本。安装包文件名为 `mi-lumruri-*.tar`，在路由器上安装包位于 `/data/mi-lumruri` 和 `/tmp/mi-lumruri`。0.5.0 之前项目名为 mi-trusttunnel：在旧版本之上安装 0.5.0 时，会自动把 `/data/mi-trusttunnel` 连同全部设置移动到 `/data/mi-lumruri`，并在原位置留下链接。发布版中除主安装包外还有一份名为 `mi-trusttunnel-*.tar` 的副本，供 0.4 版本面板中的更新功能查找。
 
 你需要：固件版本为 1.1.38 的 BE7000（RC06）、可从家庭网络通过 SSH 获得的 root 权限、安装用 TAR 包，以及你的 TrustTunnel 服务器参数。官方发布的原厂固件通常默认关闭 SSH。
 

@@ -3,8 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import { ArrowRight } from 'lucide-vue-next'
-import { api, manage, type SpeedResponse, type ZapretTestState } from '../api'
-import { bitrate, health, rates, useHealth } from '../health'
+import { api, manage, type SpeedPath, type SpeedResponse, type ZapretTestState } from '../api'
+import { bitrate, bitrateParts, health, rates, useHealth } from '../health'
 import HealthTiles from '../components/HealthTiles.vue'
 import RouteCards, { type RouteCard, type Tone } from '../components/RouteCards.vue'
 import { catalog, config, leases, lists, loadLeases, loadLists, loadStatus, notify, profile, service, serverReady, simple, simpleState, tunnel } from '../store'
@@ -52,7 +52,7 @@ const stopHealth = useHealth()
 onBeforeUnmount(() => { stopHealth(); clearTimeout(speedTimer) })
 const tag = dateTag()
 const speedRunning = computed(() => !!speedSt.value?.running || speedSt.value?.speed?.state === 'running')
-const mbps = (p: unknown) => (p && typeof p === 'object' && 'mbps' in p ? bitrate((p as { mbps: number }).mbps * 1e6, tag) : p && typeof p === 'object' && 'error' in p ? t('нет связи') : null)
+const mbps = (p: SpeedPath | null | undefined): RouteCard['cap'] => (!p ? null : 'mbps' in p ? bitrateParts(p.mbps * 1e6, tag) : 'failed')
 function speedOf(kind: 'vpn' | 'zapret' | 'direct'): Pick<RouteCard, 'cap' | 'now' | 'title'> {
   const s = speedSt.value?.speed
   const cap = speedRunning.value ? 'measuring' as const : s ? mbps(kind === 'vpn' ? s.tunnel : s.direct) : null

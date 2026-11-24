@@ -2,7 +2,7 @@
 
 [Русский](guide.md) · **English** · [简体中文](guide.zh-CN.md)
 
-This guide covers Mi Lumruri version 0.14.0. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
+This guide covers Mi Lumruri version 0.14.1. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
 
 You need a BE7000 (RC06) with firmware 1.1.38, working root access over SSH from the home network, the installation TAR, and the parameters of your TrustTunnel server. The stock release firmware usually ships with SSH turned off.
 
