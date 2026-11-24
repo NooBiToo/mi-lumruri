@@ -65,7 +65,7 @@ msg() {
 # send <текст> <путь tunnel|direct>: 0 — Telegram ответил ok
 send() {
   local opt="" r
-  [ "$2" = tunnel ] && opt="--interface mitt0"
+  [ "$2" = tunnel ] && opt="--interface $(tun_up_dev || echo mitt0)"
   # shellcheck disable=SC2086
   r="$(printf 'url = "%s/bot%s/sendMessage"\n' "$API" "$token" | "$CURL" -sS -K - $opt --max-time 15 \
     --data-urlencode "chat_id=$chat" --data-urlencode "text=$1" --data-urlencode "disable_web_page_preview=true" 2>&1)"

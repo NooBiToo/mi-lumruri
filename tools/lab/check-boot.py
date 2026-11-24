@@ -203,6 +203,16 @@ check("IPv6 через VPN («всё через VPN» для ТВ): примен
       js("last-apply.ipv6.json").get("exit") == 0 and "fwmark 0x4000/0x4000 lookup 3100" in z6 and "default dev mitt0" in z6
       and "-A MITT_C" in z6 and "-o mitt0 -j ACCEPT" in z6 and "has_ipv6 = true" in text("client.ipv6.txt"),
       [js("last-apply.ipv6.json"), z6[:600], text("client.ipv6.txt")])
+zm = text("zone.multi.txt")
+mtx = [int(x) for x in zm.split("--- mitt1 tx ")[-1].split(" -> ")] if "--- mitt1 tx " in zm and zm.split("--- mitt1 tx ")[-1].replace(" -> ", "").strip().isdigit() else [0, 0]
+check("два сервера одновременно: применение прошло, правила 0x4000/0x40f0 → 3100 и 0x4010/0x40f0 → 3101, маршрут 3101 через mitt1, два клиента, видео ТВ через mitt1",
+      js("last-apply.multi.json").get("exit") == 0 and "fwmark 0x4000/0x40f0 lookup 3100" in zm and "fwmark 0x4010/0x40f0 lookup 3101" in zm
+      and "default dev mitt1" in zm and "trusttunnel.pid" in zm and "trusttunnel1.pid" in zm and "1 mitt1 tt2" in zm
+      and seen("M-tv-video-mitt1") == (0, VPN) and len(mtx) == 2 and mtx[1] > mtx[0],
+      [js("last-apply.multi.json"), zm[:900], text("apply.multi.json")[:600]])
+zo = text("zone.multi-off.txt")
+check("возврат к одному серверу: метка снова 0x4000/0x4000, второго клиента и mitt1 нет",
+      "fwmark 0x4000/0x4000 lookup 3100" in zo and "trusttunnel1.pid" not in zo and "3101" not in zo, zo)
 check("IPv6 через VPN выключен обратно: правил IPv6 в зоне 3000–3199 нет", text("zone.ipv6-off.txt").strip() == "", text("zone.ipv6-off.txt"))
 
 # --- подбор стратегии по кнопке панели: настоящие nfqws2 и curl стока, очередь 201

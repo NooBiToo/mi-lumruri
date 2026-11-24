@@ -21,7 +21,7 @@ put() { # put <state> <ping_primary> <ping_backup> <direct> <tunnel>
 # speed <tunnel|direct>: {"mbps":…,"bytes":…} или {"error":"…"}
 speed() {
   local opt="" r rc sp by code
-  [ "$1" = tunnel ] && opt="--interface mitt0"
+  [ "$1" = tunnel ] && opt="--interface $TD"
   # shellcheck disable=SC2086
   r="$("$CURL" -s -o /dev/null $opt --connect-timeout 8 --max-time "$TIME" -w '%{speed_download} %{size_download} %{http_code}' "$URL" 2>&1)"; rc=$?
   sp="${r%% *}"; code="${r##* }"; by="$(echo "$r" | cut -d' ' -f2)"
@@ -34,12 +34,14 @@ speed() {
 }
 
 pp=null; pb=null
-if [ -f "$RENDER/servers.addr" ]; then
+# замер — первого сервера (туннель с наименьшим номером)
+tun_ctx "$(tun_nums | head -n 1)"
+if [ -f "$TR/servers.addr" ]; then
   while read -r role h p; do
     [ -n "$h" ] && [ -n "$p" ] || continue
     v="$(ping_ms "$h" "$p")"
     case "$role" in primary) pp="$(num_or_null "$v")";; backup) pb="$(num_or_null "$v")";; esac
-  done <"$RENDER/servers.addr"
+  done <"$TR/servers.addr"
 fi
 put running "$pp" "$pb" null null
 dr="$(speed direct)"

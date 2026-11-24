@@ -140,9 +140,10 @@ nap() { usleep 200000 2>/dev/null || sleep 1; }
 # Запасной адрес сервера: после удачного подключения клиент пишет «Using endpoint: name=<имя>, address=<IP>:<порт>».
 # Последние адреса (до трёх, свежий первым) — в $ETC/server-addrs «имя IP»: рендер добавляет их в addresses за доменом,
 # и при сбое DNS на старте клиент подключается по IP, а не завершается. Файл переписывается, только если адрес новый.
-server_addr_learn() {
+server_addr_learn() { # server_addr_learn [<номер туннеля>]
   local l name ip f="$ETC/server-addrs"
-  l="$(tail -n 60 "$LOG/trusttunnel.log" 2>/dev/null | grep 'Using endpoint: name=' | tail -n 1)"
+  tun_ctx "${1:-0}"
+  l="$(tail -n 60 "$TL" 2>/dev/null | grep 'Using endpoint: name=' | tail -n 1)"
   [ -n "$l" ] || return 0
   name="$(echo "$l" | sed -n 's/.*Using endpoint: name=\([^,]*\), address=.*/\1/p')"
   ip="$(echo "$l" | sed -n 's/.*, address=\([^,]*\),.*/\1/p' | sed 's/:[0-9]*$//; s/^\[//; s/\]$//')"
@@ -150,12 +151,38 @@ server_addr_learn() {
   [ "$(head -n 1 "$f" 2>/dev/null)" = "$name $ip" ] && return 0
   { echo "$name $ip"; grep -v "^$name $ip\$" "$f" 2>/dev/null; } | head -n 3 >"$f.t" && mv -f "$f.t" "$f"
 }
-# Проба сторожа туннеля: короткий HTTPS-запрос через mitt0 к 1.1.1.1, при неудаче — к 8.8.8.8 (решение — tunnel_tick).
+# Туннели: строки «номер TUN профиль» из рендера ($RENDER/tunnels.list); прежний рендер без списка — туннель 0.
+tunnels_list() {
+  if [ -f "$RENDER/tunnels.list" ]; then cat "$RENDER/tunnels.list"
+  elif [ -f "$RENDER/client.toml" ]; then echo "0 mitt0 -"; fi
+}
+tun_nums() { tunnels_list | cut -d' ' -f1; }
+# Контекст туннеля n: TR — файлы рендера, TS — состояние сторожа, TP — имя процесса клиента (pid и wanted — в $STATE),
+# TL — журнал клиента, TD — TUN. Туннель 0 — прежние пути (одиночная установка не меняется).
+tun_ctx() {
+  TN="${1:-0}"; TD="mitt$TN"
+  if [ "$TN" = 0 ]; then TR="$RENDER"; TS="$STATE"; TP=trusttunnel
+  else TR="$RENDER/tun$TN"; TS="$STATE/tun$TN"; TP="trusttunnel$TN"; mkdir -p "$TS"; fi
+  TL="$LOG/$TP.log"
+}
+# первый поднятый TUN (уведомления и замер скорости через туннель) или пусто
+tun_up_dev() {
+  local n
+  for n in $(tun_nums); do tun_ready "mitt$n" && { echo "mitt$n"; return 0; }; done
+  return 1
+}
+# все TUN туннелей готовы (и туннели есть)
+tuns_ready() {
+  local n any=""
+  for n in $(tun_nums); do tun_ready "mitt$n" || return 1; any=1; done
+  [ -n "$any" ]
+}
+# Проба сторожа туннеля: короткий HTTPS-запрос через TUN к 1.1.1.1, при неудаче — к 8.8.8.8 (решение — tunnel_tick).
 WATCH_CURL="${MITT_WATCH_CURL:-curl}"
 tunnel_probe() {
   local u
   for u in https://1.1.1.1/cdn-cgi/trace https://8.8.8.8/; do
-    "$WATCH_CURL" -sk --interface mitt0 --max-time 6 -o /dev/null "$u" 2>/dev/null && return 0
+    "$WATCH_CURL" -sk --interface "${TD:-mitt0}" --max-time 6 -o /dev/null "$u" 2>/dev/null && return 0
   done
   return 1
 }
@@ -167,12 +194,15 @@ ping_ms() {
   awk -v t="$t" 'BEGIN { if (t + 0 > 0) printf "%d", t * 1000 + 0.5 }'
 }
 # Запасной сервер (client-backup.toml от рендера): какой файл отдать клиенту — $STATE/endpoint (primary|backup).
-tt_config() { [ "$(cat "$STATE/endpoint" 2>/dev/null)" = backup ] && [ -f "$RENDER/client-backup.toml" ] && echo "$RENDER/client-backup.toml" || echo "$RENDER/client.toml"; }
+tt_config() { # tt_config [<номер туннеля>]
+  tun_ctx "${1:-0}"
+  [ "$(cat "$TS/endpoint" 2>/dev/null)" = backup ] && [ -f "$TR/client-backup.toml" ] && echo "$TR/client-backup.toml" || echo "$TR/client.toml"
+}
 # Основной сервер отвечает на TCP (проверка возврата с запасного): любой ответ или ошибка TLS — порт открыт;
 # «не подключиться», тайм-аут, не разрешилось имя — нет.
 primary_reachable() {
   local h p u rc
-  read -r h p <"$RENDER/primary.addr" 2>/dev/null || return 1
+  read -r h p <"${TR:-$RENDER}/primary.addr" 2>/dev/null || return 1
   case "$h" in *:*) u="https://[$h]:$p/";; *) u="https://$h:$p/";; esac
   "$WATCH_CURL" -sk --connect-timeout 5 --max-time 8 -o /dev/null "$u" 2>/dev/null; rc=$?
   case "$rc" in 6|7|28) return 1;; *) return 0;; esac
@@ -181,43 +211,44 @@ primary_reachable() {
 # перезапуск клиента, не чаще раза в 5 мин), запасной сервер (нет связи дольше 2 мин — на другой; на запасном раз в
 # 5 мин проверка основного, два ответа подряд — возврат) и выбор по задержке (рендер: fastest). Сценарий делает только
 # пробы и действия: остановить клиент (цикл службы запустит его с файлом tt_config), уведомление, журнал.
-tunnel_tick() {
+tunnel_tick() { # tunnel_tick [<номер туннеля>]
   local st con=0 tun=0 bk=0 fa=0 due w="" fb="" pp="" pb="" hp hb cfg a rest
-  st="$(tail -n 200 "$LOG/trusttunnel.log" 2>/dev/null | grep -o 'VPN_SS_[A-Z_]*' | tail -n 1)"
+  tun_ctx "${1:-0}"
+  st="$(tail -n 200 "$TL" 2>/dev/null | grep -o 'VPN_SS_[A-Z_]*' | tail -n 1)"
   [ "$st" = VPN_SS_CONNECTED ] && con=1
-  tun_ready && tun=1
-  [ -f "$RENDER/client-backup.toml" ] && bk=1
-  [ -f "$RENDER/fastest" ] && fa=1
+  tun_ready "$TD" && tun=1
+  [ -f "$TR/client-backup.toml" ] && bk=1
+  [ -f "$TR/fastest" ] && fa=1
   cfg="watch_interval=${MITT_WATCH_INTERVAL:-60} watch_fails=${MITT_WATCH_FAILS:-3} watch_gap=${MITT_WATCH_GAP:-300}"
   cfg="$cfg failover_after=${MITT_FAILOVER_AFTER:-120} failback_every=${MITT_FAILBACK_EVERY:-300}"
   cfg="$cfg fastest_every=${MITT_FASTEST_EVERY:-1800} fastest_margin=${MITT_FASTEST_MARGIN:-20}"
   # shellcheck disable=SC2086
-  due="$(ctl tunnel due --dir "$STATE" connected=$con tun=$tun backup=$bk fastest=$fa $cfg 2>>"$LOG/service.log")" || return 0
+  due="$(ctl tunnel due --dir "$TS" connected=$con tun=$tun backup=$bk fastest=$fa $cfg 2>>"$LOG/service.log")" || return 0
   case " $(echo $due) " in *" watch "*) if tunnel_probe; then w=ok; else w=fail; fi;; esac
   case " $(echo $due) " in *" failback "*) if primary_reachable; then fb=ok; else fb=fail; fi;; esac
   case " $(echo $due) " in *" fastest "*)
-    hp="$(sed -n 's/^primary //p' "$RENDER/servers.addr" 2>/dev/null)"; hb="$(sed -n 's/^backup //p' "$RENDER/servers.addr" 2>/dev/null)"
+    hp="$(sed -n 's/^primary //p' "$TR/servers.addr" 2>/dev/null)"; hb="$(sed -n 's/^backup //p' "$TR/servers.addr" 2>/dev/null)"
     if [ -n "$hp" ] && [ -n "$hb" ]; then
       # shellcheck disable=SC2086
       pp="$(ping_ms $hp)"; pb="$(ping_ms $hb)"; pp="${pp:--}"; pb="${pb:--}"
     fi;;
   esac
   # shellcheck disable=SC2086
-  ctl tunnel step --dir "$STATE" connected=$con tun=$tun backup=$bk fastest=$fa $cfg ${w:+watch=$w} ${fb:+failback=$fb} \
-    ${pp:+ping_primary=$pp} ${pb:+ping_backup=$pb} 2>>"$LOG/service.log" >"$STATE/tunnel.actions"
+  ctl tunnel step --dir "$TS" connected=$con tun=$tun backup=$bk fastest=$fa $cfg ${w:+watch=$w} ${fb:+failback=$fb} \
+    ${pp:+ping_primary=$pp} ${pb:+ping_backup=$pb} 2>>"$LOG/service.log" >"$TS/tunnel.actions"
   while read -r a rest; do
     case "$a" in
-      restart) pid_stop trusttunnel;;
+      restart) pid_stop "$TP";;
       log) mlog "$rest";;
       notify)
         # shellcheck disable=SC2086
         notify $rest;;
     esac
-  done <"$STATE/tunnel.actions"
-  rm -f "$STATE/tunnel.actions"
+  done <"$TS/tunnel.actions"
+  rm -f "$TS/tunnel.actions"
 }
 # TUN клиента готов: есть, поднят и с IPv4-адресом (клиент настраивает его не сразу после создания)
-tun_ready() { ip link show mitt0 2>/dev/null | grep -q '[<,]UP[,>]' && ip -4 addr show dev mitt0 2>/dev/null | grep -q 'inet '; }
+tun_ready() { local d="${1:-mitt0}"; ip link show "$d" 2>/dev/null | grep -q '[<,]UP[,>]' && ip -4 addr show dev "$d" 2>/dev/null | grep -q 'inet '; }
 pid_alive() { [ -f "$STATE/$1.pid" ] && kill -0 "$(cat "$STATE/$1.pid")" 2>/dev/null; }
 pid_stop() { if pid_alive "$1"; then kill "$(cat "$STATE/$1.pid")" 2>/dev/null; sleep 1; kill -9 "$(cat "$STATE/$1.pid")" 2>/dev/null; fi; rm -f "$STATE/$1.pid"; }
 # nfqws2 после запуска сбрасывает права (UID 2147483647) и перечитывает списки хостов уже без root: данным Zapret
@@ -279,6 +310,12 @@ update_check_due() {
 # (штатный trafficd: ubus call trafficd ip). Копия в /data — раз в час (переживает перезагрузку, флеш не изнашивается).
 SYS="${MITT_SYS:-/sys}"
 if_bytes() { local d="$SYS/class/net/$1/statistics"; [ -r "$d/rx_bytes" ] || { echo -; return; }; echo $(( $(cat "$d/rx_bytes") + $(cat "$d/tx_bytes") )); }
+# байты всех TUN туннелей (сумма) или «-», если ни одного нет
+tun_bytes() {
+  local n b sum="" ; for n in $(tun_nums); do b="$(if_bytes "mitt$n")"; [ "$b" = - ] || sum=$(( ${sum:-0} + b )); done
+  [ -n "$sum" ] || { if_bytes mitt0; return; }
+  echo "$sum"
+}
 wan_dev() { ip -4 route show default 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p' | head -n 1; }
 stats_sample() {
   local now last w
@@ -291,9 +328,9 @@ stats_sample() {
   # подключение устройств (Wi‑Fi, сигнал) для экрана «Устройства»
   ${MITT_UBUS:-ubus} call trafficd hw >"$STATE/trafficd-hw.json.t" 2>/dev/null && mv -f "$STATE/trafficd-hw.json.t" "$STATE/trafficd-hw.json"; rm -f "$STATE/trafficd-hw.json.t"
   if [ -f "$STATE/trafficd.json" ]; then
-    MI_TT_LEASES="$LEASES" "$BIN/mi-tt-ctl" stats-sample "$STATE/stats.json" "$(if_bytes mitt0)" "$( [ -n "$w" ] && if_bytes "$w" || echo -)" "$STATE/trafficd.json" 2>>"$LOG/service.log"
+    MI_TT_LEASES="$LEASES" "$BIN/mi-tt-ctl" stats-sample "$STATE/stats.json" "$(tun_bytes)" "$( [ -n "$w" ] && if_bytes "$w" || echo -)" "$STATE/trafficd.json" 2>>"$LOG/service.log"
   else
-    MI_TT_LEASES="$LEASES" "$BIN/mi-tt-ctl" stats-sample "$STATE/stats.json" "$(if_bytes mitt0)" "$( [ -n "$w" ] && if_bytes "$w" || echo -)" 2>>"$LOG/service.log"
+    MI_TT_LEASES="$LEASES" "$BIN/mi-tt-ctl" stats-sample "$STATE/stats.json" "$(tun_bytes)" "$( [ -n "$w" ] && if_bytes "$w" || echo -)" 2>>"$LOG/service.log"
   fi
   rm -f "$STATE/trafficd.json"
   # раз в час — копия в /data
@@ -343,18 +380,19 @@ notify_flush() {
   start_bg notify sh "$SCR/mitt-notify.sh"
 }
 # туннель упал (клиент не подключён дольше MITT_NOTIFY_DOWN_AFTER, 3 мин) и поднялся снова — по одному сообщению
-tunnel_track() {
-  [ -f "$STATE/trusttunnel.wanted" ] || { rm -f "$STATE/tun-notified" "$STATE/tun-bad-since"; return 0; }
+tunnel_track() { # tunnel_track [<номер туннеля>]
+  tun_ctx "${1:-0}"
+  [ -f "$STATE/$TP.wanted" ] || { rm -f "$TS/tun-notified" "$TS/tun-bad-since"; return 0; }
   local st now since
-  st="$(tail -n 200 "$LOG/trusttunnel.log" 2>/dev/null | grep -o 'VPN_SS_[A-Z_]*' | tail -n 1)"; now=$(date +%s)
-  if pid_alive trusttunnel && [ "$st" = VPN_SS_CONNECTED ] && tun_ready; then
-    rm -f "$STATE/tun-bad-since"
-    [ "$(cat "$STATE/tun-notified" 2>/dev/null)" = down ] && { notify tunnel tunnel_up; echo up >"$STATE/tun-notified"; }
+  st="$(tail -n 200 "$TL" 2>/dev/null | grep -o 'VPN_SS_[A-Z_]*' | tail -n 1)"; now=$(date +%s)
+  if pid_alive "$TP" && [ "$st" = VPN_SS_CONNECTED ] && tun_ready "$TD"; then
+    rm -f "$TS/tun-bad-since"
+    [ "$(cat "$TS/tun-notified" 2>/dev/null)" = down ] && { notify tunnel tunnel_up; echo up >"$TS/tun-notified"; }
     return 0
   fi
-  since="$(cat "$STATE/tun-bad-since" 2>/dev/null)"; [ -n "$since" ] || { echo "$now" >"$STATE/tun-bad-since"; return 0; }
-  if [ $((now - since)) -ge "${MITT_NOTIFY_DOWN_AFTER:-180}" ] && [ "$(cat "$STATE/tun-notified" 2>/dev/null)" != down ]; then
-    notify tunnel tunnel_down "$((now - since))"; echo down >"$STATE/tun-notified"
+  since="$(cat "$TS/tun-bad-since" 2>/dev/null)"; [ -n "$since" ] || { echo "$now" >"$TS/tun-bad-since"; return 0; }
+  if [ $((now - since)) -ge "${MITT_NOTIFY_DOWN_AFTER:-180}" ] && [ "$(cat "$TS/tun-notified" 2>/dev/null)" != down ]; then
+    notify tunnel tunnel_down "$((now - since))"; echo down >"$TS/tun-notified"
   fi
 }
 
@@ -388,9 +426,11 @@ rom_track() {
   echo "$rom" >"$ETC/rom.seen"
 }
 
+# имена процессов клиентов туннелей (trusttunnel, trusttunnel<n>)
+tun_procs() { local n; for n in $(tun_nums); do [ "$n" = 0 ] && echo trusttunnel || echo "trusttunnel$n"; done; }
 status_write() {
   local e="" n
-  for n in trusttunnel nfqws2 nginx uhttpd service; do
+  for n in $(tun_procs) nfqws2 nginx uhttpd service; do
     if pid_alive "$n"; then e="$e\"$n\":true,"; elif [ -f "$STATE/$n.wanted" ]; then e="$e\"$n\":false,"; fi
   done
   # render — итог последнего рендера (ok, error), apply — последнего полного применения (exit, error)

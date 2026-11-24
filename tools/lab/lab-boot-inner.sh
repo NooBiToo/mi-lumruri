@@ -345,6 +345,33 @@ for i in $(seq 60); do [ "$(at_of)" -gt "${A0:-0}" ] 2>/dev/null && grep -q '"pa
 nsx router ip -6 rule show | awk -F: '$1>=3000 && $1<=3199' >"$OUT/zone.ipv6-off.txt" 2>&1
 wait_tunnel
 
+# 6г) два сервера одновременно: второй профиль (туннель 1, тот же сервер стенда) — видео ТВ идёт через него, остальные
+# правила ТВ — через первый. Служба запускает два клиента, номер туннеля — в поле 0xf0 метки (прошивочных меток в
+# лаборатории нет), таблица 3101 ведёт в mitt1; трафик ТВ к видео проходит через mitt1. Затем возврат к одному серверу.
+phase multi_tunnel
+cp "$E/config.json" "$W/config.before-multi.json"; cp "$E/secrets.json" "$W/secrets.before-multi.json"
+"${PY[@]}" -c 'import json,sys
+p=sys.argv[1]; c=json.load(open(p))
+t=dict(c["profiles"][0]); t.update({"id":"tt2","name":"Второй сервер","tunnel":1}); c["profiles"].append(t)
+for r in c["rules"]:
+    if r["id"]=="r-tv-video": r["action"]={"type":"profile","id":"tt2"}
+json.dump(c,open(p,"w"),ensure_ascii=False,indent=2)
+s=json.load(open(sys.argv[2])); s["profiles"]["tt2"]=dict(s["profiles"]["tt-lab"]); json.dump(s,open(sys.argv[2],"w"))' "$E/config.json" "$E/secrets.json"
+A0="$(at_of)"; post apply-request '{}' >/dev/null
+for i in $(seq 60); do [ "$(at_of)" -gt "${A0:-0}" ] 2>/dev/null && grep -q '"panel-request' "$RN/last-apply.json" && break; sleep 1; done
+cp "$RN/last-apply.json" "$OUT/last-apply.multi.json"; cp "$RN/apply.panel-request.json" "$OUT/apply.multi.json" 2>/dev/null
+for i in $(seq 30); do nsx router ip link show mitt1 >/dev/null 2>&1 && break; sleep 1; done
+tx1() { nsx router ip -s link show mitt1 2>/dev/null | awk '/TX:/{getline; print $1; exit}'; }
+B1="$(tx1)"; wait_tunnel; probe M-tv-video-mitt1 tv; B2="$(tx1)"
+{ nsx router ip rule show | awk -F: '$1>=3000 && $1<=3199'; echo "--- 3100"; nsx router ip route show table 3100 2>/dev/null
+  echo "--- 3101"; nsx router ip route show table 3101 2>/dev/null; echo "--- procs"; ls "$RN" | grep -E '^trusttunnel[0-9]*\.pid$'
+  echo "--- list"; cat "$RR/tmp/mi-lumruri/render/tunnels.list"; echo "--- mitt1 tx $B1 -> $B2"; } >"$OUT/zone.multi.txt" 2>&1
+cp "$W/config.before-multi.json" "$E/config.json"; cp "$W/secrets.before-multi.json" "$E/secrets.json"
+A0="$(at_of)"; post apply-request '{}' >/dev/null
+for i in $(seq 60); do [ "$(at_of)" -gt "${A0:-0}" ] 2>/dev/null && grep -q '"panel-request' "$RN/last-apply.json" && break; sleep 1; done
+{ nsx router ip rule show | awk -F: '$1>=3000 && $1<=3199'; ls "$RN" | grep -E '^trusttunnel[0-9]*\.pid$'; nsx router ip link show mitt1 2>&1 | head -1; } >"$OUT/zone.multi-off.txt" 2>&1
+wait_tunnel
+
 # 7) «перезагрузка роутера»: RAM очищена, правила ядра сняты; снова холодный старт без WAN
 phase reboot
 boot stop >"$OUT/stop.out" 2>&1

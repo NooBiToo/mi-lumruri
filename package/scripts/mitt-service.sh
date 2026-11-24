@@ -8,9 +8,16 @@ D="$(cd "$(dirname "$0")" && pwd)"
 INTERVAL="${MITT_INTERVAL:-5}"
 
 engines_stop() {
-  for n in trusttunnel nfqws2 dnsproxy dnstunnel; do rm -f "$STATE/$n.wanted"; pid_stop "$n"; done
-  # прежний TUN удаляется ядром не сразу: новый клиент и ожидание ниже не должны застать старый mitt0
+  local f n d
+  # клиенты всех туннелей, в том числе исчезнувших из настроек
+  for f in "$STATE"/trusttunnel*.wanted "$STATE"/trusttunnel*.pid; do
+    [ -e "$f" ] || continue; n="$(basename "$f")"; n="${n%.*}"; rm -f "$STATE/$n.wanted"; pid_stop "$n"
+  done
+  for n in nfqws2 dnsproxy dnstunnel; do rm -f "$STATE/$n.wanted"; pid_stop "$n"; done
+  # прежний TUN удаляется ядром не сразу: новый клиент и ожидание ниже не должны застать старый mitt<n>
   ctl wait 10000 tun-gone mitt0
+  for d in "$SYS"/class/net/mitt*; do [ -e "$d" ] && ctl wait 10000 tun-gone "$(basename "$d")"; done
+  return 0
 }
 engines_start() {
   # защищённый DNS — первым: dnsmasq стока (а через него и клиент TrustTunnel, разрешающий имя сервера) уже
@@ -22,18 +29,20 @@ engines_start() {
     pid_alive dnsproxy || start_bg dnsproxy "$BIN/mi-tt-dns" $(cat "$RENDER/dns-proxy.args") --fallback "$(resolv_file)" --status "$STATE/dns-proxy.json"
     ctl wait 2000 ok -- "$BIN/mi-tt-dns" --probe 127.0.0.1:5453 example.com
   fi
-  # DoH/DoT для доменов туннеля: сокеты привязаны к mitt0 (до появления TUN вопросы не уходят); запасного пути нет
+  # DoH/DoT для доменов туннеля: сокеты привязаны к TUN туннеля DNS (до его появления вопросы не уходят); запасного пути нет
   if [ -f "$RENDER/dns-tunnel.args" ]; then
     touch "$STATE/dnstunnel.wanted"
     # shellcheck disable=SC2046
     pid_alive dnstunnel || start_bg dnstunnel "$BIN/mi-tt-dns" $(cat "$RENDER/dns-tunnel.args") --status "$STATE/dns-tunnel.json"
   fi
-  if [ -f "$RENDER/client.toml" ]; then
-    touch "$STATE/trusttunnel.wanted"
-    pid_alive trusttunnel || start_bg trusttunnel ${MITT_TT_WRAP:-} "$BIN/trusttunnel_client" -c "$(tt_config)"
-    # TUN должен быть поднят и с адресом до apply: маршрут таблицы 3100 ссылается на него
-    ctl wait 15000 tun-up mitt0
-  fi
+  # клиенты туннелей (tunnels.list): все запускаются сразу, затем ожидание их TUN
+  local n
+  for n in $(tun_nums); do
+    tun_ctx "$n"; touch "$STATE/$TP.wanted"
+    pid_alive "$TP" || start_bg "$TP" ${MITT_TT_WRAP:-} "$BIN/trusttunnel_client" -c "$(tt_config "$n")"
+  done
+  # TUN должен быть поднят и с адресом до apply: маршрут таблицы 3100+n ссылается на него
+  for n in $(tun_nums); do ctl wait 15000 tun-up "mitt$n"; done
   if [ -f "$RENDER/nfqws2.args" ]; then
     touch "$STATE/nfqws2.wanted"
     # аргументы по одному в строке, без пробелов (формирует рендер)
@@ -126,7 +135,7 @@ while [ -f "$STATE/service.wanted" ]; do
   if ! pid_alive adblock-update && adblock_due; then
     start_bg adblock-update sh "$SCR/mitt-adblock.sh"
   fi
-  for e in trusttunnel nfqws2 dnsproxy dnstunnel; do
+  for e in $(tun_procs) nfqws2 dnsproxy dnstunnel; do
     if [ -f "$STATE/$e.wanted" ] && ! pid_alive "$e"; then
       mlog "движок $e завершился — перезапуск"
       # время перезапусков — для диагностики (падения по кругу за последние минуты), последние 50
@@ -134,13 +143,18 @@ while [ -f "$STATE/service.wanted" ]; do
       engines_start; admin_apply "$e-restart" && echo full >"$STATE/protection"; status_write; break
     fi
   done
-  # запасной IP сервера-домена для следующего запуска клиента (см. server_addr_learn)
-  pid_alive trusttunnel && server_addr_learn
-  # сторож, запасной сервер и выбор по задержке (решения — mi-tt-ctl tunnel; клиент перезапустит цикл выше)
-  [ -f "$STATE/trusttunnel.wanted" ] && pid_alive trusttunnel && tunnel_tick
-  # полное применение не прошло (туннель не успел подняться) и действует только защита: повтор, когда mitt0 готов,
-  # не чаще раза в минуту
-  if [ "$(cat "$STATE/protection" 2>/dev/null)" = guard ] && [ -f "$STATE/trusttunnel.wanted" ] && tun_ready; then
+  for n in $(tun_nums); do
+    tun_ctx "$n"
+    # запасной IP сервера-домена для следующего запуска клиента (см. server_addr_learn)
+    pid_alive "$TP" && server_addr_learn "$n"
+    # сторож, запасной сервер и выбор по задержке (решения — mi-tt-ctl tunnel; клиент перезапустит цикл выше)
+    [ -f "$STATE/$TP.wanted" ] && pid_alive "$TP" && tunnel_tick "$n"
+    # уведомления о состоянии туннеля
+    tunnel_track "$n"
+  done
+  # полное применение не прошло (туннель не успел подняться) и действует только защита: повтор, когда все TUN
+  # готовы, не чаще раза в минуту
+  if [ "$(cat "$STATE/protection" 2>/dev/null)" = guard ] && tuns_ready; then
     now=$(date +%s); last=$(cat "$STATE/guard-retry" 2>/dev/null || echo 0)
     if [ $((now - last)) -ge 60 ] || [ "$now" -lt "$last" ]; then
       echo "$now" >"$STATE/guard-retry"
@@ -148,7 +162,7 @@ while [ -f "$STATE/service.wanted" ]; do
     fi
   fi
   # уведомления: состояние туннеля и отправка очереди; статистика трафика
-  tunnel_track; notify_flush; stats_sample; names_scan
+  notify_flush; stats_sample; names_scan
   # автозапуск: запись в firewall могли снять (сброс, прошивка, штатный интерфейс) — раз в 10 минут
   now=$(date +%s)
   if [ $((now - ${AS_LAST:-0})) -ge "${MITT_AUTOSTART_CHECK:-600}" ] || [ "$now" -lt "${AS_LAST:-0}" ]; then AS_LAST=$now; autostart_heal; fi
