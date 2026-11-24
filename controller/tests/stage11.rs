@@ -93,11 +93,17 @@ fn profiles_and_write_only_secrets() {
     assert_eq!((o.status, o.body["mode"].as_str()), (200, Some("replace")), "{}", o.body);
     assert_eq!(p.config()["profiles"].as_array().unwrap().len(), 1);
     assert_eq!(p.config()["profiles"][0]["endpoint"]["quic"], true);
-    // второй профиль не поддерживается; невалидный профиль не записывается
-    let before = std::fs::read(p.dir.join("config.json")).unwrap();
-    let second = json!({ "id": "tt2", "name": "Второй", "kind": "trusttunnel", "endpoint": { "server": "10.0.0.1", "port": 443, "username": "u" } });
+    // второй профиль получает первый свободный номер туннеля, номер существующего не меняется; невалидный не записывается
+    let second = json!({ "id": "tt2", "name": "Второй", "kind": "trusttunnel", "tunnel": 0, "endpoint": { "server": "10.0.0.1", "port": 443, "username": "u" } });
     let o = p.post("/profiles", json!({ "base_revision": p.rev(), "profile": second }));
-    assert_eq!((o.status, o.body["issues"][0]["code"].as_str()), (422, Some("too_many_profiles")), "{}", o.body);
+    assert_eq!((o.status, o.body["mode"].as_str()), (200, Some("add")), "{}", o.body);
+    assert_eq!(p.config()["profiles"][1]["tunnel"], 1);
+    let o = p.post("/profiles", json!({ "base_revision": p.rev(), "profile": tt }));
+    assert_eq!(o.status, 200, "{}", o.body);
+    assert!(p.config()["profiles"][0].get("tunnel").is_none(), "номер 0 не пишется");
+    let o = p.post("/profiles/delete", json!({ "base_revision": p.rev(), "id": "tt2" }));
+    assert_eq!(o.status, 200, "{}", o.body);
+    let before = std::fs::read(p.dir.join("config.json")).unwrap();
     let bad = json!({ "id": "tt-lab", "name": "Bad", "kind": "trusttunnel", "endpoint": { "server": "vpn example", "port": 443, "username": "u" } });
     let o = p.post("/profiles", json!({ "base_revision": p.rev(), "profile": bad }));
     assert_eq!((o.status, o.body["issues"][0]["code"].as_str()), (422, Some("bad_server")), "{}", o.body);

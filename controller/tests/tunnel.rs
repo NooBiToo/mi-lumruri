@@ -112,15 +112,26 @@ fn endpoint_validation_ip_username_certificate() {
 }
 
 #[test]
-fn single_profile_limit() {
+fn profiles_limit_and_tunnel_numbers() {
     let mut c = lab();
-    c["profiles"].as_array_mut().unwrap().push(json!({ "id": "tt2", "name": "Второй", "kind": "trusttunnel",
+    c["profiles"].as_array_mut().unwrap().push(json!({ "id": "tt2", "name": "Второй", "kind": "trusttunnel", "tunnel": 1,
         "endpoint": { "server": "10.0.0.2", "port": 443, "username": "u" } }));
     let (code, v) = validate(&c);
-    assert_eq!((code, codes(&v)), (1, vec!["profiles:too_many_profiles".to_string()]));
-    let (code, v, out) = render(&c, &secrets(&secret()));
-    assert_eq!((code, codes(&v)), (1, vec!["config.profiles:too_many_profiles".to_string()]));
-    assert!(!out.exists(), "ничего не записано");
+    assert_eq!(code, 0, "{v}");
+    c["profiles"][1]["tunnel"] = json!(0);
+    let (code, v) = validate(&c);
+    assert_eq!((code, codes(&v)), (1, vec!["profiles[1].tunnel:duplicate_tunnel".to_string()]));
+    c["profiles"][1]["tunnel"] = json!(16);
+    assert_eq!(codes(&validate(&c).1), vec!["profiles[1].tunnel:bad_tunnel".to_string()]);
+    c["profiles"][1]["tunnel"] = json!(1);
+    c["dns"] = json!({ "tunnel_profile": "nope" });
+    assert_eq!(codes(&validate(&c).1), vec!["dns.tunnel_profile:unknown_profile".to_string()]);
+    c["dns"] = json!({ "tunnel_profile": "tt2" });
+    assert_eq!(validate(&c).0, 0);
+    let profiles: Vec<serde_json::Value> = (0..17).map(|i| json!({ "id": format!("p{i}"), "name": format!("P{i}"), "kind": "trusttunnel", "tunnel": i % 16 })).collect();
+    c["profiles"] = json!(profiles);
+    c["dns"] = json!({});
+    assert!(codes(&validate(&c).1).contains(&"profiles:too_many_profiles".to_string()));
 }
 
 #[test]

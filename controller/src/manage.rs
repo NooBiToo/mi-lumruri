@@ -167,6 +167,14 @@ fn upsert<T: Clone>(v: &mut Vec<T>, item: T, id: impl Fn(&T) -> &str, max: usize
     }
 }
 
+/// Номер туннеля профиля: у существующего — прежний (не сдвигается), у нового — первый свободный.
+fn tunnel_for(profiles: &[Profile], pr: &Profile) -> u8 {
+    if let Some(old) = profiles.iter().find(|x| x.id == pr.id) {
+        return old.tunnel;
+    }
+    (0..=crate::plan::MAX_TUN).find(|n| !profiles.iter().any(|x| x.tunnel == *n)).unwrap_or(crate::plan::MAX_TUN + 1)
+}
+
 fn remove<T>(v: &mut Vec<T>, key: &str, id: impl Fn(&T) -> &str) -> Result<&'static str, Vec<Issue>> {
     match v.iter().position(|x| id(x) == key) {
         Some(i) => {
@@ -584,7 +592,13 @@ pub fn handle(method: &str, path: &str, body: Option<&[u8]>, config_path: &str) 
             Err(i) => bad(i),
         },
         ("POST", "/profiles") => match parse_json::<With<Profile>>(b, "") {
-            Ok(With { base_revision, item: Some(pr) }) => saved(update_config(p, &base_revision, MAX_CONFIG_BYTES, |c| upsert(&mut c.profiles, pr, |x| x.id.as_str(), 64)), "profile"),
+            Ok(With { base_revision, item: Some(mut pr) }) => saved(
+                update_config(p, &base_revision, MAX_CONFIG_BYTES, |c| {
+                    pr.tunnel = tunnel_for(&c.profiles, &pr);
+                    upsert(&mut c.profiles, pr, |x| x.id.as_str(), crate::validate::MAX_PROFILES)
+                }),
+                "profile",
+            ),
             Ok(_) => Response::error(400, "bad_request", "нужен profile"),
             Err(i) => bad(i),
         },

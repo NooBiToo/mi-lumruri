@@ -10,6 +10,8 @@ use crate::zapret::Kind;
 
 pub const MAX_RULES: usize = 512;
 pub const MAX_ITEMS: usize = 256;
+/// Серверов (профилей) — по числу туннелей.
+pub const MAX_PROFILES: usize = 16;
 pub const MAX_GROUP_DESTINATIONS: usize = 1024;
 pub const MAX_NAME_CHARS: usize = 64;
 
@@ -368,8 +370,21 @@ pub fn validate_config(c: &Config) -> Vec<Issue> {
         }
     }
 
-    if c.profiles.len() > 1 {
-        issues.push(Issue::new("profiles", "too_many_profiles", "поддерживается один профиль TrustTunnel"));
+    if c.profiles.len() > MAX_PROFILES {
+        issues.push(Issue::new("profiles", "too_many_profiles", format!("серверов не больше {MAX_PROFILES}")));
+    }
+    let mut tunnels: HashMap<u8, usize> = HashMap::new();
+    for (i, p) in c.profiles.iter().enumerate() {
+        if p.tunnel > crate::plan::MAX_TUN {
+            issues.push(Issue::new(format!("profiles[{i}].tunnel"), "bad_tunnel", format!("номер туннеля — от 0 до {}", crate::plan::MAX_TUN)));
+        } else if let Some(j) = tunnels.insert(p.tunnel, i) {
+            issues.push(Issue::new(format!("profiles[{i}].tunnel"), "duplicate_tunnel", format!("номер туннеля {} уже у профиля profiles[{j}]", p.tunnel)));
+        }
+    }
+    if let Some(id) = c.dns.as_ref().and_then(|d| d.tunnel_profile.as_deref()) {
+        if !c.profiles.iter().any(|p| p.id == id) {
+            issues.push(Issue::new("dns.tunnel_profile", "unknown_profile", format!("нет профиля «{id}»")));
+        }
     }
     for (i, p) in c.profiles.iter().enumerate() {
         if let Some(e) = &p.endpoint {
@@ -666,7 +681,7 @@ mod tests {
         let rec = |d: &str, a: &str| HostRecord { domain: d.into(), address: a.into() };
         let check = |h: Vec<HostRecord>| {
             let mut i = Vec::new();
-            check_dns(&mut i, &DnsConfig { tunnel_resolver: None, tunnel_secure: None, adblock: None, secure: None, hosts: h });
+            check_dns(&mut i, &DnsConfig { tunnel_resolver: None, tunnel_secure: None, adblock: None, secure: None, hosts: h, tunnel_profile: None });
             i.into_iter().map(|x| format!("{}:{}", x.path, x.code)).collect::<Vec<_>>()
         };
         assert!(check(vec![rec("home.example.com", "192.168.31.10"), rec("nas", "fd00::5")]).is_empty());
@@ -680,7 +695,7 @@ mod tests {
         let check = |json: &str| {
             let mut i = Vec::new();
             let secure: SecureDns = serde_json::from_str(json).unwrap();
-            check_dns(&mut i, &DnsConfig { tunnel_resolver: None, tunnel_secure: None, adblock: None, secure: Some(secure), hosts: vec![] });
+            check_dns(&mut i, &DnsConfig { tunnel_resolver: None, tunnel_secure: None, adblock: None, secure: Some(secure), hosts: vec![], tunnel_profile: None });
             i.into_iter().map(|x| x.code).collect::<Vec<_>>()
         };
         assert!(check(r#"{"protocol":"doh","server":"google"}"#).is_empty());

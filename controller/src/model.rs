@@ -121,6 +121,14 @@ pub struct DnsConfig {
     /// Свои записи: домен вместе с поддоменами отвечает заданным адресом (например, домашний сервер за Traefik).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hosts: Vec<HostRecord>,
+    /// Профиль, через туннель которого идут DNS-вопросы к `tunnel_resolver` (несколько серверов). Без него —
+    /// профиль с наименьшим номером туннеля.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tunnel_profile: Option<String>,
+}
+
+fn is_zero_u8(v: &u8) -> bool {
+    *v == 0
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -329,8 +337,8 @@ impl Default for ZapretConfig {
     }
 }
 
-/// Профиль TrustTunnel: сервер, к которому подключается официальный клиент `trusttunnel_client`.
-/// Поддерживается один профиль: у стока свободен один бит метки для выбора маршрута.
+/// Профиль (сервер VPN): для TrustTunnel — сервер, к которому подключается официальный клиент `trusttunnel_client`.
+/// Профилей до 16, каждый — свой туннель (`tunnel`: таблица 3100+n, TUN `mitt<n>`), правила выбирают профиль.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Profile {
@@ -339,6 +347,9 @@ pub struct Profile {
     pub kind: ProfileKind,
     #[serde(default)]
     pub on_failure: FailurePolicy,
+    /// Номер туннеля 0..=15: стабильный, не сдвигается при удалении других профилей.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub tunnel: u8,
     /// Точка подключения. Пароль хранится отдельно (secrets.json) и в API не попадает.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<Endpoint>,
