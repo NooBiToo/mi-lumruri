@@ -490,7 +490,7 @@ fn check_dns(issues: &mut Vec<Issue>, d: &DnsConfig) {
             _ => issues.push(Issue::new("dns.tunnel_resolver", "bad_resolver", "резолвер туннеля — публичный IPv4-адрес DNS-сервера, например 1.1.1.1")),
         }
     }
-    if let Some(Err(m)) = d.tunnel_proxy_args() {
+    if let Some(Err(m)) = d.tunnel_proxy_args("mitt0", None) {
         issues.push(Issue::new("dns.tunnel_secure", "tunnel_secure_unavailable", m));
     }
     if let Some(s) = &d.secure {

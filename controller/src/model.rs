@@ -226,7 +226,9 @@ impl DnsConfig {
     /// Параметры второго mi-tt-dns для доменов туннеля: порт 5454, метка туннеля на сокетах (соединения идут в TUN по
     /// правилу fwmark), без запасного пути — без туннеля вопрос не должен уходить провайдеру. None — шифрование выключено;
     /// Err — для этого резолвера оно недоступно (своё IP, NextDNS без ID, DoH у Quad9).
-    pub fn tunnel_proxy_args(&self) -> Option<Result<Vec<String>, &'static str>> {
+    /// `dev` — TUN туннеля DNS; `mark` — метка сокетов (только при одном туннеле: при нескольких номер в метке
+    /// выбирает mi-tt-admin, и решает привязка к TUN).
+    pub fn tunnel_proxy_args(&self, dev: &str, mark: Option<u32>) -> Option<Result<Vec<String>, &'static str>> {
         let protocol = self.tunnel_secure?;
         let server = match self.resolver() {
             "1.1.1.1" | "1.0.0.1" => SecureServer::Cloudflare,
@@ -242,7 +244,10 @@ impl DnsConfig {
         a[1] = format!("127.0.0.1:{DNS_TUNNEL_PORT}");
         // привязка к TUN обязательна: прошивка в mangle OUTPUT переписывает метку, и пакет перемаршрутизируется мимо туннеля
         // (EHOSTUNREACH); метка остаётся для правила fwmark, привязанный сокет из mitt0 не выйдет
-        a.extend(["--device".to_string(), crate::render::TUN_DEVICE.to_string(), "--mark".to_string(), format!("{:#x}", crate::plan::NF_MARK)]);
+        a.extend(["--device".to_string(), dev.to_string()]);
+        if let Some(m) = mark {
+            a.extend(["--mark".to_string(), format!("{m:#x}")]);
+        }
         Some(Ok(a))
     }
 }
@@ -608,13 +613,14 @@ mod tunnel_secure_tests {
 
     #[test]
     fn tunnel_proxy_args_mark_and_port() {
-        assert!(dns(r#"{}"#).tunnel_proxy_args().is_none());
-        let a = dns(r#"{"tunnel_secure":"doh"}"#).tunnel_proxy_args().unwrap().unwrap();
+        assert!(dns(r#"{}"#).tunnel_proxy_args("mitt0", None).is_none());
+        assert_eq!(dns(r#"{"tunnel_secure":"doh"}"#).tunnel_proxy_args("mitt2", None).unwrap().unwrap().last().unwrap(), "mitt2");
+        let a = dns(r#"{"tunnel_secure":"doh"}"#).tunnel_proxy_args("mitt0", Some(0x4000)).unwrap().unwrap();
         assert_eq!(a, ["--listen", "127.0.0.1:5454", "--doh", "https://cloudflare-dns.com/dns-query", "--ip", "1.1.1.1", "--ip", "1.0.0.1", "--ip", "2606:4700:4700::1111", "--ip", "2606:4700:4700::1001", "--device", "mitt0", "--mark", "0x4000"]);
-        let g = dns(r#"{"tunnel_resolver":"8.8.8.8","tunnel_secure":"dot"}"#).tunnel_proxy_args().unwrap().unwrap();
+        let g = dns(r#"{"tunnel_resolver":"8.8.8.8","tunnel_secure":"dot"}"#).tunnel_proxy_args("mitt0", Some(0x4000)).unwrap().unwrap();
         assert_eq!(&g[2..4], ["--dot", "dns.google"]);
-        assert!(dns(r#"{"tunnel_resolver":"9.9.9.9","tunnel_secure":"dot"}"#).tunnel_proxy_args().unwrap().is_ok());
-        assert!(dns(r#"{"tunnel_resolver":"9.9.9.9","tunnel_secure":"doh"}"#).tunnel_proxy_args().unwrap().is_err());
-        assert!(dns(r#"{"tunnel_resolver":"45.90.28.0","tunnel_secure":"doh"}"#).tunnel_proxy_args().unwrap().is_err());
+        assert!(dns(r#"{"tunnel_resolver":"9.9.9.9","tunnel_secure":"dot"}"#).tunnel_proxy_args("mitt0", Some(0x4000)).unwrap().is_ok());
+        assert!(dns(r#"{"tunnel_resolver":"9.9.9.9","tunnel_secure":"doh"}"#).tunnel_proxy_args("mitt0", Some(0x4000)).unwrap().is_err());
+        assert!(dns(r#"{"tunnel_resolver":"45.90.28.0","tunnel_secure":"doh"}"#).tunnel_proxy_args("mitt0", Some(0x4000)).unwrap().is_err());
     }
 }

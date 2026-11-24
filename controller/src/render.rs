@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 
 use crate::dns::DnsPlan;
 use crate::model::*;
-use crate::plan::{Act, Entry, PolicyRule, PolicySpec, QueueRule, SET_PREFIX, SetKind, SetSpec, SrcMatch, ZAPRET_QNUM, build_plan};
+use crate::plan::{Act, Entry, PolicyRule, PolicySpec, QueueRule, SET_PREFIX, SetKind, SetSpec, SrcMatch, TunSpec, ZAPRET_QNUM, build_plan};
 use crate::preview::{Dest, evaluation_order, expand, normalize_destination};
 use crate::validate::{Index, Issue, normalize_domain, normalize_mac, parse_cidr, plain_text, validate_config};
 use crate::zapret;
@@ -112,27 +112,50 @@ pub struct Rendered {
     /// План без живого контекста (для обзора и тестов).
     pub plan: Vec<Entry>,
     pub routes: Routes,
-    /// Конфигурация клиента TrustTunnel (с паролем); None — туннель не нужен.
+    /// Клиенты туннелей (с паролями), по возрастанию номера; пусто — туннель не нужен.
     #[serde(skip)]
-    pub client_toml: Option<String>,
-    /// Конфигурация для запасного сервера (если он задан и у него есть пароль) и адрес основного «host port» для
-    /// проверки, ответил ли он снова (служба: переключение и возврат).
+    pub tunnels: Vec<TunRender>,
+    /// TUN, через который идут DNS-вопросы роутера к резолверу туннеля (если домены туннеля есть).
     #[serde(skip)]
-    pub client_backup_toml: Option<String>,
-    #[serde(skip)]
-    pub primary_addr: Option<String>,
-    /// Адреса серверов для замера задержки: строки «primary хост порт» и «backup хост порт» (служба, mitt-speed.sh).
-    #[serde(skip)]
-    pub servers_addr: Option<String>,
-    /// Выбор сервера по задержке (файл-признак `fastest` для службы); только если запасной задан.
-    #[serde(skip)]
-    pub fastest: bool,
+    pub dns_dev: Option<String>,
     #[serde(skip)]
     pub dns: DnsPlan,
     pub warnings: Vec<String>,
     /// Аргументы nfqws2 (по одному на строку в nfqws2.args), если используется Zapret.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub nfqws2_args: Vec<String>,
+}
+
+/// Файлы одного туннеля для службы: туннель 0 — в каталоге рендера, n>0 — в `tun<n>/`.
+#[derive(Debug)]
+pub struct TunRender {
+    pub index: u8,
+    pub profile: String,
+    pub dev: String,
+    pub fail_open: bool,
+    /// client.toml (с паролем).
+    pub client_toml: String,
+    /// Запасной сервер (если задан и у него есть пароль) и адрес основного «host port» для проверки возврата.
+    pub client_backup_toml: Option<String>,
+    pub primary_addr: Option<String>,
+    /// «primary хост порт» и «backup хост порт» (замер задержки, mitt-speed.sh).
+    pub servers_addr: String,
+    /// Выбор сервера по задержке (файл-признак `fastest`); только если запасной задан.
+    pub fastest: bool,
+}
+
+/// TUN туннеля n.
+pub fn tun_device(n: u8) -> String {
+    format!("mitt{n}")
+}
+
+/// Подкаталог файлов туннеля в каталоге рендера: туннель 0 — прежние пути.
+pub fn tun_subdir(n: u8) -> String {
+    if n == 0 { String::new() } else { format!("tun{n}") }
+}
+
+fn with_device(toml: String, dev: &str) -> String {
+    toml.replace(&format!("device_name = \"{TUN_DEVICE}\""), &format!("device_name = \"{dev}\""))
 }
 
 /// Списки категорий: id → записи (домены или IP-префиксы), как их вернул `parse_category_list`.
@@ -317,12 +340,13 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
     if secrets.version != 1 {
         issues.push(Issue::new("secrets.version", "unsupported_version", "поддерживается версия secrets.json 1"));
     }
-    let mut tunnel_profile: Option<&Profile> = None;
-    let mut act_of = |a: &Action, path: &str, issues: &mut Vec<Issue>| -> Option<Act> {
+    // профили, через которые идут правила: номер туннеля → профиль
+    let mut used: BTreeMap<u8, &Profile> = BTreeMap::new();
+    let mut act_of = |a: &Action, path: &str, issues: &mut Vec<Issue>| -> Option<(Act, u8)> {
         match a {
-            Action::Direct => Some(Act::Direct),
-            Action::DirectZapret => Some(Act::Zapret),
-            Action::Block => Some(Act::Block),
+            Action::Direct => Some((Act::Direct, 0)),
+            Action::DirectZapret => Some((Act::Zapret, 0)),
+            Action::Block => Some((Act::Block, 0)),
             Action::Profile { id } => {
                 let p = idx.profiles[id.as_str()];
                 if p.endpoint.is_none() {
@@ -340,8 +364,8 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
                     }
                     Some(Ok(())) => {}
                 }
-                tunnel_profile = Some(p);
-                Some(Act::Tunnel)
+                used.insert(p.tunnel, p);
+                Some((Act::Tunnel, p.tunnel))
             }
         }
     };
@@ -368,7 +392,7 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
     let mut dns = DnsPlan { resolver: cfg.dns.as_ref().map(|d| d.resolver().to_string()).unwrap_or_else(|| DEFAULT_TUNNEL_RESOLVER.into()), ..Default::default() };
     let mut v6_block: BTreeSet<SrcMatch> = BTreeSet::new();
     // источники, у которых через туннель идёт весь интернет («всё через VPN»): им — IPv6 через VPN, если он включён
-    let mut tunnel_all: BTreeSet<SrcMatch> = BTreeSet::new();
+    let mut tunnel_all: BTreeSet<(u8, SrcMatch)> = BTreeSet::new();
     let (mut exact_warned, mut v6_warned) = (false, false);
 
     for r in evaluation_order(&cfg.rules) {
@@ -404,7 +428,7 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
                 }
             },
         };
-        let Some(act) = act_of(&r.action, &format!("{path}.action"), &mut issues) else { continue };
+        let Some((act, tun)) = act_of(&r.action, &format!("{path}.action"), &mut issues) else { continue };
         let (mut domains, mut nets) = (BTreeSet::new(), BTreeSet::new());
         for d in expand(&r.destination, &idx) {
             match d {
@@ -439,7 +463,7 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
         let mut add_rule = |name: String, kind: SetKind, entries: Vec<String>| {
             sets.entry(name.clone()).or_insert(SetSpec { name: name.clone(), kind, entries });
             for src in &srcs {
-                rules.push(PolicyRule { from: r.id.clone(), src: src.clone(), set: Some(name.clone()), act, tun: 0 });
+                rules.push(PolicyRule { from: r.id.clone(), src: src.clone(), set: Some(name.clone()), act, tun });
             }
         };
         if !domains.is_empty() {
@@ -460,18 +484,18 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
             v6_block.extend(srcs.iter().cloned());
         }
         if act == Act::Tunnel && all_v4 {
-            tunnel_all.extend(srcs.iter().cloned());
+            tunnel_all.extend(srcs.iter().map(|x| (tun, x.clone())));
         }
     }
-    if let Some(act) = act_of(&cfg.default_action, "default_action", &mut issues) {
+    if let Some((act, tun)) = act_of(&cfg.default_action, "default_action", &mut issues) {
         if act != Act::Direct {
             match lan_bridges() {
                 Ok(b) => {
                     for bridge in b {
                         let src = SrcMatch::Bridge { bridge };
-                        rules.push(PolicyRule { from: "default_action".into(), src: src.clone(), set: None, act, tun: 0 });
+                        rules.push(PolicyRule { from: "default_action".into(), src: src.clone(), set: None, act, tun });
                         if act == Act::Tunnel {
-                            tunnel_all.insert(src.clone());
+                            tunnel_all.insert((tun, src.clone()));
                         }
                         v6_block.insert(src);
                     }
@@ -496,52 +520,71 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
         warnings.push("доменные правила срабатывают по ответам DNS роутера: устройство со своим DoH/DoT обходит сопоставление".into());
     }
 
+    // туннель DNS роутера и IPv6 через VPN: выбранный профиль (dns.tunnel_profile) или с наименьшим номером
+    let first = used.keys().next().copied();
+    let dns_tun = cfg.dns.as_ref().and_then(|d| d.tunnel_profile.as_deref()).and_then(|id| idx.profiles.get(id)).map(|p| p.tunnel)
+        .filter(|n| used.contains_key(n)).or(first).unwrap_or(0);
+    let v6_tun = first.unwrap_or(0);
+    let tunnel_all: BTreeSet<SrcMatch> = tunnel_all.into_iter().filter(|(n, _)| *n == v6_tun).map(|(_, x)| x).collect();
     // IPv6 через VPN: включён в настройках, есть туннель и источники «всё через VPN»
-    let ipv6 = cfg.ipv6_via_vpn && tunnel_profile.is_some() && !tunnel_all.is_empty();
+    let ipv6 = cfg.ipv6_via_vpn && !used.is_empty() && !tunnel_all.is_empty();
     let zcfg = cfg.zapret.clone().unwrap_or_default();
     let uses_zapret = rules.iter().any(|r| r.act == Act::Zapret);
-    let client = tunnel_profile.map(|p| {
+    // запасные IP сервера-домена (служба: MI_TT_SERVER_ADDRS — файл «домен IP» после удачных подключений)
+    let known_addrs = std::env::var("MI_TT_SERVER_ADDRS").ok().filter(|s| !s.is_empty()).and_then(|f| std::fs::read_to_string(f).ok());
+    let mut tunnels = Vec::new();
+    for (&n, p) in &used {
         let e = p.endpoint.as_ref().expect("проверено");
-        // запасные IP сервера-домена (служба: MI_TT_SERVER_ADDRS — файл «домен IP» после удачных подключений)
-        let fallback = std::env::var("MI_TT_SERVER_ADDRS").ok().filter(|s| !s.is_empty())
-            .and_then(|f| std::fs::read_to_string(f).ok()).map(|t| fallback_addrs(&e.server, &t)).unwrap_or_default();
-        with_ipv6(client_toml_with(e, secrets.profiles[p.id.as_str()].password.as_deref().unwrap_or_default(), &fallback), ipv6)
-    });
-    let client_backup = tunnel_profile.and_then(|p| {
-        let b = p.backup.as_ref()?;
-        let pw = secrets.profiles.get(p.id.as_str())?.backup_password.as_deref()?;
-        Some(with_ipv6(client_toml(b, pw), ipv6))
-    });
-    let primary_addr = client_backup.as_ref().and(tunnel_profile).and_then(|p| p.endpoint.as_ref()).map(|e| format!("{} {}\n", e.server, e.port));
-    let fastest = client_backup.is_some() && tunnel_profile.is_some_and(|p| p.prefer_fastest);
-    let servers_addr = tunnel_profile.map(|p| {
-        let mut s = p.endpoint.as_ref().map(|e| format!("primary {} {}\n", e.server, e.port)).unwrap_or_default();
-        if let Some(b) = &p.backup {
-            s.push_str(&format!("backup {} {}\n", b.server, b.port));
-        }
-        s
-    });
-    if let Some(p) = tunnel_profile {
-        if !plain_text(&p.endpoint.as_ref().expect("проверено").username) {
+        if !plain_text(&e.username) {
             return Err(vec![Issue::new("profiles", "bad_username", "имя пользователя содержит недопустимые символы")]);
         }
+        let dev = tun_device(n);
+        let v6 = ipv6 && n == v6_tun;
+        let fallback = known_addrs.as_deref().map(|t| fallback_addrs(&e.server, t)).unwrap_or_default();
+        let main_toml = with_device(with_ipv6(client_toml_with(e, secrets.profiles[p.id.as_str()].password.as_deref().unwrap_or_default(), &fallback), v6), &dev);
+        let client_backup_toml = p.backup.as_ref().and_then(|b| {
+            let pw = secrets.profiles.get(p.id.as_str())?.backup_password.as_deref()?;
+            Some(with_device(with_ipv6(client_toml(b, pw), v6), &dev))
+        });
+        let primary_addr = client_backup_toml.as_ref().map(|_| format!("{} {}
+", e.server, e.port));
+        let mut servers_addr = format!("primary {} {}
+", e.server, e.port);
+        if let Some(b) = &p.backup {
+            servers_addr.push_str(&format!("backup {} {}
+", b.server, b.port));
+        }
+        tunnels.push(TunRender {
+            index: n,
+            profile: p.id.clone(),
+            fail_open: p.on_failure == FailurePolicy::Direct,
+            fastest: client_backup_toml.is_some() && p.prefer_fastest,
+            dev,
+            client_toml: main_toml,
+            client_backup_toml,
+            primary_addr,
+            servers_addr,
+        });
     }
     let policy = PolicySpec {
         rules,
         sets: sets.into_values().collect(),
         lan_subnets: cfg.networks.iter().filter_map(net_subnet).collect::<BTreeSet<_>>().into_iter().collect(),
-        tun: TUN_DEVICE.into(),
-        fail_open: tunnel_profile.is_some_and(|p| p.on_failure == FailurePolicy::Direct),
+        tun: tunnels.iter().find(|t| t.index == 0).map(|t| t.dev.clone()).unwrap_or_default(),
+        fail_open: tunnels.iter().find(|t| t.index == 0).is_some_and(|t| t.fail_open),
         zapret_queue: if uses_zapret { zapret_queue(&zcfg) } else { Vec::new() },
-        dns_resolver: (client.is_some() && !dns.tunnel_domains.is_empty()).then(|| dns.resolver.clone()),
+        dns_resolver: (!tunnels.is_empty() && !dns.tunnel_domains.is_empty()).then(|| dns.resolver.clone()),
         v6_block: v6_block.into_iter().collect(),
         v6_tunnel: if ipv6 { tunnel_all.iter().cloned().collect() } else { Vec::new() },
-        ..Default::default()
+        extra: tunnels.iter().filter(|t| t.index != 0).map(|t| TunSpec { index: t.index, dev: t.dev.clone(), fail_open: t.fail_open }).collect(),
+        field: Default::default(),
+        dns_tun,
+        v6_tun,
     };
-    if cfg.ipv6_via_vpn && client.is_some() && tunnel_all.is_empty() {
+    if cfg.ipv6_via_vpn && !tunnels.is_empty() && tunnel_all.is_empty() {
         warnings.push("IPv6 через VPN действует только для «всё через VPN»: при выборе отдельных сайтов IPv6 устройств закрыт".into());
     }
-    if client.is_none() {
+    if tunnels.is_empty() {
         dns.tunnel_domains.clear();
     }
     let plan: Vec<Entry> = {
@@ -556,11 +599,8 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
         policy,
         plan,
         routes,
-        client_toml: client,
-        client_backup_toml: client_backup,
-        primary_addr,
-        servers_addr,
-        fastest,
+        tunnels,
+        dns_dev: (!dns.tunnel_domains.is_empty()).then(|| tun_device(dns_tun)),
         dns,
         warnings,
     })

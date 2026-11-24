@@ -403,3 +403,39 @@ fn domain_rules_feed_dnsmasq_and_tunnel_resolver_override() {
     let conf = std::fs::read_to_string(out.join("dnsmasq-mitt.conf")).unwrap();
     assert!(conf.contains("server=/cdn.video.lab.test/9.9.9.9\n") && conf.contains("server=/ok.ads.example/#\n"), "{conf}");
 }
+
+#[test]
+fn render_two_tunnels_writes_per_tunnel_files_and_list() {
+    let mut c = lab();
+    c["profiles"].as_array_mut().unwrap().push(json!({ "id": "tt2", "name": "Второй", "kind": "trusttunnel", "tunnel": 2,
+        "endpoint": { "server": "10.30.0.9", "port": 443, "username": "u2" } }));
+    c["groups"].as_array_mut().unwrap().push(json!({ "id": "music", "name": "Музыка", "destinations": [{ "type": "domain_suffix", "value": "music.lab.test" }] }));
+    c["rules"].as_array_mut().unwrap().push(json!({ "id": "r2", "source": { "type": "device", "id": "tv" }, "destination": { "type": "group", "id": "music" },
+        "action": { "type": "profile", "id": "tt2" } }));
+    let sec = json!({ "version": 1, "profiles": { "tt-lab": { "password": secret() }, "tt2": { "password": secret() } } });
+    let (code, v, out) = render(&c, &sec);
+    assert_eq!(code, 0, "{v}");
+    assert_eq!(std::fs::read_to_string(out.join("tunnels.list")).unwrap(), "0 mitt0 tt-lab\n2 mitt2 tt2\n");
+    let t2 = std::fs::read_to_string(out.join("tun2/client.toml")).unwrap();
+    assert!(t2.contains("device_name = \"mitt2\"\n") && t2.contains("username = \"u2\"\n"), "{t2}");
+    assert!(std::fs::read_to_string(out.join("client.toml")).unwrap().contains("device_name = \"mitt0\"\n"));
+    assert_eq!(v["policy"]["extra"][0]["dev"], "mitt2");
+    let rules = v["policy"]["rules"].as_array().unwrap();
+    assert!(rules.iter().any(|r| r["from"] == "r2" && r["tun"] == 2), "{v}");
+    assert!(rules.iter().any(|r| r["from"] == "r1" && r.get("tun").is_none()), "{v}");
+    // сервер 2 убран из правил — его каталог и строка в списке исчезают
+    c["rules"].as_array_mut().unwrap().pop();
+    let (code, v) = render_to(&out, &c, &sec);
+    assert_eq!(code, 0, "{v}");
+    assert!(!out.join("tun2").exists());
+    assert_eq!(std::fs::read_to_string(out.join("tunnels.list")).unwrap(), "0 mitt0 tt-lab\n");
+    // DNS-туннель — выбранный профиль; при нескольких туннелях без метки, только привязка к TUN
+    c["rules"].as_array_mut().unwrap().push(json!({ "id": "r2", "source": { "type": "device", "id": "tv" }, "destination": { "type": "group", "id": "music" },
+        "action": { "type": "profile", "id": "tt2" } }));
+    c["dns"] = json!({ "tunnel_profile": "tt2", "tunnel_secure": "doh" });
+    let (code, v) = render_to(&out, &c, &sec);
+    assert_eq!(code, 0, "{v}");
+    assert_eq!(v["policy"]["dns_tun"], 2);
+    let args = std::fs::read_to_string(out.join("dns-tunnel.args")).unwrap();
+    assert!(args.contains("--device\nmitt2\n") && !args.contains("--mark"), "{args}");
+}

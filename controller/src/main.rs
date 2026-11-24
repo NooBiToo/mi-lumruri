@@ -235,12 +235,7 @@ fn render_cmd(cfg: &str, secrets: &str, out: &str) -> Response {
                 .map_err(|e| format!("не удалось создать каталог {}: {e}", dir.display()))
                 .and_then(|_| store::write_atomic(&dir.join("policy.json"), &policy))
                 .and_then(|_| store::write_atomic(&dir.join("routes.json"), &routes))
-                .and_then(|_| opt("client.toml", r.client_toml.clone(), true))
-                // запасной сервер: его client.toml и адрес основного для проверки возврата (служба, mitt-lib.sh)
-                .and_then(|_| opt("client-backup.toml", r.client_backup_toml.clone(), true))
-                .and_then(|_| opt("primary.addr", r.primary_addr.clone(), false))
-                .and_then(|_| opt("servers.addr", r.servers_addr.clone(), false))
-                .and_then(|_| opt("fastest", r.fastest.then(|| "1\n".to_string()), false))
+                .and_then(|_| write_tunnels(dir, &r.tunnels))
                 .and_then(|_| write_dns_file(&config, &r.dns, cfg_path, dir, tunnel_dns_args(&config, &r).is_some()))
                 // параметры mi-tt-dns по одному в строке; нет файла — защищённый DNS выключен
                 .and_then(|_| opt("dns-proxy.args", config.dns.as_ref().and_then(|d| d.secure.as_ref()).and_then(|s| s.proxy_args())
@@ -256,7 +251,7 @@ fn render_cmd(cfg: &str, secrets: &str, out: &str) -> Response {
                 return Response::error(500, "write_failed", m);
             }
             warnings.extend(r.warnings.iter().cloned());
-            Response { status: 200, body: json!({ "ok": true, "source_revision": store::revision(&c), "tunnel": r.client_toml.is_some(),
+            Response { status: 200, body: json!({ "ok": true, "source_revision": store::revision(&c), "tunnel": !r.tunnels.is_empty(), "tunnels": r.tunnels.iter().map(|t| json!({ "index": t.index, "dev": t.dev, "profile": t.profile })).collect::<Vec<_>>(),
                 "policy": r.policy, "plan": r.plan.iter().map(|e| e.label()).collect::<Vec<_>>(), "routes": r.routes,
                 "nfqws2_args": r.nfqws2_args, "warnings": warnings, "issues": [] }) }
         }
@@ -267,10 +262,60 @@ fn render_cmd(cfg: &str, secrets: &str, out: &str) -> Response {
 /// (`MI_TT_ADBLOCK_LIST`, копия в RAM), иначе `adblock.list` рядом с настройками (загрузка через CLI/API).
 /// Пустой — файла нет. Ошибочный список рекламы — отказ (действующие файлы не меняются).
 fn tunnel_dns_args(config: &model::Config, r: &render::Rendered) -> Option<Vec<String>> {
-    if r.client_toml.is_none() || r.dns.tunnel_domains.is_empty() {
+    let dev = r.dns_dev.as_deref()?;
+    if r.tunnels.is_empty() || r.dns.tunnel_domains.is_empty() {
         return None;
     }
-    config.dns.as_ref()?.tunnel_proxy_args()?.ok()
+    let mark = (!r.policy.needs_field()).then_some(mi_tt::plan::NF_MARK);
+    config.dns.as_ref()?.tunnel_proxy_args(dev, mark)?.ok()
+}
+
+/// Файлы клиентов туннелей: туннель 0 — в каталоге рендера (прежние пути), n>0 — в `tun<n>/`; `tunnels.list` —
+/// строки «номер TUN профиль» для службы. Файлы исчезнувших туннелей удаляются.
+fn write_tunnels(dir: &std::path::Path, tunnels: &[render::TunRender]) -> Result<(), String> {
+    let put = |d: &std::path::Path, name: &str, body: Option<&str>, private: bool| -> Result<(), String> {
+        let f = d.join(name);
+        match body {
+            None => {
+                let _ = std::fs::remove_file(&f);
+                Ok(())
+            }
+            Some(b) => {
+                store::write_atomic(&f, b.as_bytes())?;
+                #[cfg(unix)]
+                if private {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o600)).map_err(|e| format!("{}: {e}", f.display()))?;
+                }
+                let _ = private;
+                Ok(())
+            }
+        }
+    };
+    let files = |d: &std::path::Path, t: Option<&render::TunRender>| -> Result<(), String> {
+        put(d, "client.toml", t.map(|t| t.client_toml.as_str()), true)?;
+        // запасной сервер: его client.toml и адрес основного для проверки возврата (служба, mitt-lib.sh)
+        put(d, "client-backup.toml", t.and_then(|t| t.client_backup_toml.as_deref()), true)?;
+        put(d, "primary.addr", t.and_then(|t| t.primary_addr.as_deref()), false)?;
+        put(d, "servers.addr", t.map(|t| t.servers_addr.as_str()), false)?;
+        put(d, "fastest", t.filter(|t| t.fastest).map(|_| "1\n"), false)
+    };
+    files(dir, tunnels.iter().find(|t| t.index == 0))?;
+    for n in 1..=mi_tt::plan::MAX_TUN {
+        let d = dir.join(render::tun_subdir(n));
+        match tunnels.iter().find(|t| t.index == n) {
+            Some(t) => {
+                std::fs::create_dir_all(&d).map_err(|e| format!("{}: {e}", d.display()))?;
+                files(&d, Some(t))?;
+            }
+            None if d.exists() => {
+                let _ = std::fs::remove_dir_all(&d);
+            }
+            None => {}
+        }
+    }
+    let list: String = tunnels.iter().map(|t| format!("{} {} {}\n", t.index, t.dev, t.profile)).collect();
+    put(dir, "tunnels.list", (!list.is_empty()).then_some(list.as_str()), false)
 }
 
 fn write_dns_file(config: &model::Config, plan: &mi_tt::dns::DnsPlan, cfg: &std::path::Path, dir: &std::path::Path, tunnel_secure: bool) -> Result<(), String> {
