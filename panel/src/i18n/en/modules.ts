@@ -66,4 +66,8 @@ export default {
   "Обновить до {v}": "Update to {v}",
   "Работает": "Working",
   "Шифрование": "Encryption",
+  "есть — список серверов роутер получит после сохранения": "yes: the router gets the server list after saving",
+  "Сервер из подписки выбран, применяю на роутере": "Server from the subscription selected, applying on the router",
+  "Подписка — список серверов от вашего провайдера VPN. Роутер забирает его по расписанию списков сайтов и по кнопке и подключается к выбранному серверу (по умолчанию — первому). Хранится только на роутере.": "A subscription is a server list from your VPN provider. The router fetches it on the site list schedule and by the button, and connects to the selected server (the first one by default). It is stored only on the router.",
+  "Сервер из подписки": "Server from the subscription",
 }

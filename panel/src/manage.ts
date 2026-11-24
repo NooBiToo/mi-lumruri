@@ -49,8 +49,11 @@ export function profileToForm(p: Profile): ProfileForm {
 export function formToProfile(f: ProfileForm, subscription = false): Profile | string {
   // сервер модуля sing-box: в настройках — только сводка, ссылка уходит в секреты
   if (f.kind !== 'trusttunnel') {
-    if (!f.proxy) return t('Вставьте ссылку на сервер.')
-    return { id: f.id.trim(), name: f.name.trim(), kind: f.kind, on_failure: f.onFailure, proxy: f.proxy }
+    // только подписка: сервер выберет роутер, когда скачает список
+    if (!f.proxy && !subscription) return t('Вставьте ссылку на сервер.')
+    const p: Profile = { id: f.id.trim(), name: f.name.trim(), kind: f.kind, on_failure: f.onFailure }
+    if (f.proxy) p.proxy = f.proxy
+    return p
   }
   // только подписка: адрес и логин сервер пришлёт сам — профиль без точки подключения
   if (subscription && !f.server.trim() && !f.username.trim()) return { id: f.id.trim(), name: f.name.trim(), kind: 'trusttunnel', on_failure: f.onFailure }
@@ -75,6 +78,7 @@ export function formToSecret(f: ProfileForm): ProfileSecret | null {
   const s: ProfileSecret = {}
   if (f.kind !== 'trusttunnel') {
     if (f.link.trim()) s.link = f.link.trim()
+    if (f.subscriptionUrl.trim()) s.subscription_url = f.subscriptionUrl.trim()
     return Object.keys(s).length ? s : null
   }
   if (f.password) s.password = f.password

@@ -2,7 +2,7 @@
 
 [Русский](guide.md) · **English** · [简体中文](guide.zh-CN.md)
 
-This guide covers Mi Lumruri version 0.11.0. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
+This guide covers Mi Lumruri version 0.11.1. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
 
 You need a BE7000 (RC06) with firmware 1.1.38, working root access over SSH from the home network, the installation TAR, and the parameters of your TrustTunnel server. The stock release firmware usually ships with SSH turned off.
 
@@ -180,6 +180,8 @@ The package includes TrustTunnel client v1.3.0, which works with TrustTunnel ser
 These servers work through the [sing-box module](#modules): install it on the Modules page first. Then on the Server screen click Add server, paste a `vless://…`, `hysteria2://…` (or `hy2://…`), `trojan://…` or `ss://…` link and click Recognize. The panel shows the protocol, address, encryption and transport; check the Name and click Save. The link contains a key or password, so it is stored only on the router: the settings keep a summary, and the panel never shows the link itself. To change the server, paste a new link into the Server link field.
 
 Supported: VLESS over TCP, WebSocket, gRPC, HTTP and HTTPUpgrade, with no encryption, TLS or Reality (including `flow=xtls-rprx-vision`) and a uTLS fingerprint; Hysteria2 with salamander obfuscation; Trojan with TLS and the same transports; Shadowsocks with AEAD and 2022 ciphers. VMess, Shadowsocks plugins and Hysteria2 port hopping are not supported: such a link is not saved, and the panel skips unknown parameters with a warning. The backup server and latency-based choice exist only for TrustTunnel servers.
+
+**Subscription.** If your VPN provider gives you an `https://…` subscription link (a server list, usually base64), paste it into the Quick setup field of a new server or into the Subscription link field of an existing one and save. The router downloads the list on the site list schedule and by the Update by subscription button, takes the supported servers from it (VLESS, Hysteria2, Trojan, Shadowsocks; the rest are skipped) and connects to the selected one. You choose it in the Server from the subscription list; by default it is the first one, and on updates the router keeps the selected one while it is in the list. The server protocol may change with the choice. Until the list is downloaded, this server's sites follow the If the server is unavailable choice. The list with keys is stored only on the router. Subscriptions work for each server separately, including several TrustTunnel servers.
 
 #### Several servers
 

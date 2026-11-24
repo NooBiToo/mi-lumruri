@@ -12,7 +12,7 @@ import { api, manage, type Config, type Endpoint, type ModuleInfo, type Profile,
 import { isProxyLink, parseProxyLink, PROTOCOL_LABEL } from '../proxyLink'
 import { emptyProfileForm, formToProfile, formToSecret, profileToForm, type ProfileForm } from '../manage'
 import { parseServer, TLS_PROFILES } from '../serverConfig'
-import { build, config, freeTunnel, hasPassword, hasSubscription, knownDevicesNow, loadSecrets, notify, profile, profiles, save, selectedServer, simple, tunnel, withProfile } from '../store'
+import { build, config, freeTunnel, hasPassword, hasSubscription, knownDevicesNow, loadConfig, loadSecrets, notify, profile, profiles, save, selectedServer, simple, tunnel, withProfile } from '../store'
 import { when } from '../status'
 import { t } from '../i18n'
 import Segmented from '../components/Segmented.vue'
@@ -83,6 +83,14 @@ watch(pasted, (t) => { if (!t.trim()) parsed.value = null })
 function recognize() {
   const text = pasted.value
   if (!text.trim()) { parsed.value = null; return }
+  // ссылка-подписка серверов sing-box (https://…, не tt://): список серверов роутер скачает после сохранения
+  if (/^https:\/\/\S+$/i.test(text.trim())) {
+    const f = form.value
+    if (f.kind === 'trusttunnel') f.kind = 'vless'
+    f.subscriptionUrl = text.trim(); f.link = ''
+    parsed.value = { rows: [{ label: t('Подписка'), value: t('есть — список серверов роутер получит после сохранения') }], warnings: [] }
+    return
+  }
   // серверы модуля sing-box: ссылка целиком — секрет, в настройках — сводка
   if (isProxyLink(text)) {
     const x = parseProxyLink(text)
@@ -161,8 +169,8 @@ watch(() => form.value.link, (l) => {
 const blocker = computed(() => {
   const f = form.value
   if (isProxy.value) {
-    if (!f.proxy) return t('Вставьте ссылку на сервер.')
-    if (!f.link.trim() && !hasPassword.value) return t('Вставьте ссылку на сервер.')
+    if (!f.proxy && !subscribed.value) return t('Вставьте ссылку на сервер.')
+    if (!f.link.trim() && !hasPassword.value && !subscribed.value) return t('Вставьте ссылку на сервер.')
     if (f.link.trim() && isProxyLink(f.link)) { const x = parseProxyLink(f.link); if ('error' in x) return x.error; if (x.kind !== f.kind) return t('Ссылка другого протокола: добавьте её отдельным сервером.') }
     return null
   }
@@ -173,7 +181,7 @@ const blocker = computed(() => {
 })
 async function submit() {
   if (blocker.value || !config.value) return
-  const built = formToProfile(form.value, subscriptionOnly.value)
+  const built = formToProfile(form.value, isProxy.value ? subscribed.value : subscriptionOnly.value)
   if (typeof built === 'string') { error.value = built; return }
   // номер туннеля, запасной сервер и выбор по задержке — от сохранённого профиля; новому — свободный номер
   const old = config.value.profiles.find((x) => x.id === built.id)
@@ -221,10 +229,26 @@ async function submit() {
 // ---- подписка TrustTunnel ----
 const sub = ref<SubscriptionResponse | null>(null)
 let subTimer: number | undefined
+let subWasRunning = false
 async function loadSubscription() {
   clearTimeout(subTimer)
   try { sub.value = (await api.subscription()).body } catch { /* панель недоступна */ }
   if (sub.value?.running) subTimer = window.setTimeout(() => void loadSubscription(), 2000)
+  // подписка обновилась — роутер мог сменить сервер: перечитать настройки
+  else if (subWasRunning) void loadConfig()
+  subWasRunning = !!sub.value?.running
+}
+/** Подписка выбранного сервера: итог обновления и список серверов (sing-box). */
+const subState = computed(() => (profile.value ? sub.value?.profiles?.[profile.value.id]?.status ?? null : null))
+const subEntries = computed(() => (profile.value ? sub.value?.profiles?.[profile.value.id]?.entries ?? [] : []))
+const pickedName = computed(() => profile.value?.sub_pick ?? '')
+async function pickEntry(name: string) {
+  const id = profile.value?.id
+  if (!id) return
+  const r = await api.pickSubscription(id, name)
+  if (r.status !== 200) { notify.show('error', t('Не получилось'), r.body.error?.message); return }
+  notify.show('success', t('Сервер из подписки выбран, применяю на роутере'))
+  await loadConfig()
 }
 async function refreshSubscription(quiet = false) {
   const r = await api.updateSubscription()
@@ -241,7 +265,7 @@ async function dropSubscription() {
   await loadSecrets()
 }
 const subText = computed(() => {
-  const s = sub.value?.subscription
+  const s = subState.value
   if (sub.value?.running) return t('Обновляю по подписке…')
   if (!s) return t('Роутер ещё не обращался к подписке')
   if (!s.ok) return t('Не получилось {when}: {e}. Действуют прежние параметры', { when: when(s.checked), e: s.error ?? t('ошибка') })
@@ -354,6 +378,29 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
               :placeholder="hasPassword ? t('Сохранена. Оставьте пустым') : 'vless://…'" />
             <span class="field__hint">{{ t('В ссылке есть ключ или пароль, поэтому она хранится только на роутере и сюда не возвращается. Вставьте новую, чтобы сменить сервер.') }}</span>
           </div>
+          <div class="field">
+            <label for="srv-psub" class="field__label">{{ t('Ссылка-подписка') }}</label>
+            <Password v-model="form.subscriptionUrl" input-id="srv-psub" :feedback="false" toggle-mask fluid autocomplete="off"
+              :placeholder="hasSubscription ? t('Сохранена. Оставьте пустым') : 'https://…'" />
+            <span class="field__hint">{{ t('Подписка — список серверов от вашего провайдера VPN. Роутер забирает его по расписанию списков сайтов и по кнопке и подключается к выбранному серверу (по умолчанию — первому). Хранится только на роутере.') }}</span>
+          </div>
+          <template v-if="hasSubscription">
+            <span :class="['adblock__state', { 'adblock__state--bad': subState && !subState.ok }]" aria-live="polite">
+              <span :class="['led', subState ? (subState.ok ? 'led--ok' : 'led--warn') : 'led--idle']" aria-hidden="true" />
+              <span class="meta">{{ subText }}</span>
+            </span>
+            <div v-if="subEntries.length" class="field">
+              <label for="srv-pick" class="field__label">{{ t('Сервер из подписки') }}</label>
+              <select id="srv-pick" class="tile__server self-start" :value="pickedName || subEntries.find((e) => e.server === form.proxy?.server && e.port === form.proxy?.port)?.name || ''"
+                @change="pickEntry(($event.target as HTMLSelectElement).value)">
+                <option v-for="e in subEntries" :key="e.name" :value="e.name">{{ e.name }} — {{ e.kind }}, {{ e.server }}:{{ e.port }}</option>
+              </select>
+            </div>
+            <div class="sub__actions">
+              <Button :label="t('Обновить по подписке')" size="small" severity="secondary" variant="outlined" :loading="!!sub?.running" :disabled="!!sub?.running" @click="refreshSubscription()" />
+              <Button :label="t('Удалить подписку')" size="small" severity="secondary" variant="text" @click="dropSubscription" />
+            </div>
+          </template>
         </template>
         <template v-else>
         <div class="row2">
@@ -432,8 +479,8 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
             <span class="field__hint">{{ t('Подписка TrustTunnel 1.3: по ней роутер сам забирает адрес, логин, пароль и сертификат сервера — по расписанию списков сайтов и по кнопке. В ссылке есть логин и пароль, поэтому она хранится только на роутере') }}</span>
           </div>
           <template v-if="hasSubscription">
-            <span :class="['adblock__state', { 'adblock__state--bad': sub?.subscription && !sub.subscription.ok }]" aria-live="polite">
-              <span :class="['led', sub?.subscription ? (sub.subscription.ok ? 'led--ok' : 'led--warn') : 'led--idle']" aria-hidden="true" />
+            <span :class="['adblock__state', { 'adblock__state--bad': subState && !subState.ok }]" aria-live="polite">
+              <span :class="['led', subState ? (subState.ok ? 'led--ok' : 'led--warn') : 'led--idle']" aria-hidden="true" />
               <span class="meta">{{ subText }}</span>
             </span>
             <div class="sub__actions">

@@ -165,3 +165,32 @@ test('«Модули»: установка на флешку ставит зая
     .toMatchObject({ action: 'install', name: 'sing-box', dir: '/mnt/usb-5f2a/mi-lumruri-modules/sing-box' })
   expect(consoleErrors).toEqual([])
 })
+
+test('подписка сервера sing-box: добавление ссылкой https, список от роутера, выбор сервера', async ({ page }) => {
+  await login(page)
+  await simplify(page)
+  await nav(page, /Сервер/).click()
+  await page.getByRole('button', { name: 'Добавить сервер' }).click()
+  await page.locator('#paste').fill('https://bob:pw@sub.example.com/list') // secret-scan: allow тестовая подписка
+  await page.getByRole('button', { name: 'Распознать' }).click()
+  await page.locator('#srv-name').fill('Провайдер')
+  await page.getByRole('button', { name: 'Сохранить' }).click()
+  await expect.poll(() => config().profiles.find((p: { name: string }) => p.name === 'Провайдер')?.kind, { timeout: 10_000 }).toBe('vless')
+  const id = config().profiles.find((p: { name: string }) => p.name === 'Провайдер').id
+  const sec = () => readFileSync(join(dirname(stand.opts.config), 'secrets.json'), 'utf8')
+  await expect.poll(sec, { timeout: 10_000 }).toContain('sub.example.com/list')
+  // служба скачала список: тот же импорт, что делает mitt-sub.sh
+  const list = join(STATE, 'list.txt')
+  writeFileSync(list, Buffer.from('vless://bf000d23-0752-40b4-affe-68f7707a9661@a.example.com:443?security=tls#A\nhy2://pw@b.example.com:443#B\n').toString('base64')) // secret-scan: allow тестовые ссылки
+  const out = execFileSync(exe('mi-tt-ctl'), ['proxy-sub-import', stand.opts.config, id, list], { env: { MI_TT_RUN_DIR: join(stand.opts.stateDir, 'run'), ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}) } }).toString()
+  expect(JSON.parse(out)).toMatchObject({ changed: true, count: 2, picked: 'A' })
+  await page.reload()
+  await nav(page, /Сервер/).click()
+  await page.getByRole('button', { name: /Провайдер/ }).click()
+  const pick = page.locator('#srv-pick')
+  await expect(pick).toHaveValue('A')
+  await pick.selectOption('B')
+  await expect.poll(() => config().profiles.find((p: { id: string }) => p.id === id)?.kind, { timeout: 10_000 }).toBe('hysteria2')
+  expect(config().profiles.find((p: { id: string }) => p.id === id).sub_pick).toBe('B')
+  expect(consoleErrors).toEqual([])
+})

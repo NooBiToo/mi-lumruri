@@ -28,7 +28,7 @@ export interface Endpoint {
 }
 export type TlsProfile = 'chrome' | 'chrome_canary' | 'safari' | 'firefox' | 'okhttp' | 'openssl' | 'boringssl'
 /** Профиль TrustTunnel; backup — запасной сервер (пароль — backup_password в секретах). */
-export interface Profile { id: string; name: string; kind: ProfileKind; on_failure: 'block' | 'direct'; tunnel?: number; endpoint?: Endpoint; backup?: Endpoint; prefer_fastest?: boolean; proxy?: ProxyInfo }
+export interface Profile { id: string; name: string; kind: ProfileKind; on_failure: 'block' | 'direct'; tunnel?: number; endpoint?: Endpoint; backup?: Endpoint; prefer_fastest?: boolean; proxy?: ProxyInfo; sub_pick?: string }
 export interface Network { id: string; name: string; ssid: string; segment?: string; subnet?: string; bridge?: string; ports?: string[] }
 export interface Device { id: string; name: string; mac: string; network: string }
 
@@ -317,8 +317,14 @@ export interface SpeedResponse { ok: boolean; running?: boolean; speed: SpeedSta
 export interface UpdateResponse { ok: boolean; running?: boolean; update?: UpdateState | null; queued?: boolean; issues: Issue[]; error?: ApiError }
 
 /** Итог обновления по подписке TrustTunnel (mitt-sub.sh); время — unix-секунды; updated — когда параметры менялись. */
-export interface SubscriptionState { ok: boolean; checked: number; updated: number | null; error: string | null }
-export interface SubscriptionResponse { ok: boolean; running?: boolean; subscription?: SubscriptionState | null; queued?: boolean; issues: Issue[]; error?: ApiError }
+export interface SubscriptionState { ok: boolean; checked: number; updated: number | null; error: string | null; count?: number | null }
+/** Сервер из подписки sing-box (без ссылки). */
+export interface SubscriptionEntry { name: string; kind: ProfileKind; server: string; port: number }
+export interface SubscriptionResponse {
+  ok: boolean; running?: boolean; queued?: boolean; issues: Issue[]; error?: ApiError
+  /** По серверам: итог последнего обновления и список серверов подписки sing-box. */
+  profiles?: Record<string, { status: SubscriptionState | null; entries: SubscriptionEntry[] }>
+}
 
 /** Ответ замены настроек целиком: при успехе — новая ревизия, настройки и заявка на применение (`queued`). */
 export interface ReplaceResponse extends SaveResponse { queued?: boolean }
@@ -375,6 +381,7 @@ export const api = {
   update: () => call<UpdateResponse>('/update'),
   subscription: () => call<SubscriptionResponse>('/subscription'),
   updateSubscription: () => call<SubscriptionResponse>('/subscription/update', json({})),
+  pickSubscription: (profile_id: string, name: string) => call<ManageResponse>('/subscription/pick', json({ profile_id, name })),
   checkUpdate: () => call<UpdateResponse>('/update', json({ action: 'check' })),
   installUpdate: (trust_official = false) => call<UpdateResponse>('/update', json({ action: 'install', trust_official })),
 }
