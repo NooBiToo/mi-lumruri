@@ -26,7 +26,7 @@ python install.py 192.168.31.1
 
 | | |
 | --- | --- |
-| **服务器** | 粘贴链接，字段自动填写。**TrustTunnel** 内置：官方客户端 `trusttunnel_client` v1.3.0，HTTP/2 或 HTTP/3、anti-DPI、TLS 配置文件、client_random、订阅链接。**VLESS**（TCP、WebSocket、gRPC、Reality、xtls-rprx-vision）、**Hysteria2**、**Trojan** 和 **Shadowsocks** 通过 sing-box 模块运行，支持 `https://` 订阅，可从服务器列表中选择。**AmneziaWG** 1.x 和 2.0 通过 amneziawg 模块运行，使用 `.conf` 文件。最多 16 个服务器**同时**运行：「网站」中的服务和设备都可以选择各自的服务器。TrustTunnel 备用服务器支持切换和回切，并可按更低延迟选择服务器。服务器不可用时，列表中的网站可选择等待或直连。 |
+| **服务器** | 粘贴链接，字段自动填写。**TrustTunnel** 内置：官方客户端 `trusttunnel_client` v1.3.0，HTTP/2 或 HTTP/3、anti-DPI、TLS 配置文件、client_random、订阅链接。**VLESS**（TCP、WebSocket、gRPC、Reality、xtls-rprx-vision）、**Hysteria2**、**Trojan** 和 **Shadowsocks** 通过 sing-box 模块运行，支持 `https://` 订阅，可从服务器列表中选择。**AmneziaWG** 1.x 和 2.0 通过 amneziawg 模块运行，使用 `.conf` 文件。最多 16 个服务器**同时**运行：「网站」中的服务和设备都可以选择各自的服务器。订阅服务器以列表显示，附带各服务器延迟，可自动选择最快的服务器。TrustTunnel 备用服务器支持切换和回切，并可按更低延迟选择服务器。服务器不可用时，列表中的网站可选择等待或直连。 |
 | **网站** | 每个服务可设为 **VPN**、**Zapret** 或 **关闭**。软件包自带 [itdoginfo/allow-domains](https://github.com/itdoginfo/allow-domains) 列表及服务网段，并自动更新：从每 6 小时到每周一次，或仅手动。自定义 VPN 网站、绕过封锁的网站和例外分别以列表设置。支持「全部走 VPN，例外除外」模式和 IPv6 走 VPN。 |
 | **Zapret** | 内置 zapret2 的 nfqws2 和现成策略，开箱即用。「选择方式」在路由器上测试策略，仅当效果优于不使用 Zapret 时才应用最佳策略。也可手动选择方式，YouTube 可单独设置。支持定期自动检查方式。 |
 | **设备** | 全部家庭设备或仅所选设备。名称：您设置的名称、设备在网络中广播的名称（iPhone、Chromecast、电视、音箱）、DHCP 名称或按 MAC 识别的厂商。「隐藏 MAC」标记，详情中显示连接方式和流量。单个设备可设为「全部互联网」走 VPN 并使用自己的服务器。 |
@@ -52,7 +52,7 @@ python install.py 192.168.31.1
 
 <p>
   <img src="docs/img/zapret.png" alt="「Zapret」页面：状态、所有网站和 YouTube 的方式、方式选择和定期检查" width="49%">
-  <img src="docs/img/server.png" alt="「服务器」页面：服务器列表、粘贴链接、服务器信息、备用服务器、速度和延迟" width="49%">
+  <img src="docs/img/server.png" alt="「服务器」页面：订阅服务器及各自延迟、自动选择和搜索" width="49%">
 </p>
 
 ## 工作原理

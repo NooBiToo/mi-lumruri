@@ -383,6 +383,10 @@ pub struct Profile {
     /// Сервер из подписки sing-box (имя из списка); без него — прежняя ссылка или первая в списке.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sub_pick: Option<String>,
+    /// Автовыбор сервера из подписки: после каждого обновления служба замеряет задержку до серверов списка и
+    /// переходит на заметно более быстрый (`sub_pick` тогда не действует).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sub_auto: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

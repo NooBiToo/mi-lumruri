@@ -18,6 +18,7 @@ import { t } from '../i18n'
 import Segmented from '../components/Segmented.vue'
 import BackupServer from '../components/BackupServer.vue'
 import SpeedCard from '../components/SpeedCard.vue'
+import SubServers from '../components/SubServers.vue'
 
 const emit = defineEmits<{ navigate: [tab: 'sites' | 'modules'] }>()
 
@@ -205,6 +206,9 @@ async function submit() {
   if (tunnelNo) p.tunnel = tunnelNo
   if (old?.backup) p.backup = old.backup
   if (old?.prefer_fastest) p.prefer_fastest = true
+  // выбор сервера из подписки и автовыбор задаёт список серверов подписки, а не форма
+  if (isProxy.value && subscribed.value && old?.sub_pick) p.sub_pick = old.sub_pick
+  if (isProxy.value && subscribed.value && old?.sub_auto) p.sub_auto = true
   saving.value = true
   error.value = null
   try {
@@ -255,7 +259,11 @@ async function loadSubscription() {
 /** Подписка выбранного сервера: итог обновления и список серверов (sing-box). */
 const subState = computed(() => (profile.value ? sub.value?.profiles?.[profile.value.id]?.status ?? null : null))
 const subEntries = computed(() => (profile.value ? sub.value?.profiles?.[profile.value.id]?.entries ?? [] : []))
-const pickedName = computed(() => profile.value?.sub_pick ?? '')
+/** Сервер подписки, к которому роутер подключён сейчас: по сводке в настройках, иначе — выбранный по имени. */
+const currentEntry = computed(() => {
+  const px = profile.value?.proxy
+  return subEntries.value.find((e) => px && e.server === px.server && e.port === px.port)?.name ?? profile.value?.sub_pick ?? null
+})
 async function pickEntry(name: string) {
   const id = profile.value?.id
   if (!id) return
@@ -264,6 +272,17 @@ async function pickEntry(name: string) {
   notify.show('success', t('Сервер из подписки выбран, применяю на роутере'))
   await loadConfig()
 }
+async function setAuto(on: boolean) {
+  const id = profile.value?.id
+  if (!id) return
+  // выключить автовыбор — остаться на текущем сервере, уже выбранном вручную
+  const r = on ? await api.autoSubscription(id) : await api.pickSubscription(id, currentEntry.value ?? subEntries.value[0]?.name ?? '')
+  if (r.status !== 200) { notify.show('error', t('Не получилось'), r.body.error?.message); return }
+  notify.show('success', on ? t('Автовыбор включён: сервер с наименьшей задержкой') : t('Автовыбор выключен'))
+  await loadConfig()
+}
+/** Список серверов подписки показан: ссылка на один сервер и его сводка не нужны. */
+const subList = computed(() => hasSubscription.value && form.value.kind !== 'amneziawg' && subEntries.value.length > 0)
 async function refreshSubscription(quiet = false) {
   const r = await api.updateSubscription()
   if (r.status !== 202) { notify.show('error', t('Не получилось'), r.body.error?.message); return }
@@ -380,7 +399,7 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
               <Button :label="t('Открыть «Модули»')" size="small" @click="emit('navigate', 'modules')" />
             </div>
           </Message>
-          <dl v-if="form.proxy" class="preview__list proxy-sum">
+          <dl v-if="form.proxy && !subList" class="preview__list proxy-sum">
             <div class="preview__row"><dt>{{ t('Протокол') }}</dt><dd>{{ protoLabel }}</dd></div>
             <div class="preview__row"><dt>{{ t('Сервер') }}</dt><dd class="num">{{ form.proxy.server }}:{{ form.proxy.port }}</dd></div>
             <div v-if="form.proxy.security" class="preview__row"><dt>{{ t('Шифрование') }}</dt><dd>{{ form.proxy.security === 'none' ? t('нет') : form.proxy.security.toUpperCase() }}</dd></div>
@@ -391,30 +410,34 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
             <Textarea id="srv-awg" v-model="form.link" rows="6" spellcheck="false" class="mono" :placeholder="hasPassword ? t('Сохранена. Оставьте пустым') : '[Interface]…'" />
             <span class="field__hint">{{ t('В конфигурации есть закрытый ключ, поэтому она хранится только на роутере и сюда не возвращается. Вставьте новую, чтобы сменить сервер. AllowedIPs и DNS из неё не используются: что идёт через VPN, решают «Сайты» и «Устройства».') }}</span>
           </div>
-          <div v-else class="field">
+          <div v-else-if="!subList" class="field">
             <label for="srv-link" class="field__label">{{ t('Ссылка на сервер') }}</label>
             <Password v-model="form.link" input-id="srv-link" :feedback="false" toggle-mask fluid autocomplete="off"
               :placeholder="hasPassword ? t('Сохранена. Оставьте пустым') : 'vless://…'" />
             <span class="field__hint">{{ t('В ссылке есть ключ или пароль, поэтому она хранится только на роутере и сюда не возвращается. Вставьте новую, чтобы сменить сервер.') }}</span>
           </div>
-          <div v-if="form.kind !== 'amneziawg'" class="field">
+          <SubServers v-if="subList" :entries="subEntries" :current="currentEntry" :auto="!!profile?.sub_auto" :running="!!sub?.running"
+            :status="subText" :bad="!!subState && !subState.ok" @pick="pickEntry" @auto="setAuto" @refresh="refreshSubscription()" />
+          <details v-if="subList" class="sub-link">
+            <summary>{{ t('Ссылка-подписка и удаление') }}</summary>
+            <div class="field">
+              <label for="srv-psub" class="field__label">{{ t('Ссылка-подписка') }}</label>
+              <Password v-model="form.subscriptionUrl" input-id="srv-psub" :feedback="false" toggle-mask fluid autocomplete="off" :placeholder="t('Сохранена. Оставьте пустым')" />
+              <span class="field__hint">{{ t('Вставьте новую ссылку, чтобы сменить подписку, и нажмите «Сохранить». Хранится только на роутере.') }}</span>
+            </div>
+            <Button :label="t('Удалить подписку')" size="small" severity="secondary" variant="text" @click="dropSubscription" />
+          </details>
+          <div v-if="form.kind !== 'amneziawg' && !subList" class="field">
             <label for="srv-psub" class="field__label">{{ t('Ссылка-подписка') }}</label>
             <Password v-model="form.subscriptionUrl" input-id="srv-psub" :feedback="false" toggle-mask fluid autocomplete="off"
               :placeholder="hasSubscription ? t('Сохранена. Оставьте пустым') : 'https://…'" />
             <span class="field__hint">{{ t('Подписка — список серверов от вашего провайдера VPN. Роутер забирает его по расписанию списков сайтов и по кнопке и подключается к выбранному серверу (по умолчанию — первому). Хранится только на роутере.') }}</span>
           </div>
-          <template v-if="hasSubscription && form.kind !== 'amneziawg'">
+          <template v-if="hasSubscription && form.kind !== 'amneziawg' && !subList">
             <span :class="['adblock__state', { 'adblock__state--bad': subState && !subState.ok }]" aria-live="polite">
               <span :class="['led', subState ? (subState.ok ? 'led--ok' : 'led--warn') : 'led--idle']" aria-hidden="true" />
               <span class="meta">{{ subText }}</span>
             </span>
-            <div v-if="subEntries.length" class="field">
-              <label for="srv-pick" class="field__label">{{ t('Сервер из подписки') }}</label>
-              <select id="srv-pick" class="tile__server self-start" :value="pickedName || subEntries.find((e) => e.server === form.proxy?.server && e.port === form.proxy?.port)?.name || ''"
-                @change="pickEntry(($event.target as HTMLSelectElement).value)">
-                <option v-for="e in subEntries" :key="e.name" :value="e.name">{{ e.name }} — {{ e.kind }}, {{ e.server }}:{{ e.port }}</option>
-              </select>
-            </div>
             <div class="sub__actions">
               <Button :label="t('Обновить по подписке')" size="small" severity="secondary" variant="outlined" :loading="!!sub?.running" :disabled="!!sub?.running" @click="refreshSubscription()" />
               <Button :label="t('Удалить подписку')" size="small" severity="secondary" variant="text" @click="dropSubscription" />
@@ -511,7 +534,7 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
 
         <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
         <div class="formfoot">
-          <span class="formfoot__text" aria-live="polite">{{ blocker && dirty ? blocker : dirty ? t('Есть несохранённые изменения') : profile?.endpoint ? t('Всё сохранено') : t('Вставьте ссылку на сервер') }}</span>
+          <span class="formfoot__text" aria-live="polite">{{ blocker && dirty ? blocker : dirty ? t('Есть несохранённые изменения') : profile?.endpoint || profile?.proxy ? t('Всё сохранено') : t('Вставьте ссылку на сервер') }}</span>
           <Button type="submit" :label="t('Сохранить')" :loading="saving" :disabled="!dirty || !!blocker || saving" />
         </div>
       </form>
@@ -521,6 +544,11 @@ const nothingSelected = computed(() => !!simple.value && simple.value.mode === '
 
 <style scoped>
 .sub__actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.sub-link { display: grid; gap: 0.75rem; }
+.sub-link > summary { cursor: pointer; font-size: 0.875rem; color: var(--muted); }
+.sub-link > summary:hover { color: var(--ink); }
+.sub-link > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.sub-link[open] > summary { margin-bottom: 0.25rem; }
 .servers__list { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .server-chip { display: inline-flex; align-items: center; gap: 0.5rem; min-height: 2.5rem; padding: 0.4rem 0.9rem; border-radius: 999px;
   border: 1px solid var(--line, var(--p-content-border-color)); background: transparent; color: inherit; font: inherit; cursor: pointer; }

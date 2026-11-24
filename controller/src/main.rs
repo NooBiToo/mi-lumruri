@@ -61,6 +61,10 @@ pub fn main() -> ExitCode {
         ["subscription-import", cfg, profile, json] => cli(mi_tt::manage::subscription_import(cfg, profile, json)),
         // подписка сервера модуля sing-box: список ссылок
         ["proxy-sub-import", cfg, profile, file] => cli(mi_tt::proxysub::import(cfg, profile, file)),
+        // адреса серверов последнего списка подписки для замера задержки: строки «хост порт вид»
+        ["proxy-sub-hosts", cfg, profile] => lines(mi_tt::proxysub::hosts(cfg, profile)),
+        // автовыбор: сервер с наименьшей задержкой по замеру «хост порт мс|-»
+        ["proxy-sub-auto", cfg, profile, file] => cli(mi_tt::proxysub::auto(cfg, profile, file)),
         // серверы с подпиской: строки «id вид»
         ["subscription-list", cfg] => match mi_tt::manage::subscription_list(cfg) {
             Ok(v) => lines(v),

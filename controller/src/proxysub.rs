@@ -119,7 +119,7 @@ fn save(config_path: &str, id: &str, st: &Stored) -> Result<(), String> {
 
 /// Записать выбранную ссылку профилю: секрет `link`, вид и сводка в настройках, `sub_pick`, заявка на применение.
 /// Ничего не изменилось — ничего не пишется (`changed: false`).
-fn apply_entry(config_path: &str, id: &str, e: &Entry, pick: Option<&str>) -> Response {
+fn apply_entry(config_path: &str, id: &str, e: &Entry, pick: Option<&str>, auto: Option<bool>) -> Response {
     let raw = match crate::api::read_limited(config_path, crate::api::MAX_CONFIG_BYTES) {
         Ok(b) => b,
         Err(m) => return Response::error(500, "unreadable", m),
@@ -149,6 +149,9 @@ fn apply_entry(config_path: &str, id: &str, e: &Entry, pick: Option<&str>) -> Re
     p.proxy = Some(e.info.clone());
     if let Some(n) = pick {
         p.sub_pick = Some(n.to_string());
+    }
+    if let Some(a) = auto {
+        p.sub_auto = a;
     }
     let cfg_changed = serde_json::to_value(&next.profiles[i]).ok() != serde_json::to_value(&cfg.profiles[i]).ok();
     let link_changed = s.profiles.get(id).and_then(|x| x.link.as_deref()) != Some(e.link.as_str());
@@ -206,7 +209,7 @@ pub fn import(config_path: &str, id: &str, file: &str) -> Response {
     let chosen = pick.as_deref().and_then(|n| st.entries.iter().find(|e| e.name == n))
         .or_else(|| cur.as_deref().and_then(|l| st.entries.iter().find(|e| e.link == l)))
         .unwrap_or(&st.entries[0]);
-    let mut r = apply_entry(config_path, id, chosen, None);
+    let mut r = apply_entry(config_path, id, chosen, None, None);
     if let Value::Object(m) = &mut r.body {
         m.insert("count".into(), json!(st.entries.len()));
         m.insert("skipped".into(), json!(st.skipped));
@@ -218,26 +221,121 @@ pub fn import(config_path: &str, id: &str, file: &str) -> Response {
 #[serde(deny_unknown_fields)]
 struct PickReq {
     profile_id: String,
-    name: String,
+    #[serde(default)]
+    name: Option<String>,
+    /// true — автовыбор по задержке; выбор сервера по имени его выключает.
+    #[serde(default)]
+    auto: bool,
 }
 
-/// `POST /subscription/pick`: сервер из последнего списка подписки.
+/// `POST /subscription/pick`: сервер из последнего списка подписки или автовыбор по последнему замеру задержки.
 pub fn pick(body: &[u8], config_path: &str) -> Response {
     let q: PickReq = match serde_json::from_slice(body) {
         Ok(q) => q,
         Err(e) => return Response::error(400, "bad_request", format!("запрос не разобран: {e}")),
     };
     let st = load(config_path, &q.profile_id);
-    let Some(e) = st.entries.iter().find(|e| e.name == q.name) else {
+    if q.auto {
+        let pings = load_pings(&ping_path(&q.profile_id));
+        let cur = current_link(config_path, &q.profile_id);
+        let Some(e) = fastest(&st, &pings).or_else(|| cur.as_deref().and_then(|l| st.entries.iter().find(|e| e.link == l))).or(st.entries.first()) else {
+            return Response::error(404, "unknown_entry", "список серверов подписки пуст — обновите подписку");
+        };
+        return apply_entry(config_path, &q.profile_id, e, None, Some(true));
+    }
+    let Some(name) = q.name else {
+        return Response::error(400, "bad_request", "нужно имя сервера или auto");
+    };
+    let Some(e) = st.entries.iter().find(|e| e.name == name) else {
         return Response::error(404, "unknown_entry", "такого сервера в подписке нет — обновите подписку");
     };
-    apply_entry(config_path, &q.profile_id, e, Some(&q.name))
+    apply_entry(config_path, &q.profile_id, e, Some(&name), Some(false))
+}
+
+/// Замер задержки до серверов подписки (пишет mitt-sub.sh): `$RUN/sub/<id>.ping`, строки «хост порт мс|-».
+pub fn ping_path(id: &str) -> PathBuf {
+    crate::manage::run_dir().join("sub").join(format!("{id}.ping"))
+}
+
+/// «хост:порт» → мс; «-» (не ответил) — не попадает.
+fn load_pings(path: &Path) -> std::collections::BTreeMap<String, u32> {
+    let text = crate::api::read_limited(&path.to_string_lossy(), 64 * 1024).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
+    text.lines()
+        .filter_map(|l| {
+            let mut it = l.split_whitespace();
+            let (h, p, ms) = (it.next()?, it.next()?, it.next()?);
+            Some((format!("{h}:{p}"), ms.parse().ok()?))
+        })
+        .collect()
+}
+
+fn current_link(config_path: &str, id: &str) -> Option<String> {
+    crate::manage::load_secrets_pub(&crate::manage::secrets_path(config_path)).ok().and_then(|s| s.profiles.get(id).and_then(|x| x.link.clone()))
+}
+
+fn ping_of(e: &Entry, pings: &std::collections::BTreeMap<String, u32>) -> Option<u32> {
+    pings.get(&format!("{}:{}", e.info.server, e.info.port)).copied()
+}
+
+/// Сервер с наименьшей задержкой (из тех, что ответили).
+fn fastest<'a>(st: &'a Stored, pings: &std::collections::BTreeMap<String, u32>) -> Option<&'a Entry> {
+    st.entries.iter().filter_map(|e| ping_of(e, pings).map(|ms| (ms, e))).min_by_key(|(ms, _)| *ms).map(|(_, e)| e)
+}
+
+/// Переходить ли с текущего сервера на самый быстрый: текущий не отвечает или новый быстрее на 30 % и не меньше
+/// чем на 20 мс (как выбор основного и запасного серверов TrustTunnel) — чтобы не прыгать из-за разброса замеров.
+pub fn worth_switching(cur_ms: Option<u32>, best_ms: u32) -> bool {
+    match cur_ms {
+        None => true,
+        Some(c) => best_ms * 10 <= c * 7 && c - best_ms >= 20,
+    }
+}
+
+/// Адреса серверов последнего списка без повторов: «хост порт вид».
+pub fn hosts(config_path: &str, id: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for e in load(config_path, id).entries {
+        let kind = serde_json::to_value(e.kind).ok().and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
+        let l = format!("{} {} {kind}", e.info.server, e.info.port);
+        if !out.contains(&l) {
+            out.push(l);
+        }
+    }
+    out
+}
+
+/// `mi-tt-ctl proxy-sub-auto <config> <профиль> <файл замера>`: при автовыборе — переход на заметно более быстрый сервер.
+pub fn auto(config_path: &str, id: &str, file: &str) -> Response {
+    let cfg = match crate::manage::read_config(config_path) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if !cfg.profiles.iter().any(|p| p.id == id && p.sub_auto) {
+        return Response { status: 200, body: json!({ "ok": true, "changed": false, "auto": false, "issues": [] }) };
+    }
+    let st = load(config_path, id);
+    let pings = load_pings(Path::new(file));
+    let Some(best) = fastest(&st, &pings) else {
+        return Response { status: 200, body: json!({ "ok": true, "changed": false, "auto": true, "issues": [] }) };
+    };
+    let cur = current_link(config_path, id).and_then(|l| st.entries.iter().find(|e| e.link == l).cloned());
+    if let Some(c) = &cur {
+        if c.link == best.link || !worth_switching(ping_of(c, &pings), ping_of(best, &pings).unwrap_or(u32::MAX)) {
+            return Response { status: 200, body: json!({ "ok": true, "changed": false, "auto": true, "picked": c.name, "issues": [] }) };
+        }
+    }
+    apply_entry(config_path, id, best, None, None)
 }
 
 /// Список серверов подписки для панели (без ссылок).
 pub fn entries_view(config_path: &str, id: &str) -> Value {
     let st = load(config_path, id);
-    json!(st.entries.iter().map(|e| json!({ "name": e.name, "kind": e.kind, "server": e.info.server, "port": e.info.port })).collect::<Vec<_>>())
+    let pings = load_pings(&ping_path(id));
+    json!(st
+        .entries
+        .iter()
+        .map(|e| json!({ "name": e.name, "kind": e.kind, "server": e.info.server, "port": e.info.port, "security": e.info.security, "transport": e.info.transport, "ping": ping_of(e, &pings) }))
+        .collect::<Vec<_>>())
 }
 
 #[cfg(test)]
@@ -272,6 +370,14 @@ mod tests {
         assert_eq!(st.entries[0].name, "\u{1F1F3}\u{1F1F1} Нидерланды -50% 1");
         assert_eq!(st.skipped, 1);
         assert!(st.reasons[0].starts_with("строка 2: vless:") && st.reasons[0].contains("xhttp"), "{:?}", st.reasons);
+    }
+
+    #[test]
+    fn switching_needs_a_clear_gain() {
+        assert!(worth_switching(None, 300));
+        assert!(worth_switching(Some(120), 60));
+        assert!(!worth_switching(Some(120), 100), "меньше 30 %");
+        assert!(!worth_switching(Some(50), 34), "меньше 20 мс");
     }
 
     #[test]

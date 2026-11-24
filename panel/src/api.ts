@@ -28,7 +28,7 @@ export interface Endpoint {
 }
 export type TlsProfile = 'chrome' | 'chrome_canary' | 'safari' | 'firefox' | 'okhttp' | 'openssl' | 'boringssl'
 /** Профиль TrustTunnel; backup — запасной сервер (пароль — backup_password в секретах). */
-export interface Profile { id: string; name: string; kind: ProfileKind; on_failure: 'block' | 'direct'; tunnel?: number; endpoint?: Endpoint; backup?: Endpoint; prefer_fastest?: boolean; proxy?: ProxyInfo; sub_pick?: string }
+export interface Profile { id: string; name: string; kind: ProfileKind; on_failure: 'block' | 'direct'; tunnel?: number; endpoint?: Endpoint; backup?: Endpoint; prefer_fastest?: boolean; proxy?: ProxyInfo; sub_pick?: string; sub_auto?: boolean }
 export interface Network { id: string; name: string; ssid: string; segment?: string; subnet?: string; bridge?: string; ports?: string[] }
 export interface Device { id: string; name: string; mac: string; network: string }
 
@@ -337,7 +337,7 @@ export interface UpdateResponse { ok: boolean; running?: boolean; update?: Updat
 /** Итог обновления по подписке TrustTunnel (mitt-sub.sh); время — unix-секунды; updated — когда параметры менялись. */
 export interface SubscriptionState { ok: boolean; checked: number; updated: number | null; error: string | null; count?: number | null }
 /** Сервер из подписки sing-box (без ссылки). */
-export interface SubscriptionEntry { name: string; kind: ProfileKind; server: string; port: number }
+export interface SubscriptionEntry { name: string; kind: ProfileKind; server: string; port: number; security?: string | null; transport?: string | null; ping?: number | null }
 export interface SubscriptionResponse {
   ok: boolean; running?: boolean; queued?: boolean; issues: Issue[]; error?: ApiError
   /** По серверам: итог последнего обновления и список серверов подписки sing-box. */
@@ -401,6 +401,7 @@ export const api = {
   subscription: () => call<SubscriptionResponse>('/subscription'),
   updateSubscription: () => call<SubscriptionResponse>('/subscription/update', json({})),
   pickSubscription: (profile_id: string, name: string) => call<ManageResponse>('/subscription/pick', json({ profile_id, name })),
+  autoSubscription: (profile_id: string) => call<ManageResponse>('/subscription/pick', json({ profile_id, auto: true })),
   checkUpdate: () => call<UpdateResponse>('/update', json({ action: 'check' })),
   installUpdate: (trust_official = false) => call<UpdateResponse>('/update', json({ action: 'install', trust_official })),
 }

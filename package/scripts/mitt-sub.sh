@@ -16,9 +16,26 @@ ctl subscription-list "$ETC/config.json" >"$LIST" 2>/dev/null || : >"$LIST"
 # состояние серверов, у которых подписки больше нет
 for f in "$STATE"/sub/*.json; do
   [ -f "$f" ] || continue; id="$(basename "$f" .json)"
-  grep -q "^$id " "$LIST" || rm -f "$f"
+  grep -q "^$id " "$LIST" || rm -f "$f" "$STATE/sub/$id.ping"
 done
 js() { printf '%s' "$1" | tr -d '"\\' | tr '\n\r\t' '   ' | cut -c1-300; }
+# задержка до серверов последнего списка подписки (TCP-подключение с роутера, по 8 сразу) → $STATE/sub/<id>.ping:
+# «хост порт мс|-»; Hysteria2 работает по UDP — TCP-замер к нему ничего не скажет, «-»
+sub_ping() {
+  local id="$1" h p k n=0 t="$R/tmp/mitt-sub.$$.ping"
+  rm -f "$t".*
+  ctl proxy-sub-hosts "$ETC/config.json" "$id" >"$t.list" 2>/dev/null
+  while read -r h p k; do
+    [ -n "$p" ] || continue
+    n=$((n + 1))
+    if [ "$k" = hysteria2 ]; then echo "$h $p -" >"$t.$n"
+    else ( v="$(ping_ms "$h" "$p")"; echo "$h $p ${v:--}" >"$t.$n" ) & fi
+    [ $((n % 8)) -eq 0 ] && wait
+  done <"$t.list"
+  wait
+  rm -f "$t.list"
+  cat "$t".* 2>/dev/null >"$STATE/sub/$id.ping.t"; mv -f "$STATE/sub/$id.ping.t" "$STATE/sub/$id.ping"; rm -f "$t".*
+}
 rc_all=0
 while read -r id kind; do
   [ -n "$id" ] || continue
@@ -49,6 +66,12 @@ while read -r id kind; do
     e="$(printf '%s' "$r" | sed -n 's/.*"message": *"\([^"]*\)".*/\1/p' | head -n 1)"
     put false "${prev_upd:-null}" "ответ подписки не принят: ${e:-код $rc}"; mlog "подписка $id: не принята (${e:-код $rc})"
     [ "$prev_ok" = false ] || notify subscription sub_failed "${e:-код $rc}"; rc_all=1; continue
+  fi
+  # сервер модуля sing-box: замер задержки списка и автовыбор (если включён) — переход на заметно более быстрый
+  if [ "$kind" != trusttunnel ]; then
+    sub_ping "$id"
+    ra="$(ctl proxy-sub-auto "$ETC/config.json" "$id" "$STATE/sub/$id.ping" 2>&1)"
+    if printf '%s' "$ra" | grep -q '"changed": *true'; then mlog "подписка $id: автовыбор — сервер с меньшей задержкой"; r="$r \"changed\": true"; fi
   fi
   if printf '%s' "$r" | grep -q '"changed": *true'; then
     put true "$now" "" "$cnt"; mlog "подписка $id: параметры сервера обновлены, применяю"; notify subscription sub_changed

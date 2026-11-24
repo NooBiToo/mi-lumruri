@@ -23,6 +23,8 @@ done
 cat >"$SB/curl" <<'EOF'
 #!/bin/sh
 echo "$*" >>"$LT/curl.log"
+# замер задержки (ping_ms): время TCP-подключения по имени сервера
+case "$*" in *time_connect*) case "$*" in *c.example.com*) printf 0.020;; *a.example.com*) printf 0.090;; esac; exit 0;; esac
 out=""; while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift;; esac; shift; done
 # подписка sing-box (ссылка …/list) — список ссылок из $LT/list.b64
 case "$(tail -n 1 "$LT/curl.log")" in *sub.example.com/list*) cp "$LT/list.b64" "$out"; exit 0;; esac
@@ -105,5 +107,19 @@ printf '<html>
 printf 'vless://bf000d23-0752-40b4-affe-68f7707a9661@c.example.com:443?type=xhttp#C
 ' | base64 >"$LT/list.b64"; sub # secret-scan: allow тестовые ссылки
 [ "$(j "$S/sub/vl.json" '"xhttp" in s["error"]')" = True ] && ok "g: причина пропуска строки в ошибке" || bad "g: $(cat "$S/sub/vl.json" 2>&1)"
+
+# автовыбор: замер задержки списка, переход на заметно более быстрый сервер
+printf 'vless://bf000d23-0752-40b4-affe-68f7707a9661@a.example.com:443?security=tls#A\nvless://bf000d23-0752-40b4-affe-68f7707a9661@c.example.com:443?security=tls#C\nhy2://pw@b.example.com:443#B\n' | base64 >"$LT/list.b64" # secret-scan: allow тестовые ссылки
+python3 -I -c 'import json,sys;p=sys.argv[1];c=json.load(open(p));c["profiles"][1].pop("sub_pick",None);json.dump(c,open(p,"w"))' "$E/config.json"
+sub
+grep -q "^a.example.com 443 90$" "$S/sub/vl.ping" && grep -q "^c.example.com 443 20$" "$S/sub/vl.ping" && grep -q "^b.example.com 443 -$" "$S/sub/vl.ping" \
+  && ok "h: задержка до серверов списка замерена (Hysteria2 — без TCP-замера)" || bad "h: ping: $(cat "$S/sub/vl.ping" 2>&1)"
+[ "$(j "$E/config.json" 's["profiles"][1]["proxy"]["server"]!="c.example.com"')" = True ] && ok "h: без автовыбора сервер не меняется" || bad "h: сменился без автовыбора"
+python3 -I -c 'import json,sys;p=sys.argv[1];c=json.load(open(p));c["profiles"][1]["sub_auto"]=True;json.dump(c,open(p,"w"))' "$E/config.json"
+rm -f "$S/apply.request"; sub
+[ "$(j "$E/config.json" 's["profiles"][1]["proxy"]["server"]=="c.example.com"')" = True ] && [ -f "$S/apply.request" ] \
+  && ok "h: автовыбор — сервер C с меньшей задержкой, заявка на применение" || bad "h: auto: $(cat "$E/config.json")"
+rm -f "$S/apply.request"; sub
+[ ! -f "$S/apply.request" ] && ok "h: тот же замер — без переключения" || bad "h: лишнее переключение"
 
 [ $FAIL -eq 0 ] && echo "ИТОГ: ПРОЙДЕНО" || { echo "ИТОГ: ЕСТЬ ОШИБКИ"; exit 1; }

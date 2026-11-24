@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import InputText from 'primevue/inputtext'
-import { Search } from 'lucide-vue-next'
+import { Search, Server } from 'lucide-vue-next'
 import { build, buildBlocker, catalog, knownDevicesNow, profiles, save, scrollTarget, serverReady, simple, simpleState } from '../store'
 import { usesZapret } from '../status'
 import { normalizeDomain, serviceRoute, setServiceRoute, type ServiceRoute, type Simple } from '../simple'
@@ -193,10 +193,13 @@ onMounted(async () => {
                     <span>{{ o.label }}</span>
                   </label>
                 </div>
-                <select v-if="many && routeOf(s.id) === 'vpn'" class="tile__server" :value="serverOf(s.id)"
-                  :aria-label="t('Сервер для «{name}»', { name: t(s.name) })" @change="setServer(s.id, ($event.target as HTMLSelectElement).value)">
-                  <option v-for="p in profiles" :key="p.id" :value="p.id">{{ p.name }}</option>
-                </select>
+                <label v-if="many && routeOf(s.id) === 'vpn'" class="tile__via">
+                  <span class="tile__vialabel"><Server :size="14" aria-hidden="true" />{{ t('Сервер VPN') }}</span>
+                  <select class="tile__server tile__viasel" :value="serverOf(s.id)"
+                    :aria-label="t('Сервер для «{name}»', { name: t(s.name) })" @change="setServer(s.id, ($event.target as HTMLSelectElement).value)">
+                    <option v-for="p in profiles" :key="p.id" :value="p.id">{{ p.name }}</option>
+                  </select>
+                </label>
               </div>
             </div>
           </div>

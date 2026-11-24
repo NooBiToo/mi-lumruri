@@ -31,6 +31,19 @@ const DEVICES: [string, string, string, number][] = [
   ['5c:cf:7f:04:05:06', '192.168.31.27', 'Пылесос', 0.02e9],
 ]
 
+const SUB_HOSTS: [string, string, number | null, string][] = [
+  ['\u{1F1F3}\u{1F1F1} Netherlands - Amsterdam', 'nl-1.example.net', 38, 'vless'],
+  ['\u{1F1F8}\u{1F1EA} Sweden - Stockholm', 'se-1.example.net', 52, 'vless'],
+  ['\u{1F1E9}\u{1F1EA} Germany - Frankfurt', 'de-1.example.net', 61, 'vless'],
+  ['\u{1F1EB}\u{1F1EE} Finland - Helsinki', 'fi-1.example.net', 74, 'vless'],
+  ['\u{1F1F5}\u{1F1F1} Poland - Warsaw', 'pl-1.example.net', 96, 'vless'],
+  ['\u{1F1F9}\u{1F1F7} Turkey - Istanbul', 'tr-1.example.net', 182, 'vless'],
+  ['\u{1F1FA}\u{1F1F8} USA - New York', 'us-1.example.net', 341, 'vless'],
+  ['\u{1F1EF}\u{1F1F5} Japan - Tokyo', 'jp-1.example.net', null, 'hysteria2'],
+]
+const SUB = SUB_HOSTS.map(([name, server, , kind]) => ({ name, kind, info: { server, port: 443, security: kind === 'vless' ? 'reality' : 'tls', transport: kind === 'vless' ? 'tcp' : 'udp' },
+  link: `${kind === 'vless' ? 'vless://bf000d23-0752-40b4-affe-68f7707a9661' : 'hy2://pw'}@${server}:443#x` })) // secret-scan: allow тестовые ссылки
+
 let stand: { listen: (p: number) => Promise<number>; close: () => Promise<void>; opts: { authDir: string; sessionDir: string; config: string; stateDir: string } }
 let origin = ''
 let password = ''
@@ -42,6 +55,8 @@ function put(path: string, text: string) { mkdirSync(dirname(path), { recursive:
 test.beforeAll(async () => {
   const cfg = JSON.parse(readFileSync(join(ROOT, 'fixtures', 'config.valid.json'), 'utf8'))
   cfg.profiles[0] = { ...cfg.profiles[0], name: 'Домашний сервер', endpoint: { server: '203.0.113.10', port: 443, sni: 'vpn.example.com', username: 'home' } }
+  // второй сервер — подписка провайдера VLESS со списком серверов и замером задержки
+  cfg.profiles.push({ id: 'sub', name: 'Подписка VPN', kind: 'vless', on_failure: 'block', tunnel: 1, proxy: SUB[1]!.info })
   cfg.device_names = Object.fromEntries(DEVICES.map(([mac, , name]) => [mac, name]))
   const seed = join(STATE, 'config.json')
   writeFileSync(seed, JSON.stringify(cfg, null, 2))
@@ -104,6 +119,12 @@ test.beforeAll(async () => {
   put(join(run, 'oui.txt'), '3C-D9-2B Hewlett Packard ICON:device_list_hp.png\n')
   put(join(run, 'names.json'), JSON.stringify({ at: 1, devices: { 'aa:bb:cc:dd:ee:20': { name: 'Гостиная', kind: 'tv', model: 'Chromecast', source: 'mdns', rank: 9, seen: 1 } } }))
 
+  // подписка второго сервера: ссылка, выбранный сервер, список и задержки
+  const etc = dirname(stand.opts.config)
+  put(join(etc, 'secrets.json'), JSON.stringify({ version: 1, profiles: { sub: { subscription_url: 'https://sub.example.net/list', link: SUB[1]!.link } } })) // secret-scan: allow тестовые ссылки
+  put(join(etc, 'sub', 'sub.json'), JSON.stringify({ entries: SUB, skipped: 0 }))
+  put(join(run, 'sub', 'sub.ping'), SUB_HOSTS.map(([, h, ms]) => `${h} 443 ${ms ?? '-'}`).join('\n') + '\n')
+  put(join(run, 'sub', 'sub.json'), JSON.stringify({ ok: true, checked: now - 300, updated: now - 3600, error: null, count: SUB.length }))
   const port = await stand.listen(0)
   origin = `https://127.0.0.1:${port}`
   password = 'pw-' + randomBytes(18).toString('base64url')
@@ -154,6 +175,8 @@ test('скриншоты', async ({ page }) => {
   const route = (id: string, v: 'vpn' | 'zapret') => page.locator(`input[name="route-${id}"][value="${v}"]`).evaluate((el) => (el as HTMLInputElement).click())
   for (const id of ['youtube', 'meta', 'telegram', 'google_ai', 'google_meet', 'tiktok', 'twitter', 'anime', 'news', 'block']) await route(id, 'vpn')
   await route('discord', 'zapret')
+  await page.waitForTimeout(1500)
+  for (const id of ['youtube', 'google_ai']) await page.getByRole('combobox', { name: new RegExp(`^Сервер для «${id === 'youtube' ? 'YouTube' : 'ChatGPT и Google AI'}»`) }).selectOption('sub')
   // автосохранение: дождаться, пока выбор дойдёт до настроек на «роутере»
   await expect.poll(() => readFileSync(stand.opts.config, 'utf8').includes('discord'), { timeout: 20_000 }).toBe(true)
   await page.waitForTimeout(3000)
@@ -169,7 +192,10 @@ test('скриншоты', async ({ page }) => {
 
   await nav(page, /Сервер/).click()
   await page.waitForTimeout(1500)
-  await shot(page, 'server')
+  await shot(page, 'server', true, async () => {
+    await page.getByRole('button', { name: 'Подписка VPN' }).first().click()
+    await expect(page.getByRole('radiogroup', { name: 'Сервер из подписки' })).toBeVisible({ timeout: 10_000 })
+  })
 
   await nav(page, /Модули/).click()
   await page.waitForTimeout(1500)

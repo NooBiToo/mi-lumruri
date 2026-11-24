@@ -187,11 +187,18 @@ test('подписка сервера sing-box: добавление ссылк�
   await page.reload()
   await nav(page, /Сервер/).click()
   await page.getByRole('button', { name: /Провайдер/ }).click()
-  const pick = page.locator('#srv-pick')
-  await expect(pick).toHaveValue('A')
-  await pick.selectOption('B')
+  const subList = page.getByRole('radiogroup', { name: 'Сервер из подписки' })
+  await expect(subList.getByRole('radio', { checked: true })).toContainText('A')
+  await subList.getByRole('radio', { name: /B/ }).click()
   await expect.poll(() => config().profiles.find((p: { id: string }) => p.id === id)?.kind, { timeout: 10_000 }).toBe('hysteria2')
   expect(config().profiles.find((p: { id: string }) => p.id === id).sub_pick).toBe('B')
+  // автовыбор: без замера задержки остаётся текущий сервер, в настройках — sub_auto
+  await page.locator('label[for="sub-auto"]').click()
+  await expect.poll(() => config().profiles.find((p: { id: string }) => p.id === id)?.sub_auto, { timeout: 10_000 }).toBe(true)
+  await expect(subList.getByRole('radio', { checked: true })).toContainText('авто')
+  // выбор вручную выключает автовыбор
+  await subList.getByRole('radio', { name: /A/ }).click()
+  await expect.poll(() => config().profiles.find((p: { id: string }) => p.id === id)?.sub_auto ?? false, { timeout: 10_000 }).toBe(false)
   expect(consoleErrors).toEqual([])
 })
 

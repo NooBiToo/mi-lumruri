@@ -26,7 +26,7 @@ The router's internal storage is small: about 20 MB, of which the firmware uses 
 
 | | |
 | --- | --- |
-| **Servers** | Paste a link and the fields fill in. **TrustTunnel** is built in: the official `trusttunnel_client` v1.3.0, HTTP/2 or HTTP/3, anti-DPI, TLS profile, client_random, subscription link. **VLESS** (TCP, WebSocket, gRPC, Reality, xtls-rprx-vision), **Hysteria2**, **Trojan** and **Shadowsocks** through the sing-box module, with `https://` subscriptions that list servers to pick from. **AmneziaWG** 1.x and 2.0 through the amneziawg module, from a `.conf` file. Up to 16 servers **at the same time**: a service on Sites and a device can each use their own. A TrustTunnel backup server with failover and return, and switching to the server with lower latency. If a server is down, listed sites either wait or open directly, your choice. |
+| **Servers** | Paste a link and the fields fill in. **TrustTunnel** is built in: the official `trusttunnel_client` v1.3.0, HTTP/2 or HTTP/3, anti-DPI, TLS profile, client_random, subscription link. **VLESS** (TCP, WebSocket, gRPC, Reality, xtls-rprx-vision), **Hysteria2**, **Trojan** and **Shadowsocks** through the sing-box module, with `https://` subscriptions that list servers to pick from. **AmneziaWG** 1.x and 2.0 through the amneziawg module, from a `.conf` file. Up to 16 servers **at the same time**: a service on Sites and a device can each use their own. Subscription servers in a list with the latency to each and auto select of the fastest. A TrustTunnel backup server with failover and return, and switching to the server with lower latency. If a server is down, listed sites either wait or open directly, your choice. |
 | **Sites** | Each service is **VPN**, **Zapret** or **Off**. Ready-made [itdoginfo/allow-domains](https://github.com/itdoginfo/allow-domains) lists with service subnets ship with the package and update themselves: from every 6 hours to once a week, or manually only. Your own VPN sites, DPI-bypass sites and exceptions are separate lists. There is an "Everything through VPN except exceptions" mode and IPv6 through the VPN. |
 | **Zapret** | nfqws2 from zapret2 with ready strategies works out of the box. "Find a method" tests strategies on the router and applies the best one only if sites open better than without Zapret. The method can also be picked manually, separately for YouTube. Scheduled method re-checks. |
 | **Devices** | All home devices or only selected ones. Names: yours, announced on the network (iPhone, Chromecast, TVs, speakers), from DHCP, or the maker by MAC. A "hidden MAC" mark, details with connection type and traffic. A single device can get "All internet" through the VPN and its own server. |
@@ -52,7 +52,7 @@ The router's internal storage is small: about 20 MB, of which the firmware uses 
 
 <p>
   <img src="docs/img/zapret.png" alt="Zapret screen: status, method for all sites and for YouTube, method search and scheduled re-check" width="49%">
-  <img src="docs/img/server.png" alt="Server screen: server list, link paste, server details, backup server, speed and latency" width="49%">
+  <img src="docs/img/server.png" alt="Server screen: subscription servers with the latency to each, auto select and search" width="49%">
 </p>
 
 ## How it works
