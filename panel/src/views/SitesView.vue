@@ -24,10 +24,11 @@ interface Draft {
   /** Сервисы через WebSocket (Telegram) и запасной путь: id профиля или '' (напрямую); undefined — не выбирался. */
   wsServices: string[]
   tgwsVia: string | undefined
+  offBlock: boolean
 }
 const toDraft = (s: Simple): Draft => ({
   mode: s.mode, services: [...s.services], zapretServices: [...s.zapretServices], custom: [...s.customDomains], zapret: [...s.zapretDomains],
-  except: [...s.exceptions], rest: s.rest, server: { ...(s.serviceServer ?? {}) }, wsServices: [...(s.wsServices ?? [])], tgwsVia: s.tgwsVia,
+  except: [...s.exceptions], rest: s.rest, server: { ...(s.serviceServer ?? {}) }, wsServices: [...(s.wsServices ?? [])], tgwsVia: s.tgwsVia, offBlock: !!s.offBlock,
 })
 /** Отметки серверов только у сервисов через VPN и только для другого существующего сервера; пусто — undefined. */
 function cleanServers(d: Draft): Record<string, string> | undefined {
@@ -46,6 +47,7 @@ const next = computed<Simple | null>(() => simple.value && draft.value ? {
   zapretServices: [...draft.value.zapretServices].sort(), zapretDomains: domains(draft.value.zapret),
   exceptions: domains(draft.value.except), rest: draft.value.rest, serviceServer: cleanServers(draft.value),
   wsServices: draft.value.wsServices.length ? [...draft.value.wsServices].sort() : undefined, tgwsVia: draft.value.tgwsVia,
+  offBlock: draft.value.offBlock || undefined,
 } : null)
 const dirty = computed(() => {
   const a = simple.value, b = next.value
@@ -53,7 +55,7 @@ const dirty = computed(() => {
   return a.mode !== b.mode || a.rest !== b.rest || !sameList([...a.services].sort(), b.services) || !sameList(a.customDomains, b.customDomains)
     || !sameList([...a.zapretServices].sort(), b.zapretServices) || !sameList(a.zapretDomains, b.zapretDomains) || !sameList(a.exceptions, b.exceptions)
     || serversJson(a.serviceServer) !== serversJson(b.serviceServer)
-    || !sameList([...(a.wsServices ?? [])].sort(), b.wsServices ?? []) || a.tgwsVia !== b.tgwsVia
+    || !sameList([...(a.wsServices ?? [])].sort(), b.wsServices ?? []) || a.tgwsVia !== b.tgwsVia || !!a.offBlock !== !!b.offBlock
 })
 // ---- сервер сервиса (если серверов несколько) ----
 const many = computed(() => profiles.value.length > 1)
@@ -67,6 +69,11 @@ function setServer(id: string, pid: string) {
 // настройки перечитаны (сохранение, другое окно): черновик без правок следует за ними
 watch(simple, (s) => { if (s && (!draft.value || !dirty.value)) draft.value = toDraft(s) })
 
+const OFF_MODES = computed(() => [{ value: 'direct' as const, label: t('Открывать напрямую') }, { value: 'block' as const, label: t('Не открывать') }])
+const offMode = computed<'direct' | 'block'>({
+  get: () => (draft.value?.offBlock ? 'block' : 'direct'),
+  set: (v) => { if (draft.value) draft.value.offBlock = v === 'block' },
+})
 const MODES = computed(() => [{ value: 'selected' as const, label: t('Только выбранные') }, { value: 'all' as const, label: t('Всё через VPN') }])
 const RESTS = computed(() => [{ value: 'direct' as const, label: t('Напрямую') }, { value: 'zapret' as const, label: t('С обходом блокировок (Zapret)') }])
 const ROUTES = computed<{ value: ServiceRoute; label: string; title: string }[]>(() => [
@@ -179,6 +186,15 @@ onMounted(async () => {
               : t('Весь интернет через VPN. Сайты из «Не пускать через VPN» и сайты с обходом блокировок откроются напрямую.') }}</p>
           </div>
           <Segmented v-model="draft.mode" :options="MODES" :label="t('Что пускать через VPN')" name="mode" />
+        </div>
+        <div v-if="draft.mode === 'selected'" class="offblock">
+          <div class="offblock__text">
+            <span class="offblock__title">{{ t('Когда VPN выключен, сайты из списка') }}</span>
+            <span class="hint">{{ draft.offBlock
+              ? t('Не откроются, пока вы не включите VPN: так сайт никогда не увидит ваш настоящий адрес.')
+              : t('Откроются напрямую, через провайдера.') }}</span>
+          </div>
+          <Segmented v-model="offMode" :options="OFF_MODES" :label="t('Когда VPN выключен, сайты из списка')" name="offblock" />
         </div>
       </div>
 

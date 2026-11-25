@@ -165,4 +165,9 @@ export default {
   "если не работает — через «{name}»": "if it fails: through \"{name}\"",
   "если не работает — напрямую": "if it fails: direct",
   "Telegram через WebSocket": "Telegram through WebSocket",
+  // VPN выключен: сайты из списка
+  "Сайты из списка VPN не открываются, пока VPN выключен. Остальные — напрямую.": "Sites from the VPN list do not open while the VPN is off. Everything else goes directly.",
+  "Когда VPN выключен, сайты из списка": "When the VPN is off, listed sites",
+  "Не откроются, пока вы не включите VPN: так сайт никогда не увидит ваш настоящий адрес.": "Will not open until you turn the VPN on, so the site never sees your real address.",
+  "Откроются напрямую, через провайдера.": "Will open directly, through your provider.",
 }

@@ -564,3 +564,24 @@ fn telegram_websocket_rule_redirects_and_keeps_vpn_fallback() {
     c["default_action"] = json!({ "type": "tg_ws" });
     assert!(codes(&validate(&c).1).contains(&"default_action:tg_ws_default".to_string()));
 }
+
+#[test]
+fn domain_sets_beat_subnets_of_other_rules() {
+    // Discord с обходом блокировок: его подсети — целиком Cloudflare; сайт из списка VPN на Cloudflare должен идти в VPN
+    let mut c = lab();
+    c["groups"] = json!([
+        { "id": "zap", "name": "Z", "destinations": [{ "type": "domain_suffix", "value": "discord.com" }, { "type": "cidr", "value": "104.16.0.0/12" }] },
+        { "id": "vpn", "name": "V", "destinations": [{ "type": "domain_suffix", "value": "ifconfig.co" }, { "type": "cidr", "value": "91.108.4.0/22" }] }
+    ]);
+    c["rules"] = json!([
+        { "id": "zapret-lan", "source": { "type": "lan" }, "destination": { "type": "group", "id": "zap" }, "action": { "type": "direct_zapret" } },
+        { "id": "vpn-lan", "source": { "type": "lan" }, "destination": { "type": "group", "id": "vpn" }, "action": { "type": "profile", "id": "tt-lab" } }
+    ]);
+    let (code, v, _) = render(&c, &secrets(&secret()));
+    assert_eq!(code, 0, "{v}");
+    let order: Vec<(String, String)> = v["policy"]["rules"].as_array().unwrap().iter()
+        .filter(|r| r["src"]["bridge"] == "br-lan")
+        .map(|r| (r["act"].as_str().unwrap().to_string(), r["set"].as_str().unwrap_or("").chars().last().unwrap_or('-').to_string())).collect();
+    // домены обоих правил (в прежнем порядке), затем подсети
+    assert_eq!(order, [("zapret".into(), "d".into()), ("tunnel".into(), "d".into()), ("zapret".into(), "n".into()), ("tunnel".into(), "n".into())], "{v}");
+}

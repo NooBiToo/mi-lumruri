@@ -21,7 +21,8 @@
 // - последнее правило-метка, всегда выключенное (на маршрутизацию не влияет): `rest-lan`, а при выключенном VPN —
 //   `vpn-off`; его действие — выбор «остальные сайты», чтобы выбор не терялся, когда по правилам его не видно.
 // Выключенный VPN: правила VPN и исключений `enabled: false`, `default_action` напрямую; галочки остаются в группах и
-// правилах. Правила `zapret-<src>` остаются включёнными: обход блокировок без VPN от VPN не зависит.
+// правилах. С `vpn_off_block` (режим «выбранные») правила `vpn-<src>` и `vpn-<src>--<профиль>` остаются включёнными с
+// действием «блокировать»: сайты из списка VPN не открываются, пока VPN выключен. Правила `zapret-<src>` остаются включёнными: обход блокировок без VPN от VPN не зависит.
 // Настройки без `zapret-sites` (как до появления сайтов с обходом) — тоже канонические, с пустыми списками.
 //
 // `fromConfig` считает настройки простыми, только если `toConfig` от разобранных ответов даёт ровно их же.
@@ -53,6 +54,8 @@ export interface Simple {
   wsServices?: string[]
   /** Запасной путь WebSocket: id профиля (через VPN) или '' (напрямую); undefined — не выбирался. */
   tgwsVia?: string
+  /** Выключенный VPN: сайты из списка VPN не открываются (иначе — напрямую). */
+  offBlock?: boolean
 }
 
 /** Устройство, известное панели (аренды DHCP и настройки); `name` — как его показывать и сохранять. */
@@ -244,8 +247,12 @@ export function toConfig(base: Config, s: Simple, lan: Lan, catalog: ListCatalog
     if (zapretSites.length) rules.push(rule(`zapret-${key}`, src, ZAPRET_SITES, { type: 'direct_zapret' }, true))
     // Telegram через WebSocket выключается вместе с VPN: его запасной путь — VPN
     if (wsSites.length) rules.push(rule(`tgws-${key}`, src, TG_SITES, { type: 'tg_ws' }, s.enabled))
-    for (const [pid] of atSites) rules.push(rule(`vpn-${key}--${pid}`, src, SITES_AT + pid, toProfile(pid), s.enabled))
-    if (vpnTarget) rules.push(rule(`vpn-${key}`, src, vpnTarget, toVpn, s.enabled))
+    // VPN выключен и выбрано «не открывать»: сайты из списка блокируются (только режим «выбранные»: в режиме «всё»
+    // так закрылся бы весь интернет)
+    const offBlock = !s.enabled && !!s.offBlock && s.mode === 'selected'
+    const vpnRule = (id: string, g: string, a: Action) => rule(id, src, g, offBlock ? { type: 'block' } : a, s.enabled || offBlock)
+    for (const [pid] of atSites) rules.push(vpnRule(`vpn-${key}--${pid}`, SITES_AT + pid, toProfile(pid)))
+    if (vpnTarget) rules.push(vpnRule(`vpn-${key}`, vpnTarget, toVpn))
   }
   rules.push(rule(s.enabled ? REST_ON : REST_OFF, { type: 'lan' }, ALL, rest, false))
 
@@ -267,6 +274,7 @@ export function toConfig(base: Config, s: Simple, lan: Lan, catalog: ListCatalog
   if (base.device_names && Object.keys(base.device_names).length) out.device_names = base.device_names
   if (base.panel_origins?.length) out.panel_origins = base.panel_origins
   if (base.history) out.history = base.history
+  if (s.offBlock) out.vpn_off_block = true
   if (s.tgwsVia !== undefined) out.tgws = s.tgwsVia && known_.has(s.tgwsVia) ? { via: s.tgwsVia } : {}
   return out
 }
@@ -376,6 +384,7 @@ export function fromConfig(cfg: Config): FromConfig {
   if (Object.keys(deviceServer).length) simple.deviceServer = deviceServer
   if (wsServices.length) simple.wsServices = wsServices
   if (cfg.tgws) simple.tgwsVia = cfg.tgws.via ?? ''
+  if (cfg.vpn_off_block) simple.offBlock = true
 
   // проверка: из этих ответов получаются ровно те же настройки
   const catalog: ListCatalog = { source: '', commit: '', date: '', services: [] }

@@ -181,6 +181,24 @@ describe('simple', () => {
     expect(again.devices[0]?.name).toBe('Телевизор')
   })
 
+  it('выключенный VPN с «не открывать»: правила VPN блокируют сайты из списка, выбор сохраняется', () => {
+    const on = simple({ services: ['youtube'], customDomains: ['airwallex.com'], offBlock: true })
+    expect(toConfig(base, on, lan, catalog, known).vpn_off_block).toBe(true)
+    expect(toConfig(base, on, lan, catalog, known).rules.find((r) => r.id === 'vpn-lan')?.action).toEqual({ type: 'profile', id: 'tt' })
+    expect(roundTrip(on)).toEqual({ canonical: true, simple: on })
+    const off = { ...on, enabled: false }
+    const c = toConfig(base, off, lan, catalog, known)
+    expect(c.rules.find((r) => r.id === 'vpn-lan')).toMatchObject({ enabled: true, action: { type: 'block' } })
+    expect(c.default_action).toEqual({ type: 'direct' })
+    expect(roundTrip(off)).toEqual({ canonical: true, simple: off })
+    // без настройки — как раньше: правило выключено, сайты напрямую
+    expect(toConfig(base, { ...off, offBlock: undefined }, lan, catalog, known).rules.find((r) => r.id === 'vpn-lan')?.enabled).toBe(false)
+    // режим «всё через VPN» весь интернет не закрывает
+    const all = simple({ mode: 'all', enabled: false, offBlock: true })
+    expect(toConfig(base, all, lan, catalog, known).rules.some((r) => r.enabled && r.action.type === 'block')).toBe(false)
+    expect(roundTrip(all)).toEqual({ canonical: true, simple: all })
+  })
+
   it('Telegram через WebSocket: группа, правило tg_ws, запасной путь и туда-обратно', () => {
     const s = simple({ services: ['youtube'], wsServices: ['telegram'], tgwsVia: 'tt' })
     const c = toConfig(base, s, lan, catalog, known)

@@ -46,6 +46,10 @@ pub struct Config {
     /// Журнал трафика по дням (срок и накопитель); без него — только сутки и неделя.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub history: Option<HistoryConfig>,
+    /// Выключенный VPN (переключатель панели): сайты из списка VPN не открываются, а не идут напрямую. Правила
+    /// блокировки пишет панель; поле хранит выбор, пока VPN включён.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub vpn_off_block: bool,
     /// Telegram через WebSocket: куда идут соединения, когда WebSocket не работает.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tgws: Option<TgWsConfig>,

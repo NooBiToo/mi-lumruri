@@ -58,6 +58,9 @@ export function tunnelState(s: ManageResponse | null, c: Config | null, simple: 
       + (guard ? t('Действует защита: сайты из списка не откроются, пока настройки не применятся.') : t('Роутер работает по прежним настройкам.')) }
   }
   if (simple && !simple.enabled) {
+    if (simple.offBlock && simple.mode === 'selected') {
+      return { tone: 'idle', title: t('VPN выключен'), detail: t('Сайты из списка VPN не открываются, пока VPN выключен. Остальные — напрямую.') }
+    }
     return { tone: 'idle', title: t('VPN выключен'), detail: hasZapretSites(simple)
       ? t('Все сайты открываются напрямую. Сайты с обходом блокировок по-прежнему открываются с Zapret.')
       : t('Все сайты открываются напрямую, обход блокировок (Zapret) тоже выключен.') }

@@ -584,6 +584,27 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
             }
         }
     }
+    // Совпадение по домену точнее совпадения по подсети: в каждой подряд идущей группе правил одного источника правила
+    // с доменными наборами проверяются раньше правил с подсетями. Иначе подсети одного сервиса перекрывают домены
+    // другого: у Discord в списке — подсети Cloudflare (104.16.0.0/12, 172.64.0.0/13), и сайты на Cloudflare из списка
+    // VPN (свой сайт, ifconfig.co) уходили с обходом блокировок мимо туннеля. Правило без набора — граница: его порядок
+    // не меняется.
+    let dns_set = |r: &PolicyRule| r.set.as_ref().and_then(|n| sets.get(n)).is_some_and(|x| x.kind == SetKind::Dns);
+    let mut i = 0;
+    while i < rules.len() {
+        if rules[i].set.is_none() {
+            i += 1;
+            continue;
+        }
+        let mut j = i;
+        // источник «вся сеть» — это несколько мостов: правила для них идут вперемешку и считаются одним источником
+        let same = |a: &SrcMatch, b: &SrcMatch| a == b || (matches!(a, SrcMatch::Bridge { .. }) && matches!(b, SrcMatch::Bridge { .. }));
+        while j < rules.len() && rules[j].set.is_some() && same(&rules[j].src, &rules[i].src) {
+            j += 1;
+        }
+        rules[i..j].sort_by_key(|r| !dns_set(r));
+        i = j;
+    }
     // Telegram через WebSocket: запасной путь — туннель выбранного сервера (он нужен плану и запускается) или напрямую
     let uses_tgws = rules.iter().any(|r| r.act == Act::TgWs);
     let tgws_via = match cfg.tgws.as_ref().and_then(|t| t.via.clone()).filter(|_| uses_tgws) {

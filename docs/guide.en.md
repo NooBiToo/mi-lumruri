@@ -2,7 +2,7 @@
 
 [Русский](guide.md) · **English** · [简体中文](guide.zh-CN.md)
 
-This guide covers Mi Lumruri version 0.16.0. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
+This guide covers Mi Lumruri version 0.16.1. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
 
 You need a BE7000 (RC06) with firmware 1.1.38, working root access over SSH from the home network, the installation TAR, and the parameters of your TrustTunnel server. The stock release firmware usually ships with SSH turned off.
 
@@ -267,6 +267,10 @@ The screen has three sections of the same width: Now, Routes and Traffic.
 **Routes** is cards of the same size: through VPN, with DPI bypass, direct (or Exceptions when all internet goes through the VPN). Each shows the channel speed from the last speed test (through the VPN or direct), the service icons and the number of your own addresses, and the current traffic on the route at the bottom. DPI-bypass traffic is not counted separately; it is part of Direct. A route that is off has a dashed frame. The section heading shows which devices are used and how many are online (opens Devices), the time of the last speed test, the **Measure speed** button and the Change link to Sites.
 
 The **VPN** switch at the top of the panel turns the VPN off: all traffic goes directly, while the selection of sites and devices is kept and starts working again when the VPN is turned back on. While the VPN is off, sites with DPI bypass still open with Zapret. If Zapret is on only for all other sites, it turns off together with the VPN.
+
+What happens to listed sites while the VPN is off is chosen on Sites in the What to open through VPN card (in the Only selected mode): **Open directly** (as before) or **Do not open**: listed sites then do not open until the VPN is turned back on, and never see your real address. This is not the same as If the server is unavailable on the Server screen, which applies when the VPN is on but the server does not answer.
+
+If a listed site sees your real address, check it in Diagnostics → Check a site, which shows the path the router sends it on. A domain match takes priority over a subnet match: a site from your lists goes through the VPN even if its address falls into the subnets of a DPI-bypass service (Discord's subnets include all of Cloudflare). Connections a device opened before the site was added to a list keep their old path until they close: restart the browser.
 
 If the router could not apply the latest settings, the top shows "Settings not applied" and a short reason. The router then runs on the previous settings. If applying the rules itself failed, it keeps the protection on: sites from the VPN list do not open until the settings apply. This usually happens when the tunnel is not up yet: the router retries once a minute and applies the settings as soon as the tunnel is ready.
 

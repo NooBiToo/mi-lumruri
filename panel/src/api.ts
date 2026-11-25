@@ -104,6 +104,8 @@ export interface Config {
   history?: { months: number; target: string }
   /** Telegram через WebSocket: запасной путь. */
   tgws?: TgWsConfig
+  /** Выключенный VPN: сайты из списка VPN не открываются (иначе — напрямую). */
+  vpn_off_block?: boolean
 }
 
 export interface Issue { path: string; code: string; message: string }

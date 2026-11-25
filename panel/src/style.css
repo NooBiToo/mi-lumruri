@@ -413,6 +413,10 @@ label.setrow { cursor: pointer; }
 .route__opt--ws.route__opt--on { background: var(--ok); color: #fff; box-shadow: none; }
 .tile__via--ws { border-top-color: color-mix(in srgb, var(--ok) 22%, var(--line)); }
 .tile__via--ws .tile__vialabel svg { color: var(--ok); }
+/* «Сайты»: что с сайтами из списка, когда VPN выключен */
+.offblock { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem 1.5rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.offblock__text { display: grid; gap: 0.25rem; min-width: 0; flex: 1 1 18rem; }
+.offblock__title { font-weight: 500; }
 .tile__note { grid-column: 1 / -1; margin: 0; font-size: 0.8125rem; color: var(--warn-ink, var(--warn)); }
 /* через какой сервер VPN идёт сервис (если серверов несколько): строка во всю ширину плитки */
 .tile__via { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-top: 0.25rem; padding-top: 0.625rem;
