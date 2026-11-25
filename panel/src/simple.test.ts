@@ -333,6 +333,19 @@ describe('simple', () => {
     expect(() => toConfig(none, simple({ services: ['youtube'] }), lan, catalog, known)).toThrow(/сервер/)
     expect(toConfig(none, simple({}), lan, catalog, known).rules.map((r) => r.id)).toEqual(['rest-lan'])
   })
+  it('свои домены через другой сервер: в группе сервера, туда-обратно', () => {
+    const b2: Config = { ...base, profiles: [...base.profiles, { id: 'se', name: 'Sweden', kind: 'vless', on_failure: 'block', tunnel: 1, proxy: { server: 'se.example', port: 443 } }] }
+    const s = simple({ services: ['youtube'], customDomains: ['example.org', 'airwallex.com'], domainServer: { 'airwallex.com': 'se' } })
+    const c = toConfig(b2, s, lan, catalog, known)
+    expect(c.groups.find((g) => g.id === 'vpn-sites')?.destinations).toContainEqual({ type: 'domain_suffix', value: 'example.org' })
+    expect(c.groups.find((g) => g.id === 'vpn-sites--se')?.destinations).toEqual([{ type: 'domain_suffix', value: 'airwallex.com' }])
+    expect(c.rules.filter((r) => r.enabled).map((r) => [r.id, r.action])).toEqual([['vpn-lan--se', { type: 'profile', id: 'se' }], ['vpn-lan', { type: 'profile', id: 'tt' }]])
+    const r = fromConfig(JSON.parse(JSON.stringify(c)) as Config)
+    expect(r).toEqual({ canonical: true, simple: s })
+    // сервер по умолчанию или несуществующий — без отметки
+    expect(toConfig(b2, simple({ customDomains: ['a.ru'], domainServer: { 'a.ru': 'tt' } }), lan, catalog, known).groups.some((g) => g.id === 'vpn-sites--se')).toBe(false)
+  })
+
   it('несколько серверов: сервисы и устройство через другой сервер, туда-обратно; сервер по умолчанию — наименьший номер туннеля', () => {
     const two: Config = { ...base, profiles: [{ ...base.profiles[0]!, id: 'hy', name: 'Второй', tunnel: 1 }, base.profiles[0]!] }
     const s = simple({ services: ['youtube', 'meta', 'telegram'], customDomains: ['example.org'], serviceServer: { youtube: 'hy' },

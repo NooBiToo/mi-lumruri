@@ -11,7 +11,13 @@ import { parseDomainInput } from '../ui'
 import { plural } from '../status'
 import { t } from '../i18n'
 
-const props = defineProps<{ id: string; title: string; sub: string; placeholder: string; empty: string }>()
+const props = defineProps<{
+  id: string; title: string; sub: string; placeholder: string; empty: string
+  /** Серверы VPN (если их несколько): у каждого сайта — выбор сервера; serverOf — текущий, событие server — выбор. */
+  servers?: { id: string; name: string }[]
+  serverOf?: (d: string) => string
+}>()
+const emit = defineEmits<{ server: [domain: string, profile: string] }>()
 const model = defineModel<string[]>({ required: true })
 const text = ref('')
 const note = ref<{ bad: boolean; text: string } | null>(null)
@@ -79,6 +85,10 @@ function clear() {
     <ul v-if="model.length" ref="list" class="dlist__items" :aria-labelledby="`${id}-title`">
       <li v-for="d in model" :key="d" class="dlist__item">
         <span class="dlist__text">{{ d }}</span>
+        <select v-if="servers && servers.length > 1" class="tile__server dlist__server" :value="serverOf?.(d)"
+          :aria-label="t('Сервер для «{name}»', { name: d })" @change="emit('server', d, ($event.target as HTMLSelectElement).value)">
+          <option v-for="p in servers" :key="p.id" :value="p.id">{{ p.name }}</option>
+        </select>
         <button type="button" class="icon-btn" :aria-label="t('Убрать {d}', { d })" @click="remove(d)"><X :size="16" aria-hidden="true" /></button>
       </li>
     </ul>

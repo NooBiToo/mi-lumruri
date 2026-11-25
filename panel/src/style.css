@@ -469,6 +469,7 @@ label.setrow { cursor: pointer; }
   overflow-y: auto; overscroll-behavior: contain;
 }
 .dlist__item { display: flex; align-items: center; gap: 0.5rem; min-height: 2.375rem; padding: 0.25rem 0.375rem 0.25rem 0.875rem; }
+.dlist__server { flex: none; max-width: 45%; text-overflow: ellipsis; }
 .dlist__item + .dlist__item { border-top: 1px solid var(--line); }
 .dlist__item:hover { background: var(--surface-2); }
 .dlist__text { flex: 1; min-width: 0; font-size: 0.9375rem; overflow-wrap: anywhere; }

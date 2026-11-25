@@ -105,6 +105,13 @@ test('второй сервер: добавление, выбор для сер�
     .toEqual([{ type: 'category', id: 'svc-youtube' }])
   expect(config().rules.some((r: { id: string; action: { id?: string } }) => r.id.endsWith(`--${second.id}`) && r.action.id === second.id)).toBe(true)
 
+  // свой домен тоже через второй сервер
+  await page.locator('#custom').fill('airwallex.com')
+  await page.locator('#custom').press('Enter')
+  await page.getByRole('combobox', { name: 'Сервер для «airwallex.com»' }).selectOption({ label: 'Второй' })
+  await expect.poll(() => config().groups.find((g: { id: string }) => g.id === `vpn-sites--${second.id}`)?.destinations, { timeout: 15_000 })
+    .toEqual([{ type: 'category', id: 'svc-youtube' }, { type: 'domain_suffix', value: 'airwallex.com' }])
+
   // DNS для сайтов через VPN — выбор сервера появился
   await nav(page, /Настройки/).click()
   await expect(page.locator('#dns-tunnel')).toBeVisible()
@@ -117,6 +124,7 @@ test('второй сервер: добавление, выбор для сер�
   await expect.poll(() => config().profiles.length, { timeout: 10_000 }).toBe(1)
   expect(config().groups.some((g: { id: string }) => g.id.startsWith('vpn-sites--'))).toBe(false)
   expect(config().groups.find((g: { id: string }) => g.id === 'vpn-sites')?.destinations).toContainEqual({ type: 'category', id: 'svc-youtube' })
+  expect(config().groups.find((g: { id: string }) => g.id === 'vpn-sites')?.destinations).toContainEqual({ type: 'domain_suffix', value: 'airwallex.com' })
   expect(consoleErrors).toEqual([])
 })
 

@@ -2,7 +2,7 @@
 
 [Русский](guide.md) · **English** · [简体中文](guide.zh-CN.md)
 
-This guide covers Mi Lumruri version 0.16.1. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
+This guide covers Mi Lumruri version 0.16.2. Package files are named `mi-lumruri-*.tar`, and on the router the package lives in `/data/mi-lumruri` and `/tmp/mi-lumruri`. Before 0.5.0 the project was called mi-trusttunnel: installing 0.5.0 over an earlier version moves `/data/mi-trusttunnel` to `/data/mi-lumruri` with all settings and leaves a link in the old place. Next to the main package the release carries a copy named `mi-trusttunnel-*.tar`, which the panel updater of version 0.4 looks for.
 
 You need a BE7000 (RC06) with firmware 1.1.38, working root access over SSH from the home network, the installation TAR, and the parameters of your TrustTunnel server. The stock release firmware usually ships with SSH turned off.
 
@@ -224,7 +224,7 @@ In the **What to open via VPN** card, choose a mode:
 
 If only one device needs all its internet through the VPN, keep Selected only and turn on Whole internet for that device on the [Devices](#devices) screen.
 
-With several servers, a service set to **VPN** gets a server choice. By default it goes through the default server; your own sites through the VPN go through it too.
+With several servers, a service set to **VPN** gets a server choice. By default it goes through the default server. Each site in Your own sites through VPN can also get its own server, in the list next to the address.
 
 **Services** are tiles with ready-made lists: YouTube, Instagram and Facebook, Discord, Telegram, ChatGPT and Google AI, TikTok, X and others. Services are split into groups, and there is a search. Each tile has three positions: **VPN** (through the VPN), **Zapret** (directly with DPI bypass) and **Off** (like all other sites). Everything blocked in Russia is a large general list. It is enough if you do not know what to choose. For services with their own networks (Telegram, Discord, Meta and others), their IP subnets are turned on together with the service. The Hosting and CDN group includes entire hosting networks. Only specialists need it.
 

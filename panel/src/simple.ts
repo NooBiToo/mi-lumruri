@@ -15,7 +15,7 @@
 // - устройства «весь интернет через VPN» (режим «выбранные»): перед правилами источников — `except-<dev>`,
 //   `zapret-<dev>` и `vpnall-<dev>` → `vpn-all` → профиль;
 // - несколько серверов: сервер по умолчанию — профиль с наименьшим номером туннеля; сервисы другого сервера — в группе
-//   `vpn-sites--<профиль>`, их правило `vpn-<src>--<профиль>` стоит перед `vpn-<src>`; устройство «весь интернет через
+//   `vpn-sites--<профиль>` (вместе со своими доменами этого сервера), их правило `vpn-<src>--<профиль>` стоит перед `vpn-<src>`; устройство «весь интернет через
 //   VPN» может идти через свой сервер (действие правила `vpnall-<dev>`);
 // - `default_action`: профиль в режиме «всё» для всей сети, иначе «остальные сайты» (напрямую или с Zapret);
 // - последнее правило-метка, всегда выключенное (на маршрутизацию не влияет): `rest-lan`, а при выключенном VPN —
@@ -48,6 +48,8 @@ export interface Simple {
   vpnAll?: string[]
   /** Сервисы через другой сервер (не по умолчанию): id сервиса → id профиля. */
   serviceServer?: Record<string, string>
+  /** Свои домены через другой сервер (не по умолчанию): домен → id профиля. */
+  domainServer?: Record<string, string>
   /** Устройства «весь интернет через VPN» через другой сервер: MAC → id профиля. */
   deviceServer?: Record<string, string>
   /** Сервисы через WebSocket (модуль tgws, только Telegram); с `services` и `zapretServices` не пересекаются. */
@@ -176,13 +178,20 @@ export function toConfig(base: Config, s: Simple, lan: Lan, catalog: ListCatalog
     const p = s.serviceServer?.[id]
     return p && p !== profile?.id && known_.has(p) ? p : null
   }
+  /** Сервер своего домена: другой существующий профиль или null (по умолчанию). */
+  const domainServerOf = (d: string): string | null => {
+    const p = Object.entries(s.domainServer ?? {}).find(([k]) => normalizeDomain(k) === d)?.[1]
+    return p && p !== profile?.id && known_.has(p) ? p : null
+  }
+  const customs = uniqueDomains(s.customDomains)
   const sites: Destination[] = []
   addServices(services.filter((id) => !serverOf(id)), sites)
-  for (const d of uniqueDomains(s.customDomains)) sites.push({ type: 'domain_suffix', value: d })
-  // сервисы других серверов — по профилю в порядке номеров туннелей
+  for (const d of customs.filter((x) => !domainServerOf(x))) sites.push({ type: 'domain_suffix', value: d })
+  // сервисы и свои домены других серверов — по профилю в порядке номеров туннелей
   const atSites: [string, Destination[]][] = profiles.slice(1).map((p): [string, Destination[]] => {
     const into: Destination[] = []
     addServices(services.filter((id) => serverOf(id) === p.id), into)
+    for (const d of customs.filter((x) => domainServerOf(x) === p.id)) into.push({ type: 'domain_suffix', value: d })
     return [p.id, into]
   }).filter(([, d]) => d.length > 0)
   const zapretSites: Destination[] = []
@@ -328,14 +337,15 @@ export function fromConfig(cfg: Config): FromConfig {
   if (wsDomains.length) return notSimple(t('в списке сайтов есть записи, добавленные вручную'))
   // сервисы других серверов
   const serviceServer: Record<string, string> = {}
+  const domainServer: Record<string, string> = {}
   for (const g of cfg.groups.filter((x) => x.id.startsWith(SITES_AT))) {
     const pid = g.id.slice(SITES_AT.length)
     const svc: string[] = []
     const dom: string[] = []
     const e = readSites(g.id, svc, dom)
     if (e) return notSimple(e)
-    if (dom.length) return notSimple(t('в списке сайтов есть записи, добавленные вручную'))
     for (const id of svc) { services.push(id); serviceServer[id] = pid }
+    for (const d of dom) { customDomains.push(d); domainServer[d] = pid }
   }
   const defaultId = sortedProfiles(cfg.profiles)[0]?.id
   const exceptions: string[] = []
@@ -381,6 +391,7 @@ export function fromConfig(cfg: Config): FromConfig {
   }
   if (vpnAll.length) simple.vpnAll = vpnAll
   if (Object.keys(serviceServer).length) simple.serviceServer = serviceServer
+  if (Object.keys(domainServer).length) simple.domainServer = domainServer
   if (Object.keys(deviceServer).length) simple.deviceServer = deviceServer
   if (wsServices.length) simple.wsServices = wsServices
   if (cfg.tgws) simple.tgwsVia = cfg.tgws.via ?? ''

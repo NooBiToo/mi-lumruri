@@ -21,6 +21,8 @@ interface Draft {
   mode: Simple['mode']; services: string[]; zapretServices: string[]; custom: string[]; zapret: string[]; except: string[]; rest: Simple['rest']
   /** Сервисы через другой сервер: id сервиса → id профиля. */
   server: Record<string, string>
+  /** Свои домены через другой сервер: домен → id профиля. */
+  domainServer: Record<string, string>
   /** Сервисы через WebSocket (Telegram) и запасной путь: id профиля или '' (напрямую); undefined — не выбирался. */
   wsServices: string[]
   tgwsVia: string | undefined
@@ -28,13 +30,22 @@ interface Draft {
 }
 const toDraft = (s: Simple): Draft => ({
   mode: s.mode, services: [...s.services], zapretServices: [...s.zapretServices], custom: [...s.customDomains], zapret: [...s.zapretDomains],
-  except: [...s.exceptions], rest: s.rest, server: { ...(s.serviceServer ?? {}) }, wsServices: [...(s.wsServices ?? [])], tgwsVia: s.tgwsVia, offBlock: !!s.offBlock,
+  except: [...s.exceptions], rest: s.rest, server: { ...(s.serviceServer ?? {}) }, domainServer: { ...(s.domainServer ?? {}) }, wsServices: [...(s.wsServices ?? [])], tgwsVia: s.tgwsVia, offBlock: !!s.offBlock,
 })
 /** Отметки серверов только у сервисов через VPN и только для другого существующего сервера; пусто — undefined. */
 function cleanServers(d: Draft): Record<string, string> | undefined {
   const def = profiles.value[0]?.id
   const ids = new Set(profiles.value.map((p) => p.id))
   const r = Object.fromEntries(Object.entries(d.server).filter(([svc, p]) => d.services.includes(svc) && p !== def && ids.has(p)).sort(([a], [b]) => a.localeCompare(b)))
+  return Object.keys(r).length ? r : undefined
+}
+/** Серверы своих доменов: только у доменов списка и только другой существующий сервер; пусто — undefined. */
+function cleanDomainServers(d: Draft): Record<string, string> | undefined {
+  const def = profiles.value[0]?.id
+  const ids = new Set(profiles.value.map((p) => p.id))
+  const keep = new Set(domains(d.custom))
+  const r = Object.fromEntries(Object.entries(d.domainServer).map(([k, p]) => [normalizeDomain(k), p] as [string, string])
+    .filter(([k, p]) => keep.has(k) && p !== def && ids.has(p)).sort(([a], [b]) => a.localeCompare(b)))
   return Object.keys(r).length ? r : undefined
 }
 const serversJson = (m: Record<string, string> | undefined) => JSON.stringify(Object.entries(m ?? {}).sort(([a], [b]) => a.localeCompare(b)))
@@ -45,7 +56,7 @@ const sameList = (a: string[], b: string[]) => a.length === b.length && a.every(
 const next = computed<Simple | null>(() => simple.value && draft.value ? {
   ...simple.value, mode: draft.value.mode, services: [...draft.value.services].sort(), customDomains: domains(draft.value.custom),
   zapretServices: [...draft.value.zapretServices].sort(), zapretDomains: domains(draft.value.zapret),
-  exceptions: domains(draft.value.except), rest: draft.value.rest, serviceServer: cleanServers(draft.value),
+  exceptions: domains(draft.value.except), rest: draft.value.rest, serviceServer: cleanServers(draft.value), domainServer: cleanDomainServers(draft.value),
   wsServices: draft.value.wsServices.length ? [...draft.value.wsServices].sort() : undefined, tgwsVia: draft.value.tgwsVia,
   offBlock: draft.value.offBlock || undefined,
 } : null)
@@ -54,7 +65,7 @@ const dirty = computed(() => {
   if (!a || !b) return false
   return a.mode !== b.mode || a.rest !== b.rest || !sameList([...a.services].sort(), b.services) || !sameList(a.customDomains, b.customDomains)
     || !sameList([...a.zapretServices].sort(), b.zapretServices) || !sameList(a.zapretDomains, b.zapretDomains) || !sameList(a.exceptions, b.exceptions)
-    || serversJson(a.serviceServer) !== serversJson(b.serviceServer)
+    || serversJson(a.serviceServer) !== serversJson(b.serviceServer) || serversJson(a.domainServer) !== serversJson(b.domainServer)
     || !sameList([...(a.wsServices ?? [])].sort(), b.wsServices ?? []) || a.tgwsVia !== b.tgwsVia || !!a.offBlock !== !!b.offBlock
 })
 // ---- сервер сервиса (если серверов несколько) ----
@@ -65,6 +76,14 @@ function setServer(id: string, pid: string) {
   if (pid === profiles.value[0]?.id) delete draft.value.server[id]
   else draft.value.server[id] = pid
   draft.value.server = { ...draft.value.server }
+}
+const domainServerOf = (d: string): string => draft.value?.domainServer[d] ?? profiles.value[0]?.id ?? ''
+function setDomainServer(d: string, pid: string) {
+  if (!draft.value) return
+  const m = { ...draft.value.domainServer }
+  if (pid === profiles.value[0]?.id) delete m[d]
+  else m[d] = pid
+  draft.value.domainServer = m
 }
 // настройки перечитаны (сохранение, другое окно): черновик без правок следует за ними
 watch(simple, (s) => { if (s && (!draft.value || !dirty.value)) draft.value = toDraft(s) })
@@ -270,6 +289,7 @@ onMounted(async () => {
       <ListsCard />
 
       <DomainList v-if="draft.mode === 'selected'" id="custom" v-model="draft.custom" :title="t('Свои сайты через VPN')" placeholder="example.com"
+        :servers="many ? profiles : undefined" :server-of="domainServerOf" @server="setDomainServer"
         :sub="t('Сайты, которых нет среди сервисов. Поддомены тоже пойдут через VPN.')" :empty="t('Пока пусто. Добавьте адрес сайта, например example.com.')" />
       <DomainList id="zapret-sites" v-model="draft.zapret" :title="t('Сайты с обходом блокировок')" placeholder="example.com"
         :sub="t('Открываются напрямую, без VPN, с обходом блокировок (Zapret). Работают и при выключенном VPN.')"

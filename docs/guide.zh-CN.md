@@ -2,7 +2,7 @@
 
 [Русский](guide.md) · [English](guide.en.md) · **简体中文**
 
-本说明适用于 Mi Lumruri 0.16.1 版本。安装包文件名为 `mi-lumruri-*.tar`，在路由器上安装包位于 `/data/mi-lumruri` 和 `/tmp/mi-lumruri`。0.5.0 之前项目名为 mi-trusttunnel：在旧版本之上安装 0.5.0 时，会自动把 `/data/mi-trusttunnel` 连同全部设置移动到 `/data/mi-lumruri`，并在原位置留下链接。发布版中除主安装包外还有一份名为 `mi-trusttunnel-*.tar` 的副本，供 0.4 版本面板中的更新功能查找。
+本说明适用于 Mi Lumruri 0.16.2 版本。安装包文件名为 `mi-lumruri-*.tar`，在路由器上安装包位于 `/data/mi-lumruri` 和 `/tmp/mi-lumruri`。0.5.0 之前项目名为 mi-trusttunnel：在旧版本之上安装 0.5.0 时，会自动把 `/data/mi-trusttunnel` 连同全部设置移动到 `/data/mi-lumruri`，并在原位置留下链接。发布版中除主安装包外还有一份名为 `mi-trusttunnel-*.tar` 的副本，供 0.4 版本面板中的更新功能查找。
 
 你需要：固件版本为 1.1.38 的 BE7000（RC06）、可从家庭网络通过 SSH 获得的 root 权限、安装用 TAR 包，以及你的 TrustTunnel 服务器参数。官方发布的原厂固件通常默认关闭 SSH。
 
@@ -224,7 +224,7 @@ trusttunnel_endpoint vpn.toml hosts.toml -c <用户名> -a <IP:端口>
 
 如果只有一台设备需要全部流量走 VPN，请保留「仅所选」，并在[「设备」](#设备)页面为该设备开启「全部流量」。
 
-有多个服务器时，处于 **VPN** 位置的服务会出现服务器选择。默认经由默认服务器；自定义经 VPN 网站也经由它。
+有多个服务器时，处于 **VPN** 位置的服务会出现服务器选择。默认经由默认服务器。「自定义经 VPN 网站」中的每个网站也可以在地址右侧的列表中选择自己的服务器。
 
 **「服务」**：现成列表的磁贴，包括 YouTube、Instagram 和 Facebook、Discord、Telegram、ChatGPT 和 Google AI、TikTok、X 等。服务按组划分，并支持搜索。每个磁贴有三种状态：**VPN**（走 VPN）、**Zapret**（直连并绕过封锁）、**关闭**（与其他网站相同）。「俄罗斯封锁的全部网站」是一个大型综合列表；如果不知道该选什么，选它就够了。对于拥有自有网络的服务（Telegram、Discord、Meta 等），启用服务时会同时纳入其 IP 子网。「托管与 CDN」组包含整个托管服务商的网络，仅供专业人员使用。
 
