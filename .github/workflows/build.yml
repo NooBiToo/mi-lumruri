@@ -89,6 +89,7 @@ jobs:
           (cd controller && cargo run --quiet --locked --bin mi-tt-admin -- release verify ../out/package/mi-lumruri)
           (cd controller && cargo run --quiet --locked --bin mi-tt-admin -- release verify ../out/package/module-sing-box/module)
           (cd controller && cargo run --quiet --locked --bin mi-tt-admin -- release verify ../out/package/module-amneziawg/module)
+          (cd controller && cargo run --quiet --locked --bin mi-tt-admin -- release verify ../out/package/module-tgws/module)
           cd out/package
           # основной пакет, совместимая копия под прежним именем (обновление из панели 0.4.x) и модуль sing-box
           sha256sum mi-lumruri-*.tar mi-trusttunnel-*.tar mitt-mod-*.tar > SHA256SUMS

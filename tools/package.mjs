@@ -16,7 +16,7 @@ import { gunzipSync } from 'node:zlib'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
-const VERSION = args.includes('--version') ? args[args.indexOf('--version') + 1] : '0.15.0'
+const VERSION = args.includes('--version') ? args[args.indexOf('--version') + 1] : '0.16.0'
 const OUT = args.includes('--out') ? args[args.indexOf('--out') + 1] : join(ROOT, 'out', 'package')
 const PKG = join(OUT, 'mi-lumruri')
 const DL = join(ROOT, '.tools', 'lab', 'dl')
@@ -68,6 +68,8 @@ if (!AWG_BIN) {
     env: { ...process.env, CGO_ENABLED: '0', GOOS: 'linux', GOARCH: 'arm64', GOFLAGS: '-mod=readonly', GOPATH: G, GOCACHE: join(G, 'cache'), GOMODCACHE: join(G, 'mod') },
   })
 }
+// модуль tgws (mi-tt-tgws): версия программы — меняется вместе с её кодом
+const TGWS_VER = '1.0.0'
 const ZAP = join(ROOT, '.tools', 'lab', 'zapret2', 'zapret2-v1.0.7')
 if (!existsSync(join(ZAP, 'binaries', 'linux-arm64', 'nfqws2'))) throw new Error('нет zapret2: tools/lab/fetch-zapret.sh')
 
@@ -151,6 +153,8 @@ function moduleTar(name, version, bin, title, protocols, kinds) {
 const catalog = { modules: [
   moduleTar('sing-box', SB_VER, SB_BIN, 'sing-box', ['VLESS', 'Hysteria2', 'Trojan', 'Shadowsocks'], ['vless', 'hysteria2', 'trojan', 'shadowsocks']),
   moduleTar('amneziawg', AWG_VER, AWG_BIN, 'AmneziaWG', ['AmneziaWG'], ['amneziawg']),
+  // Telegram через WebSocket: своя программа на Rust (controller/src/tgws), собирается вместе с mi-tt
+  moduleTar('tgws', TGWS_VER, join(T, 'mi-tt-tgws'), 'Telegram через WebSocket', ['Telegram'], []),
 ] }
 writeFileSync(join(PKG, 'payload', 'scripts', 'modules.json'), JSON.stringify(catalog, null, 1) + '\n')
 {

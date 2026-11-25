@@ -537,3 +537,30 @@ fn render_amneziawg_writes_uapi_and_addr() {
     let (code, _, _) = render(&c, &sec);
     assert_eq!(code, 1);
 }
+
+#[test]
+fn telegram_websocket_rule_redirects_and_keeps_vpn_fallback() {
+    // правило tg_ws без VPN-правил: запасной путь через tt-lab — туннель нужен плану и программе (tgws.args)
+    let mut c = lab();
+    c["rules"] = json!([{ "id": "tg", "source": { "type": "device", "id": "tv" }, "destination": { "type": "group", "id": "video" }, "action": { "type": "tg_ws" } }]);
+    c["tgws"] = json!({ "via": "tt-lab" });
+    let (code, v, out) = render(&c, &secrets(&secret()));
+    assert_eq!(code, 0, "{v}");
+    assert_eq!(v["policy"]["tgws_via"], json!(0), "{v}");
+    assert!(v["policy"]["rules"].as_array().unwrap().iter().any(|r| r["act"] == "tg_ws"), "{v}");
+    assert!(v["plan"].as_array().unwrap().iter().any(|e| e.as_str().unwrap().contains("REDIRECT")), "{v}");
+    let args = std::fs::read_to_string(out.join("tgws.args")).unwrap();
+    assert_eq!(args, "--listen\n0.0.0.0:18443\n--via-device\nmitt0\n--via-mark\n0x4000\n");
+    // напрямую: без туннеля и без привязки
+    c["tgws"] = json!({});
+    let (code, v, out) = render(&c, &secrets(&secret()));
+    assert_eq!(code, 0, "{v}");
+    assert_eq!(v["tunnels"], json!([]), "{v}");
+    assert_eq!(std::fs::read_to_string(out.join("tgws.args")).unwrap(), "--listen\n0.0.0.0:18443\n");
+    // неизвестный профиль запасного пути — ошибка проверки; tg_ws в default_action — тоже
+    c["tgws"] = json!({ "via": "nope" });
+    assert!(codes(&validate(&c).1).contains(&"tgws.via:unknown_profile".to_string()));
+    c["tgws"] = json!({});
+    c["default_action"] = json!({ "type": "tg_ws" });
+    assert!(codes(&validate(&c).1).contains(&"default_action:tg_ws_default".to_string()));
+}

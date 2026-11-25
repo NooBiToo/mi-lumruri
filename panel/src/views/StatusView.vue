@@ -83,6 +83,13 @@ const cards = computed<RouteCard[]>(() => {
     out.push({ key: 'zapret', kind: 'zapret', tone: nfqwsUp.value ? 'zapret' : 'bad', live: nfqwsUp.value, ...speedOf('zapret'),
       name: t('С обходом блокировок'), meta: zapretWay.value, items: zapretServices.value, domains: s.zapretDomains.length })
   }
+  // Telegram через WebSocket: трафик не отделить от прямого; запасной путь — подписью
+  const ws = named(s.wsServices ?? [])
+  if (ws.length) {
+    const via = config.value?.profiles.find((p) => p.id === s.tgwsVia)
+    out.push({ key: 'ws', kind: 'direct', tone: s.enabled ? 'ok' : 'idle', live: s.enabled, ...speedOf('zapret'), name: t('Через WebSocket'),
+      meta: via ? t('если не работает — через «{name}»', { name: via.name }) : t('если не работает — напрямую'), items: ws, domains: 0 })
+  }
   if (s.mode === 'selected') {
     // при выключенном VPN остальные сайты идут напрямую без обработки (default_action — direct)
     const z = s.enabled && s.rest === 'zapret' && zapretUsed.value

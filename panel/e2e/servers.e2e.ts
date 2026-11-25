@@ -220,3 +220,22 @@ test('сервер AmneziaWG из конфигурации .conf: сводка �
   await expect.poll(() => readFileSync(join(dirname(stand.opts.config), 'secrets.json'), 'utf8'), { timeout: 10_000 }).toContain('Jmin = 40')
   expect(consoleErrors).toEqual([])
 })
+
+test('Telegram через WebSocket: положение «WS» только у Telegram, запасной путь — сервер VPN или напрямую', async ({ page }) => {
+  await login(page)
+  await simplify(page)
+  await nav(page, /Сайты/).click()
+  await expect(page.locator('input[name="route-youtube"][value="ws"]')).toHaveCount(0)
+  await page.locator('input[name="route-telegram"][value="ws"]').evaluate((el) => (el as HTMLInputElement).click())
+  const via = page.getByRole('combobox', { name: 'Запасной путь Telegram, если WebSocket не работает' })
+  await expect(via).toBeVisible()
+  // модуля tgws в каталоге стенда нет — подсказка
+  await expect(page.getByText('Нужен модуль tgws')).toBeVisible()
+  const def = config().profiles[0].id
+  await expect(via).toHaveValue(def)
+  await expect.poll(() => config().rules.some((r: { action: { type: string } }) => r.action.type === 'tg_ws'), { timeout: 15_000 }).toBe(true)
+  expect(config().tgws).toEqual({ via: def })
+  await via.selectOption('')
+  await expect.poll(() => JSON.stringify(config().tgws), { timeout: 15_000 }).toBe('{}')
+  expect(consoleErrors).toEqual([])
+})

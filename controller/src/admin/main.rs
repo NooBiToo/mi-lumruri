@@ -210,6 +210,18 @@ fn read_live(warnings: &mut Vec<String>) -> Result<Live, String> {
     Ok(l)
 }
 
+/// Порт TCP слушается (IPv4, /proc/net/tcp: состояние 0A). MI_TT_PROC — другой /proc (лаборатория).
+fn tcp_listening(port: u16) -> bool {
+    let proc = std::env::var("MI_TT_PROC").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/proc".into());
+    let want = format!(":{port:04X}");
+    fs::read_to_string(format!("{proc}/net/tcp")).is_ok_and(|t| {
+        t.lines().skip(1).any(|l| {
+            let f: Vec<&str> = l.split_whitespace().collect();
+            f.len() > 3 && f[1].ends_with(&want) && f[3] == "0A"
+        })
+    })
+}
+
 fn tun_present() -> bool {
     dev_present(TUN_DEVICE)
 }
@@ -501,6 +513,11 @@ fn change(a: &Args, target: Option<Desired>) -> ExitCode {
                 }
             }
             tun_down = d.spec.down.clone();
+            // Telegram через WebSocket: прокси не слушает порт (модуля нет, не запустился) — запасной путь сразу
+            if d.spec.uses(mi_tt::plan::Act::TgWs) && !tcp_listening(mi_tt::plan::TGWS_PORT) {
+                d.spec = d.spec.tgws_fallback();
+                warnings.push("Telegram через WebSocket: прокси не запущен — Telegram идёт запасным путём".into());
+            }
             let b = match build(a, &d) {
                 Ok(b) => b,
                 Err(code) => return code,

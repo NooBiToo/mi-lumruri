@@ -131,7 +131,12 @@ pub enum Act {
     Direct,
     Zapret,
     Block,
+    /// Telegram через WebSocket: TCP перенаправляется в прокси mi-tt-tgws (nat PREROUTING, REDIRECT).
+    TgWs,
 }
+
+/// Порт прокси Telegram через WebSocket на роутере (REDIRECT из nat PREROUTING).
+pub const TGWS_PORT: u16 = 18443;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -230,6 +235,9 @@ pub struct PolicySpec {
     /// туннеле, а трафик устройств приходит с адресами LAN). TrustTunnel и sing-box проксируют сами.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub masq: Vec<String>,
+    /// Запасной путь Telegram через WebSocket — туннель (прокси привязывает к нему соединения); None — напрямую.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tgws_via: Option<u8>,
 }
 
 fn default_table() -> u32 {
@@ -265,6 +273,7 @@ impl PolicySpec {
             .into_iter()
             .filter(|t| {
                 self.rules.iter().any(|r| r.act == Act::Tunnel && r.tun == t.index)
+                    || (self.tgws_via == Some(t.index) && self.uses(Act::TgWs))
                     || (self.dns_resolver.is_some() && self.dns_tun == t.index)
                     || (!self.v6_tunnel.is_empty() && self.v6_tun == t.index && self.rules.iter().any(|r| r.act == Act::Tunnel))
             })
@@ -306,6 +315,24 @@ impl PolicySpec {
             .collect();
         s.dns_tun = keep;
         s.v6_tun = keep;
+        if s.tgws_via.is_some_and(|n| n != keep) {
+            s.tgws_via = None;
+        }
+        s
+    }
+    /// Прокси Telegram через WebSocket не запущен (модуля нет, программа упала): его правила — запасной путь сразу
+    /// (метка туннеля или без метки), без перенаправления в несуществующий порт.
+    pub fn tgws_fallback(&self) -> PolicySpec {
+        let mut s = self.clone();
+        for r in s.rules.iter_mut().filter(|r| r.act == Act::TgWs) {
+            match self.tgws_via {
+                Some(n) => {
+                    r.act = Act::Tunnel;
+                    r.tun = n;
+                }
+                None => r.act = Act::Direct,
+            }
+        }
         s
     }
     /// Мосты и порты, которые должны существовать до применения: (интерфейс, мост, если это порт).
@@ -624,6 +651,26 @@ pub fn build_plan(spec: &PolicySpec, v6_lan_prefixes: &[String], bridge_ports: &
                 .collect();
             let c = chain(false, m, 'O', rows);
             p.insert(Entry::Jump { v6: false, table: m.into(), from: "OUTPUT".into(), chain: chain_name(&c) });
+            p.insert(c);
+        }
+    }
+    // nat PREROUTING: TCP Telegram через WebSocket — в прокси на роутере (первое совпадение, как в mangle)
+    if spec.uses(Act::TgWs) && !guard_only {
+        let to = vec![s("-j"), s("REDIRECT"), s("--to-ports"), TGWS_PORT.to_string()];
+        if let Some(rows) = classify(spec, bridge_ports, |r| (r.act == Act::TgWs).then(|| to.clone())) {
+            // -p tcp — перед модулями -m (так его печатает iptables -S: правило сравнивается с живым как есть)
+            let rows = rows
+                .into_iter()
+                .map(|mut r| {
+                    if r.last().is_some_and(|x| x == &TGWS_PORT.to_string()) {
+                        let at = r.iter().position(|w| w == "-m" || w == "-j").unwrap_or(r.len());
+                        r.splice(at..at, [s("-p"), s("tcp")]);
+                    }
+                    r
+                })
+                .collect();
+            let c = chain(false, "nat", 'W', rows);
+            p.insert(Entry::Jump { v6: false, table: "nat".into(), from: "PREROUTING".into(), chain: chain_name(&c) });
             p.insert(c);
         }
     }
@@ -1167,6 +1214,30 @@ mod tests {
                 _ => None,
             })
             .unwrap_or_else(|| panic!("нет цепочки {letter} в {table}"))
+    }
+
+    #[test]
+    fn tgws_redirects_tcp_in_nat_and_falls_back_without_proxy() {
+        let mut s = spec();
+        s.rules.insert(1, PolicyRule { from: "telegram".into(), src: SrcMatch::Bridge { bridge: "br-lan".into() }, set: Some("mitt0005d".into()), act: Act::TgWs, tun: 0 });
+        s.sets.push(SetSpec { name: "mitt0005d".into(), kind: SetKind::Dns, entries: vec![] });
+        let p = build_plan(&s, &[], &whole(), false);
+        let w = chain_rows(&p, "nat", 'W');
+        let sv = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<String>>();
+        // подсети LAN — мимо; правило VPN выше — RETURN (первое совпадение); Telegram — REDIRECT с -p tcp до -m
+        assert_eq!(w.last().unwrap(), &sv(&["-i", "br-lan", "-p", "tcp", "-m", "set", "--match-set", "mitt0005d", "dst", "-j", "REDIRECT", "--to-ports", "18443"]));
+        assert!(w.iter().any(|r| r.ends_with(&sv(&["mitt0001d", "dst", "-j", "RETURN"]))));
+        assert!(p.iter().any(|e| matches!(e, Entry::Jump { table, from, .. } if table == "nat" && from == "PREROUTING")));
+        // в mangle Telegram метки не получает
+        assert!(!chain_rows(&p, "mangle", 'C').iter().any(|r| r.iter().any(|w| w == "mitt0005d") && !r.ends_with(&sv(&["-j", "RETURN"]))));
+        // прокси не запущен: запасной путь — туннель (метка) или напрямую; перенаправления нет
+        s.tgws_via = Some(0);
+        assert!(s.used_tunnels().iter().any(|t| t.index == 0));
+        let f = s.tgws_fallback();
+        assert!(f.rules.iter().any(|r| r.from == "telegram" && r.act == Act::Tunnel && r.tun == 0));
+        assert!(!build_plan(&f, &[], &whole(), false).iter().any(|e| matches!(e, Entry::Chain { table, .. } if table == "nat")));
+        s.tgws_via = None;
+        assert!(s.tgws_fallback().rules.iter().any(|r| r.from == "telegram" && r.act == Act::Direct));
     }
 
     #[test]

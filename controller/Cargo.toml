@@ -26,6 +26,11 @@ path = "src/admin/main.rs"
 name = "mi-tt-dns"
 path = "src/dnsproxy/main.rs"
 
+# Telegram через WebSocket (модуль tgws: отдельная программа, ставится с флешки или во внутреннюю память)
+[[bin]]
+name = "mi-tt-tgws"
+path = "src/tgws/main.rs"
+
 [[bin]]
 name = "mi-tt"
 path = "src/multicall/main.rs"
@@ -52,6 +57,9 @@ qrcode = { version = "0.14", default-features = false }
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12"] }
 rustls-rustcrypto = "0.1.0-pre.0"
 webpki-roots = "1"
+# mi-tt-tgws: обфусцированный транспорт MTProto — AES-256-CTR (RustCrypto, чистый Rust)
+aes = "0.8"
+ctr = "0.9"
 
 # метка сокета (SO_MARK, только Linux): соединения mi-tt-dns для доменов VPN уходят в туннель по правилу fwmark
 [target.'cfg(target_os = "linux")'.dependencies]

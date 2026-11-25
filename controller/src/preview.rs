@@ -211,6 +211,7 @@ pub fn action_label(a: &Action, idx: &Index) -> String {
         Action::Direct => "прямой выход".into(),
         Action::DirectZapret => "прямой выход с Zapret".into(),
         Action::Block => "блокировка".into(),
+        Action::TgWs => "Telegram через WebSocket".into(),
     }
 }
 

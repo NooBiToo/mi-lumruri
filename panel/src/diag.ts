@@ -17,6 +17,7 @@ export const checkTitles = (): Record<string, string> => ({
   secure: t('Защищённый DNS (DoH/DoT)'),
   tunnelsecure: t('Шифрованный DNS через VPN'),
   zapret: t('Обход блокировок (Zapret)'),
+  tgws: t('Telegram через WebSocket'),
   restarts: t('Стабильность программ'),
   watch: t('Сторож туннеля'),
 })

@@ -275,6 +275,8 @@ fn render_cmd(cfg: &str, secrets: &str, out: &str) -> Response {
                 .and_then(|_| opt("adblock.url", config.dns.as_ref().and_then(|d| d.adblock.as_ref()).filter(|a| a.enabled)
                     .and_then(|a| a.list_url()).map(|u| format!("{u}\n")), false))
                 .and_then(|_| opt("nfqws2.args", (!r.nfqws2_args.is_empty()).then(|| format!("{}\n", r.nfqws2_args.join("\n"))), false))
+                // прокси Telegram через WebSocket (модуль tgws): порт и запасной путь; нет файла — не нужен
+                .and_then(|_| opt("tgws.args", r.tgws.as_ref().map(|t| tgws_args(t, &r.policy).join("\n") + "\n"), false))
             {
                 return Response::error(500, "write_failed", m);
             }
@@ -289,6 +291,18 @@ fn render_cmd(cfg: &str, secrets: &str, out: &str) -> Response {
 /// Файл dnsmasq: наборы ipset доменов правил, резолвер туннеля и блокировка рекламы. Список рекламы — скачанный службой
 /// (`MI_TT_ADBLOCK_LIST`, копия в RAM), иначе `adblock.list` рядом с настройками (загрузка через CLI/API).
 /// Пустой — файла нет. Ошибочный список рекламы — отказ (действующие файлы не меняются).
+/// Параметры mi-tt-tgws: порт, запасной путь — TUN туннеля (и метка, когда туннель один: поле номера не нужно).
+fn tgws_args(t: &render::TgWsRender, policy: &mi_tt::plan::PolicySpec) -> Vec<String> {
+    let mut a = vec!["--listen".to_string(), format!("0.0.0.0:{}", mi_tt::plan::TGWS_PORT)];
+    if let Some(dev) = &t.via_dev {
+        a.extend(["--via-device".to_string(), dev.clone()]);
+        if !policy.needs_field() {
+            a.extend(["--via-mark".to_string(), format!("0x{:x}", mi_tt::plan::NF_MARK)]);
+        }
+    }
+    a
+}
+
 fn tunnel_dns_args(config: &model::Config, r: &render::Rendered) -> Option<Vec<String>> {
     let dev = r.dns_dev.as_deref()?;
     if r.tunnels.is_empty() || r.dns.tunnel_domains.is_empty() {

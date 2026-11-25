@@ -154,4 +154,15 @@ export default {
   'Весь интернет через VPN: {name}': '全部流量走 VPN：{name}',
   'Весь интернет': '全部流量',
   '«Весь интернет» — у этого устройства через VPN идут все сайты, а не только выбранные. Исключения и сайты с обходом блокировок действуют и для него.': '「全部流量」：该设备的所有网站都走 VPN，而不仅是所选网站。例外和绕过封锁的网站对它同样有效。',
+  // Telegram через WebSocket (модуль tgws)
+  "через WebSocket Telegram, без VPN-сервера": "通过 Telegram WebSocket，无需 VPN 服务器",
+  "через WebSocket: {n}": "经 WebSocket：{n}",
+  "Если WS не работает": "WS 不可用时",
+  "Запасной путь Telegram, если WebSocket не работает": "WebSocket 不可用时 Telegram 的备用路径",
+  "через VPN «{name}»": "经 VPN「{name}」",
+  "Нужен модуль tgws — без него Telegram идёт запасным путём.": "需要 tgws 模块；没有它时 Telegram 走备用路径。",
+  "Через WebSocket": "经 WebSocket",
+  "если не работает — через «{name}»": "不可用时经「{name}」",
+  "если не работает — напрямую": "不可用时直连",
+  "Telegram через WebSocket": "Telegram 经 WebSocket",
 }

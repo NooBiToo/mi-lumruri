@@ -154,4 +154,15 @@ export default {
   'Весь интернет через VPN: {name}': 'Whole internet via VPN: {name}',
   'Весь интернет': 'Whole internet',
   '«Весь интернет» — у этого устройства через VPN идут все сайты, а не только выбранные. Исключения и сайты с обходом блокировок действуют и для него.': '“Whole internet” sends all sites from this device through the VPN, not only the selected ones. Exceptions and DPI-bypass sites still apply to it.',
+  // Telegram через WebSocket (модуль tgws)
+  "через WebSocket Telegram, без VPN-сервера": "through Telegram WebSocket, no VPN server",
+  "через WebSocket: {n}": "through WebSocket: {n}",
+  "Если WS не работает": "If WS fails",
+  "Запасной путь Telegram, если WebSocket не работает": "Telegram fallback when WebSocket fails",
+  "через VPN «{name}»": "through VPN \"{name}\"",
+  "Нужен модуль tgws — без него Telegram идёт запасным путём.": "The tgws module is needed; without it Telegram uses the fallback.",
+  "Через WebSocket": "Through WebSocket",
+  "если не работает — через «{name}»": "if it fails: through \"{name}\"",
+  "если не работает — напрямую": "if it fails: direct",
+  "Telegram через WebSocket": "Telegram through WebSocket",
 }

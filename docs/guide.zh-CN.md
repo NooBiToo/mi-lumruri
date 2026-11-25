@@ -2,7 +2,7 @@
 
 [Русский](guide.md) · [English](guide.en.md) · **简体中文**
 
-本说明适用于 Mi Lumruri 0.15.0 版本。安装包文件名为 `mi-lumruri-*.tar`，在路由器上安装包位于 `/data/mi-lumruri` 和 `/tmp/mi-lumruri`。0.5.0 之前项目名为 mi-trusttunnel：在旧版本之上安装 0.5.0 时，会自动把 `/data/mi-trusttunnel` 连同全部设置移动到 `/data/mi-lumruri`，并在原位置留下链接。发布版中除主安装包外还有一份名为 `mi-trusttunnel-*.tar` 的副本，供 0.4 版本面板中的更新功能查找。
+本说明适用于 Mi Lumruri 0.16.0 版本。安装包文件名为 `mi-lumruri-*.tar`，在路由器上安装包位于 `/data/mi-lumruri` 和 `/tmp/mi-lumruri`。0.5.0 之前项目名为 mi-trusttunnel：在旧版本之上安装 0.5.0 时，会自动把 `/data/mi-trusttunnel` 连同全部设置移动到 `/data/mi-lumruri`，并在原位置留下链接。发布版中除主安装包外还有一份名为 `mi-trusttunnel-*.tar` 的副本，供 0.4 版本面板中的更新功能查找。
 
 你需要：固件版本为 1.1.38 的 BE7000（RC06）、可从家庭网络通过 SSH 获得的 root 权限、安装用 TAR 包，以及你的 TrustTunnel 服务器参数。官方发布的原厂固件通常默认关闭 SSH。
 
@@ -285,6 +285,8 @@ trusttunnel_endpoint vpn.toml hosts.toml -c <用户名> -a <IP:端口>
 模块为软件包添加新的 VPN 协议：VLESS、Hysteria2、AmneziaWG 等。模块体积较大，路由器内存放不下，因此安装在插入路由器 USB 接口的 U 盘上；如果内部存储空间足够，也可以安装在内部存储中。**「存储」** 卡片显示内部存储和已连接的 U 盘：厂商和型号、可用空间、路径和文件系统。路由器每分钟检查一次存储设备，新插入的 U 盘会自动出现。
 
 **流量日志**（「模块」页面上的卡片）按天保存流量汇总（总量、经 VPN 及按设备），保留 1、2、3、6、12 或 24 个月。选择保留时长和存储位置：U 盘（推荐）或内部存储；面板会显示所需空间（每天约 1.5 KB）。按路由器本地时间计算天数。日志所在的 U 盘缺失期间不写入日志，「流量」中的一天和一周照常统计。
+
+**tgws 模块**让 Telegram 不经 VPN 服务器、通过 WebSocket 连接（自有的 Rust 程序 mi-tt-tgws，约 1 MB，也可放在内部存储中）。「网站」中的 Telegram 卡片会多出第四个选项 **WS**。路由器拦截设备到 Telegram 数据中心的连接，并经 Telegram 网页版入口转发：通过 TLS 的 WebSocket 连接到 `kws<N>.web.telegram.org`，在运营商的过滤系统看来是访问网页版的 HTTPS，而不是 MTProto 协议。无需在 Telegram 应用中设置代理，网络中的所有设备都可使用。**「WS 不可用时」** 一行设置备用路径：经所选 VPN 服务器（默认）或直连。当 WebSocket 入口无响应（失败后一分钟内直接走备用路径）、发往 Telegram 地址的流量不是 MTProto（Telegram 网站），或模块未运行（U 盘被拔出）时，连接走备用路径；此时路由器会立即把 Telegram 规则按备用路径应用。Telegram 通话使用 UDP，不经过 WebSocket。「诊断」会检查该入口（「Telegram 经 WebSocket」一行）。思路来自 [tg-ws-proxy](https://github.com/Flowseal/tg-ws-proxy)（MIT）；与之不同，这里是透明模式，无需在客户端设置 MTProto 代理。
 
 **amneziawg 模块**提供 AmneziaWG 服务器：从源码构建的 amneziawg-go 程序（存储设备上约 1 MB，内存中约 3 MB）。安装、更新和删除方式与 sing-box 模块相同（见下文）。
 

@@ -127,10 +127,25 @@ else
   ch zapret skip "обход блокировок не используется"
 fi
 
+# Telegram через WebSocket: прокси запущен, вход WebSocket DC 2 отвечает (первый запрос MTProto); иначе Telegram
+# идёт запасным путём — это не ошибка, но стоит знать
+if [ -f "$RENDER/tgws.args" ]; then
+  if ! [ -x "$(module_bin tgws)" ]; then ch tgws bad "модуль tgws не установлен или накопитель недоступен — Telegram идёт запасным путём"
+  elif ! pid_alive tgws; then ch tgws bad "прокси не запущен — Telegram идёт запасным путём"
+  else
+    o="$("$(module_bin tgws)" --probe 2 2>/dev/null)"
+    ms="$(printf '%s' "$o" | sed -n 's/.*"ms":\([0-9]*\).*/\1/p')"
+    if [ -n "$ms" ]; then ch tgws ok "WebSocket Telegram отвечает (DC 2, $ms мс)"
+    else ch tgws bad "WebSocket Telegram не отвечает: $(printf '%s' "$o" | sed -n 's/.*"error":"\([^"]*\)".*/\1/p') — Telegram идёт запасным путём"; fi
+  fi
+else
+  ch tgws skip "Telegram через WebSocket не используется"
+fi
+
 # программы, которые падают и перезапускаются по кругу (служба проверяет их раз в несколько секунд)
 # считаются только перезапуски за последние 10 минут (служба пишет их время в $STATE/restarts)
 since=$(( $(date +%s) - 600 )); loop=""; recent=""
-for e in trusttunnel nfqws2 dnsproxy dnstunnel; do
+for e in trusttunnel nfqws2 dnsproxy dnstunnel tgws; do
   c=$(awk -v s="$since" -v e="$e" '$1 >= s && $2 == e' "$STATE/restarts" 2>/dev/null | wc -l)
   if [ "$c" -ge 3 ]; then
     last="$(tail -n 1 "$LOG/$e.log" 2>/dev/null | cut -c1-120)"

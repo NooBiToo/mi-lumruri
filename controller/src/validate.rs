@@ -420,6 +420,11 @@ pub fn validate_config(c: &Config) -> Vec<Issue> {
         check_rule_refs(&mut issues, &format!("rules[{i}]"), r, &idx);
     }
     check_action(&mut issues, "default_action", &c.default_action, &idx);
+    if let Some(via) = c.tgws.as_ref().and_then(|t| t.via.as_deref()) {
+        if !idx.profiles.contains_key(via) {
+            issues.push(Issue::new("tgws.via", "unknown_profile", format!("VPN-профиль «{via}» не найден")));
+        }
+    }
     if let Some(d) = &c.dns {
         check_dns(&mut issues, d);
     }
@@ -606,6 +611,9 @@ pub fn check_destination(issues: &mut Vec<Issue>, path: &str, d: &Destination, i
 }
 
 fn check_action(issues: &mut Vec<Issue>, path: &str, a: &Action, idx: &Index) {
+    if matches!(a, Action::TgWs) && path.starts_with("default_action") {
+        issues.push(Issue::new(path, "tg_ws_default", "Telegram через WebSocket — только для правил с сайтами Telegram"));
+    }
     if let Action::Profile { id } = a {
         if !idx.profiles.contains_key(id.as_str()) {
             issues.push(Issue::new(format!("{path}.id"), "unknown_profile", format!("VPN-профиль «{id}» не найден")));

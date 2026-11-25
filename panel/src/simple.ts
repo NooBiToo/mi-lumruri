@@ -5,11 +5,12 @@
 // - категории `svc-<id>` (домены) и `svc-<id>-ip` (подсети IPv4) отмеченных списков; файлы списков служба роутера
 //   кладёт в categories/ сама по каталогу релиза;
 // - группы `vpn-sites` (списки и свои домены), `zapret-sites` (сайты с обходом блокировок без VPN: списки и домены),
-//   `vpn-except` (исключения), `vpn-all` (весь IPv4: 0.0.0.0/1 и 128.0.0.0/1); сервис каталога — либо в `vpn-sites`,
-//   либо в `zapret-sites`, не в обеих (категория `svc-<id>` одна);
+//   `vpn-except` (исключения), `vpn-all` (весь IPv4: 0.0.0.0/1 и 128.0.0.0/1), `tgws-sites` (Telegram через
+//   WebSocket, модуль tgws); сервис каталога — только в одной из них (категория `svc-<id>` одна);
 // - устройства `dev-<mac без двоеточий>` — только выбранные;
 // - для каждого источника (`lan` или выбранное устройство) по порядку: `except-<src>` → `vpn-except` → «остальные
-//   сайты»; `zapret-<src>` → `zapret-sites` → напрямую с Zapret; `vpn-<src>` → `vpn-sites` (режим «выбранные») или
+//   сайты»; `zapret-<src>` → `zapret-sites` → напрямую с Zapret; `tgws-<src>` → `tgws-sites` → Telegram через
+//   WebSocket (запасной путь — `tgws.via`: профиль или напрямую); `vpn-<src>` → `vpn-sites` (режим «выбранные») или
 //   `vpn-all` (режим «всё») → профиль. Исключения важнее всего, а сайты с обходом не уходят в VPN и в режиме «всё»;
 // - устройства «весь интернет через VPN» (режим «выбранные»): перед правилами источников — `except-<dev>`,
 //   `zapret-<dev>` и `vpnall-<dev>` → `vpn-all` → профиль;
@@ -48,6 +49,10 @@ export interface Simple {
   serviceServer?: Record<string, string>
   /** Устройства «весь интернет через VPN» через другой сервер: MAC → id профиля. */
   deviceServer?: Record<string, string>
+  /** Сервисы через WebSocket (модуль tgws, только Telegram); с `services` и `zapretServices` не пересекаются. */
+  wsServices?: string[]
+  /** Запасной путь WebSocket: id профиля (через VPN) или '' (напрямую); undefined — не выбирался. */
+  tgwsVia?: string
 }
 
 /** Устройство, известное панели (аренды DHCP и настройки); `name` — как его показывать и сохранять. */
@@ -61,6 +66,9 @@ export const SITES = 'vpn-sites'
 export const ZAPRET_SITES = 'zapret-sites'
 export const EXCEPT = 'vpn-except'
 export const ALL = 'vpn-all'
+export const TG_SITES = 'tgws-sites'
+/** Сервисы, которые умеют идти через WebSocket (модуль tgws): только Telegram. */
+export const WS_SERVICES = ['telegram']
 /** Группа сервисов сервера, кроме сервера по умолчанию: `vpn-sites--<id профиля>`. */
 export const SITES_AT = `${SITES}--`
 const REST_ON = 'rest-lan'
@@ -73,20 +81,22 @@ export function defaultSimple(): Simple {
 }
 
 /** Как открывается сервис каталога: через VPN, напрямую с обходом блокировок (Zapret) или как все остальные сайты. */
-export type ServiceRoute = 'vpn' | 'zapret' | 'off'
-type ServiceLists = Pick<Simple, 'services' | 'zapretServices'>
+export type ServiceRoute = 'vpn' | 'zapret' | 'ws' | 'off'
+type ServiceLists = Pick<Simple, 'services' | 'zapretServices' | 'wsServices'>
 
 export function serviceRoute(s: ServiceLists, id: string): ServiceRoute {
-  return s.services.includes(id) ? 'vpn' : s.zapretServices.includes(id) ? 'zapret' : 'off'
+  return s.services.includes(id) ? 'vpn' : s.zapretServices.includes(id) ? 'zapret' : s.wsServices?.includes(id) ? 'ws' : 'off'
 }
 
 /** Списки сервисов после выбора `route` для `id`: сервис остаётся не больше чем в одном из них. */
 export function setServiceRoute(s: ServiceLists, id: string, route: ServiceRoute): ServiceLists {
   const services = s.services.filter((x) => x !== id)
   const zapretServices = s.zapretServices.filter((x) => x !== id)
+  const wsServices = (s.wsServices ?? []).filter((x) => x !== id)
   if (route === 'vpn') services.push(id)
   if (route === 'zapret') zapretServices.push(id)
-  return { services, zapretServices }
+  if (route === 'ws' && WS_SERVICES.includes(id)) wsServices.push(id)
+  return { services, zapretServices, wsServices: wsServices.length ? wsServices : undefined }
 }
 
 /** MAC в виде aa:bb:cc:dd:ee:ff или null, если это не MAC устройства (как normalize_mac контроллера). */
@@ -141,6 +151,7 @@ export function toConfig(base: Config, s: Simple, lan: Lan, catalog: ListCatalog
   const services = [...new Set(s.services)].filter((id) => byId.has(id))
   // сервис и в VPN, и с обходом остаётся в VPN: категория у сервиса одна
   const zapretServices = [...new Set(s.zapretServices)].filter((id) => byId.has(id) && !services.includes(id))
+  const wsServices = [...new Set(s.wsServices ?? [])].filter((id) => byId.has(id) && WS_SERVICES.includes(id) && !services.includes(id) && !zapretServices.includes(id))
   const categories: Category[] = []
   const addServices = (ids: string[], into: Destination[]) => {
     for (const id of ids) {
@@ -174,12 +185,15 @@ export function toConfig(base: Config, s: Simple, lan: Lan, catalog: ListCatalog
   const zapretSites: Destination[] = []
   addServices(zapretServices, zapretSites)
   for (const d of uniqueDomains(s.zapretDomains)) zapretSites.push({ type: 'domain_suffix', value: d })
+  const wsSites: Destination[] = []
+  addServices(wsServices, wsSites)
   const except: Destination[] = uniqueDomains(s.exceptions).map((value) => ({ type: 'domain_suffix', value }))
 
   const groups: Group[] = []
   if (sites.length) groups.push(group(SITES, 'Сайты через VPN', sites))
   for (const [pid, d] of atSites) groups.push(group(SITES_AT + pid, `Сайты через VPN (${pid})`, d))
   if (zapretSites.length) groups.push(group(ZAPRET_SITES, 'Сайты с обходом блокировок', zapretSites))
+  if (wsSites.length) groups.push(group(TG_SITES, 'Telegram через WebSocket', wsSites))
   if (except.length) groups.push(group(EXCEPT, 'Исключения', except))
   groups.push(group(ALL, 'Весь интернет', ALL_NETS))
 
@@ -221,12 +235,15 @@ export function toConfig(base: Config, s: Simple, lan: Lan, catalog: ListCatalog
     const src: Source = { type: 'device', id: key }
     if (except.length) rules.push(rule(`except-${key}`, src, EXCEPT, rest, s.enabled))
     if (zapretSites.length) rules.push(rule(`zapret-${key}`, src, ZAPRET_SITES, { type: 'direct_zapret' }, true))
+    if (wsSites.length) rules.push(rule(`tgws-${key}`, src, TG_SITES, { type: 'tg_ws' }, s.enabled))
     rules.push(rule(`vpnall-${key}`, src, ALL, deviceTo(mac), s.enabled))
   }
   for (const [key, src] of sources) {
     if (except.length) rules.push(rule(`except-${key}`, src, EXCEPT, rest, s.enabled))
     // обход блокировок без VPN от VPN не зависит: правило включено и при выключенном VPN
     if (zapretSites.length) rules.push(rule(`zapret-${key}`, src, ZAPRET_SITES, { type: 'direct_zapret' }, true))
+    // Telegram через WebSocket выключается вместе с VPN: его запасной путь — VPN
+    if (wsSites.length) rules.push(rule(`tgws-${key}`, src, TG_SITES, { type: 'tg_ws' }, s.enabled))
     for (const [pid] of atSites) rules.push(rule(`vpn-${key}--${pid}`, src, SITES_AT + pid, toProfile(pid), s.enabled))
     if (vpnTarget) rules.push(rule(`vpn-${key}`, src, vpnTarget, toVpn, s.enabled))
   }
@@ -250,6 +267,7 @@ export function toConfig(base: Config, s: Simple, lan: Lan, catalog: ListCatalog
   if (base.device_names && Object.keys(base.device_names).length) out.device_names = base.device_names
   if (base.panel_origins?.length) out.panel_origins = base.panel_origins
   if (base.history) out.history = base.history
+  if (s.tgwsVia !== undefined) out.tgws = s.tgwsVia && known_.has(s.tgwsVia) ? { via: s.tgwsVia } : {}
   return out
 }
 
@@ -295,8 +313,11 @@ export function fromConfig(cfg: Config): FromConfig {
   const customDomains: string[] = []
   const zapretServices: string[] = []
   const zapretDomains: string[] = []
-  const bad = readSites(SITES, services, customDomains) ?? readSites(ZAPRET_SITES, zapretServices, zapretDomains)
+  const wsServices: string[] = []
+  const wsDomains: string[] = []
+  const bad = readSites(SITES, services, customDomains) ?? readSites(ZAPRET_SITES, zapretServices, zapretDomains) ?? readSites(TG_SITES, wsServices, wsDomains)
   if (bad) return notSimple(bad)
+  if (wsDomains.length) return notSimple(t('в списке сайтов есть записи, добавленные вручную'))
   // сервисы других серверов
   const serviceServer: Record<string, string> = {}
   for (const g of cfg.groups.filter((x) => x.id.startsWith(SITES_AT))) {
@@ -353,10 +374,12 @@ export function fromConfig(cfg: Config): FromConfig {
   if (vpnAll.length) simple.vpnAll = vpnAll
   if (Object.keys(serviceServer).length) simple.serviceServer = serviceServer
   if (Object.keys(deviceServer).length) simple.deviceServer = deviceServer
+  if (wsServices.length) simple.wsServices = wsServices
+  if (cfg.tgws) simple.tgwsVia = cfg.tgws.via ?? ''
 
   // проверка: из этих ответов получаются ровно те же настройки
   const catalog: ListCatalog = { source: '', commit: '', date: '', services: [] }
-  for (const id of [...services, ...zapretServices]) {
+  for (const id of [...services, ...zapretServices, ...wsServices]) {
     const dom = cfg.categories?.find((c) => c.id === `svc-${id}`)
     const ip = cfg.categories?.find((c) => c.id === `svc-${id}-ip`)
     const path = (c: Category | undefined) => (c?.source?.startsWith(SOURCE_PREFIX) ? c.source.slice(SOURCE_PREFIX.length) : '')

@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import InputText from 'primevue/inputtext'
-import { Search, Server } from 'lucide-vue-next'
+import { Search, Server, Unplug } from 'lucide-vue-next'
+import { manage } from '../api'
 import { build, buildBlocker, catalog, knownDevicesNow, profiles, save, scrollTarget, serverReady, simple, simpleState } from '../store'
 import { usesZapret } from '../status'
-import { normalizeDomain, serviceRoute, setServiceRoute, type ServiceRoute, type Simple } from '../simple'
+import { normalizeDomain, serviceRoute, setServiceRoute, WS_SERVICES, type ServiceRoute, type Simple } from '../simple'
 import { useAutosave, type Blocker } from '../autosave'
 import { t } from '../i18n'
 import ManualBanner from './ManualBanner.vue'
@@ -13,17 +14,20 @@ import ServiceLogo from '../components/ServiceLogo.vue'
 import DomainList from '../components/DomainList.vue'
 import ListsCard from '../components/ListsCard.vue'
 
-const emit = defineEmits<{ navigate: [tab: 'server' | 'devices' | 'zapret'] }>()
+const emit = defineEmits<{ navigate: [tab: 'server' | 'devices' | 'zapret' | 'modules'] }>()
 
 // ---- черновик экрана ----
 interface Draft {
   mode: Simple['mode']; services: string[]; zapretServices: string[]; custom: string[]; zapret: string[]; except: string[]; rest: Simple['rest']
   /** Сервисы через другой сервер: id сервиса → id профиля. */
   server: Record<string, string>
+  /** Сервисы через WebSocket (Telegram) и запасной путь: id профиля или '' (напрямую); undefined — не выбирался. */
+  wsServices: string[]
+  tgwsVia: string | undefined
 }
 const toDraft = (s: Simple): Draft => ({
   mode: s.mode, services: [...s.services], zapretServices: [...s.zapretServices], custom: [...s.customDomains], zapret: [...s.zapretDomains],
-  except: [...s.exceptions], rest: s.rest, server: { ...(s.serviceServer ?? {}) },
+  except: [...s.exceptions], rest: s.rest, server: { ...(s.serviceServer ?? {}) }, wsServices: [...(s.wsServices ?? [])], tgwsVia: s.tgwsVia,
 })
 /** Отметки серверов только у сервисов через VPN и только для другого существующего сервера; пусто — undefined. */
 function cleanServers(d: Draft): Record<string, string> | undefined {
@@ -41,6 +45,7 @@ const next = computed<Simple | null>(() => simple.value && draft.value ? {
   ...simple.value, mode: draft.value.mode, services: [...draft.value.services].sort(), customDomains: domains(draft.value.custom),
   zapretServices: [...draft.value.zapretServices].sort(), zapretDomains: domains(draft.value.zapret),
   exceptions: domains(draft.value.except), rest: draft.value.rest, serviceServer: cleanServers(draft.value),
+  wsServices: draft.value.wsServices.length ? [...draft.value.wsServices].sort() : undefined, tgwsVia: draft.value.tgwsVia,
 } : null)
 const dirty = computed(() => {
   const a = simple.value, b = next.value
@@ -48,6 +53,7 @@ const dirty = computed(() => {
   return a.mode !== b.mode || a.rest !== b.rest || !sameList([...a.services].sort(), b.services) || !sameList(a.customDomains, b.customDomains)
     || !sameList([...a.zapretServices].sort(), b.zapretServices) || !sameList(a.zapretDomains, b.zapretDomains) || !sameList(a.exceptions, b.exceptions)
     || serversJson(a.serviceServer) !== serversJson(b.serviceServer)
+    || !sameList([...(a.wsServices ?? [])].sort(), b.wsServices ?? []) || a.tgwsVia !== b.tgwsVia
 })
 // ---- сервер сервиса (если серверов несколько) ----
 const many = computed(() => profiles.value.length > 1)
@@ -66,8 +72,24 @@ const RESTS = computed(() => [{ value: 'direct' as const, label: t('Напрям
 const ROUTES = computed<{ value: ServiceRoute; label: string; title: string }[]>(() => [
   { value: 'vpn', label: 'VPN', title: t('через VPN') },
   { value: 'zapret', label: 'Zapret', title: t('напрямую с обходом блокировок') },
+  { value: 'ws', label: 'WS', title: t('через WebSocket Telegram, без VPN-сервера') },
   { value: 'off', label: t('Выкл'), title: t('как остальные сайты') },
 ])
+/** Положения сервиса: «WS» — только у Telegram. */
+const routesOf = (id: string) => ROUTES.value.filter((o) => o.value !== 'ws' || WS_SERVICES.includes(id))
+// ---- Telegram через WebSocket: запасной путь и модуль ----
+const tgwsVia = computed(() => draft.value?.tgwsVia ?? profiles.value[0]?.id ?? '')
+function setTgwsVia(v: string) {
+  if (draft.value) draft.value.tgwsVia = v
+}
+/** Модуль tgws: null — ещё неизвестно; false — не установлен или накопитель недоступен. */
+const tgwsModule = ref<boolean | null>(null)
+async function loadTgwsModule() {
+  try {
+    const r = await manage.modules()
+    if (r.status === 200) tgwsModule.value = r.body.modules.some((m) => m.name === 'tgws' && m.installed?.state === 'ok')
+  } catch { /* панель недоступна */ }
+}
 
 // ---- сервисы каталога ----
 const search = ref('')
@@ -91,7 +113,11 @@ const countIn = (g: string) => (catalog.value?.services ?? [])
 const routeOf = (id: string): ServiceRoute => (draft.value ? serviceRoute(draft.value, id) : 'off')
 function setRoute(id: string, route: ServiceRoute) {
   if (!draft.value) return
-  Object.assign(draft.value, setServiceRoute(draft.value, id, route))
+  const r = setServiceRoute(draft.value, id, route)
+  Object.assign(draft.value, { services: r.services, zapretServices: r.zapretServices, wsServices: r.wsServices ?? [] })
+  // первый выбор WS: запасной путь — сервер VPN по умолчанию (если сервер есть), иначе напрямую
+  if (route === 'ws' && draft.value.tgwsVia === undefined) draft.value.tgwsVia = profiles.value[0]?.id ?? ''
+  if (route === 'ws') void loadTgwsModule()
 }
 const servicesSub = computed(() => {
   const d = draft.value
@@ -99,6 +125,7 @@ const servicesSub = computed(() => {
   const parts: string[] = []
   if (d.services.length) parts.push(t('через VPN: {n}', { n: d.services.length }))
   if (d.zapretServices.length) parts.push(t('с обходом блокировок: {n}', { n: d.zapretServices.length }))
+  if (d.wsServices.length) parts.push(t('через WebSocket: {n}', { n: d.wsServices.length }))
   return parts.length ? t('Выбрано {list}', { list: parts.join(', ') }) : t('Ничего не выбрано')
 })
 
@@ -127,6 +154,7 @@ useAutosave({
 const zapretDraft = computed(() => usesZapret(next.value))
 
 onMounted(async () => {
+  if (draft.value?.wsServices.length) void loadTgwsModule()
   // переход с «Дополнительно» на подбор способа: сразу к блоку Zapret
   if (scrollTarget.value) {
     const id = scrollTarget.value
@@ -187,12 +215,26 @@ onMounted(async () => {
                 <ServiceLogo :id="s.id" />
                 <span :id="`svc-${s.id}`" class="tile__name" :title="t(s.name)">{{ t(s.name) }}</span>
                 <div class="route" role="radiogroup" :aria-labelledby="`svc-${s.id}`">
-                  <label v-for="o in ROUTES" :key="o.value" :class="['route__opt', `route__opt--${o.value}`, { 'route__opt--on': routeOf(s.id) === o.value }]" :title="`${t(s.name)}: ${o.title}`">
+                  <label v-for="o in routesOf(s.id)" :key="o.value" :class="['route__opt', `route__opt--${o.value}`, { 'route__opt--on': routeOf(s.id) === o.value }]" :title="`${t(s.name)}: ${o.title}`">
                     <input type="radio" class="route__radio" :name="`route-${s.id}`" :value="o.value" :checked="routeOf(s.id) === o.value"
                       :aria-label="`${o.label}: ${o.title}`" @change="setRoute(s.id, o.value)" />
                     <span>{{ o.label }}</span>
                   </label>
                 </div>
+                <template v-if="routeOf(s.id) === 'ws'">
+                  <label class="tile__via tile__via--ws">
+                    <span class="tile__vialabel"><Unplug :size="14" aria-hidden="true" />{{ t('Если WS не работает') }}</span>
+                    <select class="tile__server tile__viasel" :value="tgwsVia" :aria-label="t('Запасной путь Telegram, если WebSocket не работает')"
+                      @change="setTgwsVia(($event.target as HTMLSelectElement).value)">
+                      <option v-for="p in profiles" :key="p.id" :value="p.id">{{ t('через VPN «{name}»', { name: p.name }) }}</option>
+                      <option value="">{{ t('напрямую') }}</option>
+                    </select>
+                  </label>
+                  <p v-if="tgwsModule === false" class="tile__note">
+                    {{ t('Нужен модуль tgws — без него Telegram идёт запасным путём.') }}
+                    <button type="button" class="link-btn" @click="emit('navigate', 'modules')">{{ t('Открыть «Модули»') }}</button>
+                  </p>
+                </template>
                 <label v-if="many && routeOf(s.id) === 'vpn'" class="tile__via">
                   <span class="tile__vialabel"><Server :size="14" aria-hidden="true" />{{ t('Сервер VPN') }}</span>
                   <select class="tile__server tile__viasel" :value="serverOf(s.id)"

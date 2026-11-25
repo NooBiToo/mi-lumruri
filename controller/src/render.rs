@@ -154,10 +154,19 @@ pub struct Rendered {
     pub dns_dev: Option<String>,
     #[serde(skip)]
     pub dns: DnsPlan,
+    /// Telegram через WebSocket: прокси нужен (запасной путь — TUN туннеля или напрямую).
+    #[serde(skip)]
+    pub tgws: Option<TgWsRender>,
     pub warnings: Vec<String>,
     /// Аргументы nfqws2 (по одному на строку в nfqws2.args), если используется Zapret.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub nfqws2_args: Vec<String>,
+}
+
+/// Прокси Telegram через WebSocket: TUN запасного пути (None — напрямую).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TgWsRender {
+    pub via_dev: Option<String>,
 }
 
 /// Файлы одного туннеля для службы: туннель 0 — в каталоге рендера, n>0 — в `tun<n>/`.
@@ -413,6 +422,7 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
             Action::Direct => Some((Act::Direct, 0)),
             Action::DirectZapret => Some((Act::Zapret, 0)),
             Action::Block => Some((Act::Block, 0)),
+            Action::TgWs => Some((Act::TgWs, 0)),
             Action::Profile { id } => {
                 let p = idx.profiles[id.as_str()];
                 if p.kind.singbox() && secrets.profiles.get(id).is_some_and(|s| s.link.is_none() && s.subscription_url.is_some()) {
@@ -574,6 +584,15 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
             }
         }
     }
+    // Telegram через WebSocket: запасной путь — туннель выбранного сервера (он нужен плану и запускается) или напрямую
+    let uses_tgws = rules.iter().any(|r| r.act == Act::TgWs);
+    let tgws_via = match cfg.tgws.as_ref().and_then(|t| t.via.clone()).filter(|_| uses_tgws) {
+        Some(id) => match act_of(&Action::Profile { id }, "tgws.via", &mut issues) {
+            Some((Act::Tunnel, n)) => Some(n),
+            _ => None,
+        },
+        None => None,
+    };
     if !issues.is_empty() {
         return Err(issues);
     }
@@ -694,6 +713,7 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
         v6_tun,
         down: Vec::new(),
         masq: tunnels.iter().filter(|t| t.engine == Engine::AmneziaWg).map(|t| t.dev.clone()).collect(),
+        tgws_via,
     };
     if cfg.ipv6_via_vpn && !tunnels.is_empty() && tunnel_all.is_empty() {
         warnings.push("IPv6 через VPN действует только для «всё через VPN»: при выборе отдельных сайтов IPv6 устройств закрыт".into());
@@ -715,6 +735,7 @@ pub fn render(cfg: &Config, secrets: &Secrets, lists: &Lists) -> Result<Rendered
         routes,
         tunnels,
         dns_dev: (!dns.tunnel_domains.is_empty()).then(|| tun_device(dns_tun)),
+        tgws: uses_tgws.then(|| TgWsRender { via_dev: tgws_via.map(tun_device) }),
         dns,
         warnings,
     })

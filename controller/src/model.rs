@@ -46,6 +46,9 @@ pub struct Config {
     /// Журнал трафика по дням (срок и накопитель); без него — только сутки и неделя.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub history: Option<HistoryConfig>,
+    /// Telegram через WebSocket: куда идут соединения, когда WebSocket не работает.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tgws: Option<TgWsConfig>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
@@ -569,6 +572,15 @@ pub enum Source {
     Lan,
 }
 
+/// Запасной путь Telegram через WebSocket: через сервер VPN (`via` — профиль) или напрямую (`via` не задан). Вход
+/// WebSocket для DC не задан или не отвечает, поток не MTProto, модуль не запущен — соединение идёт этим путём.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TgWsConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
@@ -576,6 +588,8 @@ pub enum Action {
     Direct,
     DirectZapret,
     Block,
+    /// Telegram через WebSocket (модуль tgws): MTProto к дата-центрам — через вход веб-версии; запасной путь — `Config.tgws`.
+    TgWs,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

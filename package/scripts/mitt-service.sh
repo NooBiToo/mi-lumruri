@@ -13,7 +13,7 @@ engines_stop() {
   for f in "$STATE"/trusttunnel*.wanted "$STATE"/trusttunnel*.pid "$STATE"/singbox*.wanted "$STATE"/singbox*.pid "$STATE"/awg*.wanted "$STATE"/awg*.pid; do
     [ -e "$f" ] || continue; n="$(basename "$f")"; n="${n%.*}"; rm -f "$STATE/$n.wanted"; pid_stop "$n"
   done
-  for n in nfqws2 dnsproxy dnstunnel; do rm -f "$STATE/$n.wanted"; pid_stop "$n"; done
+  for n in nfqws2 dnsproxy dnstunnel tgws; do rm -f "$STATE/$n.wanted"; pid_stop "$n"; done
   # прежний TUN удаляется ядром не сразу: новый клиент и ожидание ниже не должны застать старый mitt<n>
   ctl wait 10000 tun-gone mitt0
   for d in "$SYS"/class/net/mitt*; do [ -e "$d" ] && ctl wait 10000 tun-gone "$(basename "$d")"; done
@@ -56,6 +56,18 @@ engines_start() {
   done
   # TUN должен быть поднят и с адресом до apply: маршрут таблицы 3100+n ссылается на него
   for n in $started; do ctl wait 15000 tun-up "mitt$n"; done
+  # Telegram через WebSocket — из модуля tgws в RAM, после туннелей (запасной путь — через TUN). Модуля нет — не
+  # запускается: mi-tt-admin видит, что порт не слушается, и применяет правила Telegram запасным путём
+  if [ -f "$RENDER/tgws.args" ]; then
+    if [ -x "$(module_bin tgws)" ]; then
+      touch "$STATE/tgws.wanted"
+      # shellcheck disable=SC2046
+      pid_alive tgws || start_bg tgws ${MITT_TGWS_WRAP:-} "$(module_bin tgws)" $(cat "$RENDER/tgws.args") --status "$STATE/tgws.json"
+      ctl wait 3000 ok -- sh -c 'grep -q ":480B 00000000:0000 0A" /proc/net/tcp'
+    else
+      mlog "Telegram через WebSocket: модуль tgws недоступен — Telegram идёт запасным путём"
+    fi
+  fi
   if [ -f "$RENDER/nfqws2.args" ]; then
     touch "$STATE/nfqws2.wanted"
     # аргументы по одному в строке, без пробелов (формирует рендер)
@@ -154,7 +166,7 @@ while [ -f "$STATE/service.wanted" ]; do
   if ! pid_alive adblock-update && adblock_due; then
     start_bg adblock-update sh "$SCR/mitt-adblock.sh"
   fi
-  for e in $(tun_procs) nfqws2 dnsproxy dnstunnel; do
+  for e in $(tun_procs) nfqws2 dnsproxy dnstunnel tgws; do
     if [ -f "$STATE/$e.wanted" ] && ! pid_alive "$e"; then
       mlog "движок $e завершился — перезапуск"
       # время перезапусков — для диагностики (падения по кругу за последние минуты), последние 50

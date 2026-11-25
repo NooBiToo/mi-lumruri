@@ -28,6 +28,8 @@ export interface Endpoint {
 }
 export type TlsProfile = 'chrome' | 'chrome_canary' | 'safari' | 'firefox' | 'okhttp' | 'openssl' | 'boringssl'
 /** Профиль TrustTunnel; backup — запасной сервер (пароль — backup_password в секретах). */
+/** Telegram через WebSocket: запасной путь — профиль (через VPN) или напрямую (via не задан). */
+export interface TgWsConfig { via?: string }
 export interface Profile { id: string; name: string; kind: ProfileKind; on_failure: 'block' | 'direct'; tunnel?: number; endpoint?: Endpoint; backup?: Endpoint; prefer_fastest?: boolean; proxy?: ProxyInfo; sub_pick?: string; sub_auto?: boolean }
 export interface Network { id: string; name: string; ssid: string; segment?: string; subnet?: string; bridge?: string; ports?: string[] }
 export interface Device { id: string; name: string; mac: string; network: string }
@@ -75,7 +77,7 @@ export interface ProfileSecret { password?: string; subscription_url?: string; b
 export interface Group { id: string; name: string; destinations: Destination[] }
 
 export type Source = { type: 'device'; id: string } | { type: 'network'; id: string } | { type: 'lan' }
-export type Action = { type: 'profile'; id: string } | { type: 'direct' } | { type: 'direct_zapret' } | { type: 'block' }
+export type Action = { type: 'profile'; id: string } | { type: 'direct' } | { type: 'direct_zapret' } | { type: 'block' } | { type: 'tg_ws' }
 
 export interface Rule { id: string; source: Source; destination: Destination; action: Action; enabled: boolean }
 
@@ -100,6 +102,8 @@ export interface Config {
   panel_origins?: string[]
   /** Журнал трафика по дням: срок в месяцах и накопитель (путь из GET /storage). */
   history?: { months: number; target: string }
+  /** Telegram через WebSocket: запасной путь. */
+  tgws?: TgWsConfig
 }
 
 export interface Issue { path: string; code: string; message: string }

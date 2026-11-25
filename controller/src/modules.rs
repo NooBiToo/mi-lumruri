@@ -84,8 +84,14 @@ fn etc_path(config_path: &str) -> PathBuf {
     Path::new(config_path).with_file_name("modules.json")
 }
 
-fn used_by(config_path: &str, kinds: &[ProfileKind]) -> Vec<String> {
-    crate::manage::read_config(config_path).map(|c| c.profiles.iter().filter(|p| kinds.contains(&p.kind)).map(|p| p.name.clone()).collect()).unwrap_or_default()
+fn used_by(config_path: &str, name: &str, kinds: &[ProfileKind]) -> Vec<String> {
+    let Ok(c) = crate::manage::read_config(config_path) else { return Vec::new() };
+    let mut v: Vec<String> = c.profiles.iter().filter(|p| kinds.contains(&p.kind)).map(|p| p.name.clone()).collect();
+    // модуль tgws — у правил «Telegram через WebSocket», а не у серверов
+    if name == "tgws" && c.rules.iter().any(|r| r.action == crate::model::Action::TgWs) {
+        v.push("Telegram через WebSocket".into());
+    }
+    v
 }
 
 /// `GET /modules`.
@@ -107,7 +113,7 @@ pub fn get(config_path: &str) -> Response {
                 "installed": i.map(|i| json!({ "version": i.version, "path": i.path, "installed": i.installed,
                     "state": state.get(&m.name).and_then(|s| s.get("state")).cloned().unwrap_or(json!("unknown")),
                     "update": i.version != m.version })),
-                "used_by": used_by(config_path, &m.kinds),
+                "used_by": used_by(config_path, &m.name, &m.kinds),
             })
         })
         .collect();
@@ -178,9 +184,9 @@ pub fn remove(body: &[u8], config_path: &str) -> Response {
     }
     let cat = load_catalog(&crate::manage::run_dir().join("modules-catalog.json"));
     let kinds = cat.modules.iter().find(|m| m.name == q.name).map(|m| m.kinds.clone()).unwrap_or_default();
-    let used = used_by(config_path, &kinds);
+    let used = used_by(config_path, &q.name, &kinds);
     if !used.is_empty() {
-        return Response::error(409, "module_in_use", format!("модуль используют серверы: {}. Сначала удалите их", used.join(", ")));
+        return Response::error(409, "module_in_use", format!("модуль используется: {}. Сначала выберите другой путь", used.join(", ")));
     }
     queue(json!({ "action": "remove", "name": q.name, "requested_unix": crate::auth::now() }))
 }

@@ -533,7 +533,7 @@ rom_track() {
 tun_procs() { tunnels_list | awk '{ if ($4 == "sing-box") print "singbox" $1; else if ($4 == "amneziawg") print "awg" $1; else if ($1 == 0) print "trusttunnel"; else print "trusttunnel" $1 }'; }
 status_write() {
   local e="" n
-  for n in $(tun_procs) nfqws2 nginx uhttpd service; do
+  for n in $(tun_procs) nfqws2 tgws nginx uhttpd service; do
     if pid_alive "$n"; then e="$e\"$n\":true,"; elif [ -f "$STATE/$n.wanted" ]; then e="$e\"$n\":false,"; fi
   done
   # render — итог последнего рендера (ok, error), apply — последнего полного применения (exit, error)

@@ -181,6 +181,25 @@ describe('simple', () => {
     expect(again.devices[0]?.name).toBe('Телевизор')
   })
 
+  it('Telegram через WebSocket: группа, правило tg_ws, запасной путь и туда-обратно', () => {
+    const s = simple({ services: ['youtube'], wsServices: ['telegram'], tgwsVia: 'tt' })
+    const c = toConfig(base, s, lan, catalog, known)
+    expect(c.groups.find((g) => g.id === 'tgws-sites')?.destinations).toEqual([{ type: 'category', id: 'svc-telegram' }, { type: 'category', id: 'svc-telegram-ip' }])
+    expect(c.rules.filter((r) => r.enabled).map((r) => [r.id, r.action])).toEqual([['tgws-lan', { type: 'tg_ws' }], ['vpn-lan', { type: 'profile', id: 'tt' }]])
+    expect(c.tgws).toEqual({ via: 'tt' })
+    expect(roundTrip(s)).toEqual({ canonical: true, simple: s })
+    // напрямую; с выключенным VPN правило выключено, выбор сохраняется
+    const direct = simple({ wsServices: ['telegram'], tgwsVia: '' })
+    expect(toConfig(base, direct, lan, catalog, known).tgws).toEqual({})
+    expect(roundTrip(direct)).toEqual({ canonical: true, simple: direct })
+    const off = simple({ enabled: false, wsServices: ['telegram'], tgwsVia: 'tt' })
+    expect(toConfig(base, off, lan, catalog, known).rules.find((r) => r.id === 'tgws-lan')?.enabled).toBe(false)
+    expect(roundTrip(off)).toEqual({ canonical: true, simple: off })
+    // только Telegram и не одновременно с VPN
+    expect(toConfig(base, simple({ wsServices: ['youtube'] }), lan, catalog, known).groups.some((g) => g.id === 'tgws-sites')).toBe(false)
+    expect(toConfig(base, simple({ services: ['telegram'], wsServices: ['telegram'] }), lan, catalog, known).groups.some((g) => g.id === 'tgws-sites')).toBe(false)
+  })
+
   it('zapret_sites: группа, правила по порядку и туда-обратно', () => {
     const s = simple({ services: ['youtube'], customDomains: ['example.org'], zapretServices: ['meta'], zapretDomains: ['rutracker.org'], exceptions: ['ya.ru'] })
     const c = toConfig(base, s, lan, catalog, known)
@@ -249,6 +268,10 @@ describe('simple', () => {
     l = setServiceRoute(l, 'meta', 'off')
     expect(l).toEqual({ services: [], zapretServices: ['youtube'] })
     expect(setServiceRoute(l, 'youtube', 'zapret')).toEqual(l)
+    // WebSocket — только у Telegram
+    expect(setServiceRoute(l, 'telegram', 'ws')).toEqual({ services: [], zapretServices: ['youtube'], wsServices: ['telegram'] })
+    expect(serviceRoute({ ...l, wsServices: ['telegram'] }, 'telegram')).toBe('ws')
+    expect(setServiceRoute(l, 'youtube', 'ws')).toEqual({ services: [], zapretServices: [] })
   })
 
   it('zapret_sites: прежний канонический вид без них читается с пустыми списками; ручные правки замечаются', () => {
